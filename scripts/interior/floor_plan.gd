@@ -64,13 +64,13 @@ func room_stand_world(ri: int) -> Vector3:
 	return room_center_world(ri)
 
 
-## The opening from room `ri` into the stairwell, or -1.
+## The door from room `ri` into the stairwell (open or not), or -1.
 func stair_opening(ri: int) -> int:
 	if stair_room < 0 or ri < 0 or ri == stair_room:
 		return -1
 	for di in rooms[ri].doors:
 		var d := doors[di]
-		if d.open_always and (d.a == stair_room or d.b == stair_room):
+		if d.a == stair_room or d.b == stair_room:
 			return di
 	return -1
 

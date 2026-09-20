@@ -172,15 +172,23 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 		var d := fp.doors[di]
 		var into := Vector2(-d.dir) if d.a == ri else Vector2(d.dir)
 		var lp := d.pos + Vector3(into.x, 0, into.y) * 0.3
-		if d.open_always:
-			# an archway into the stairwell: the storeys you can reach from here
+		var to_stair := not room.is_stair and fp.stair_room >= 0 and (d.a == fp.stair_room or d.b == fp.stair_room)
+		if to_stair:
+			# the stairwell door: its word, and the storeys behind it
+			labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.55, 0)))
 			if fp.floor < fp.floors_total - 1:
-				labels.add_child(_label("up", lp + Vector3(0, DOOR_H * 0.78, 0)))
+				labels.add_child(_label("up", lp + Vector3(0, DOOR_H * 0.95, 0)))
 			if fp.floor > 0:
-				labels.add_child(_label("down", lp + Vector3(0, DOOR_H * 0.5, 0)))
+				labels.add_child(_label("down", lp + Vector3(0, DOOR_H * 0.2, 0)))
 			continue
 		# on the upper half of the leaf, so it is in view even when you stand right at it
 		labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.7, 0)))
+	if room.is_stair:
+		var lps := Stairwell.label_points(fp, fp.stair_layout)
+		if fp.floor < fp.floors_total - 1 and lps.has("up"):
+			labels.add_child(_label("up", lps["up"]))
+		if fp.floor > 0 and lps.has("down"):
+			labels.add_child(_label("down", lps["down"]))
 	root.add_child(labels)
 	return root
 

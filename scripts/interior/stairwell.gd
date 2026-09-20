@@ -310,6 +310,41 @@ static func climb_points(fp: FloorPlan, lay: Dictionary, up: bool) -> PackedVect
 	return pts
 
 
+## Where you stand in the stairwell after a climb (this storey's floor level):
+## the entry landing of a core; the walkway next to the flight you just left for a wall
+## staircase (`from_below` = you came up the storey below's flight).
+static func landing_point(fp: FloorPlan, lay: Dictionary, from_below: bool) -> Vector3:
+	var f := frame(fp, lay)
+	var W: float = f["W"]
+	if lay["kind"] == Kind.CORE:
+		return P(f, _core_t0(f) * 0.5, 0, 0)
+	if from_below:
+		var tr := _wall_range(f, fp.floor - 1)
+		return P(f, minf(tr.y + 0.6, f["L"] - 0.4), -W * 0.25, 0)
+	var tr := _wall_range(f, fp.floor)
+	return P(f, maxf(tr.x - 0.6, 0.4), -W * 0.25, 0)
+
+
+## Where the "up" / "down" words float inside the stairwell: at the foot of this storey's
+## flight and at the top of the one arriving from below.
+static func label_points(fp: FloorPlan, lay: Dictionary) -> Dictionary:
+	var f := frame(fp, lay)
+	var W: float = f["W"]
+	var out := {}
+	if lay["kind"] == Kind.CORE:
+		var t0 := _core_t0(f)
+		out["up"] = P(f, t0 + 0.4, -W * 0.25, 1.9)
+		out["down"] = P(f, t0 + 0.4, W * 0.25, 1.3)
+	else:
+		if fp.floor < fp.floors_total - 1:
+			var tr := _wall_range(f, fp.floor)
+			out["up"] = P(f, tr.x + 0.3, W * 0.25, 1.9)
+		if fp.floor > 0:
+			var tr := _wall_range(f, fp.floor - 1)
+			out["down"] = P(f, tr.y - 0.3, W * 0.25, 1.3)
+	return out
+
+
 ## Where a walk from an opening joins the climb: a point just inside the stairwell, on
 ## the walkway side, at the given height.
 static func inside_point(fp: FloorPlan, lay: Dictionary, d: FloorPlan.Door, h: float) -> Vector3:

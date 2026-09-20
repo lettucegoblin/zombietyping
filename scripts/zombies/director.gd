@@ -80,6 +80,20 @@ func used_first_letters() -> Dictionary:
 	return d
 
 
+## Nearest zombie that is up and about (any state but dormant/dead) within max_dist.
+func nearest_awake(max_dist: float) -> Zombie:
+	var best: Zombie = null
+	var bd := max_dist
+	for z in alive():
+		if z.state == Zombie.State.DORMANT:
+			continue
+		var d := z.global_position.distance_to(player.global_position)
+		if d < bd:
+			bd = d
+			best = z
+	return best
+
+
 func nearest_alive(max_dist: float) -> Zombie:
 	var best: Zombie = null
 	var bd := max_dist

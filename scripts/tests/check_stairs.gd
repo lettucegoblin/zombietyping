@@ -26,15 +26,15 @@ func _ready() -> void:
 					for i in fp.cell_room.size():
 						if fp.cell_room[i] < 0:
 							print("uncovered cell in ", b.id(), " floor ", f); bad += 1; break
-					# openings: at least one, all doorless and wordless, on allowed edges
+					# doors: at least one, each with a word
 					var openings := 0
 					for di in fp.rooms[fp.stair_room].doors:
 						var d := fp.doors[di]
-						if not d.open_always or d.word != "":
-							print("stair door not an opening: ", b.id()); bad += 1
+						if d.word == "":
+							print("stair door without a word: ", b.id()); bad += 1
 						openings += 1
 					if openings == 0:
-						print("stairwell has no opening: ", b.id(), " floor ", f, " kind ", lay0["kind"]); bad += 1
+						print("stairwell has no door: ", b.id(), " floor ", f, " kind ", lay0["kind"]); bad += 1
 					# connectivity through all doors
 					var seen := { 0: true }
 					var q := [0]

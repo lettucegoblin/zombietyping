@@ -17,6 +17,7 @@ var _climbed := false
 var _kills := 0
 var _auto_returns := 0
 var _floor_before := 0
+var _expect_landing := false
 var _idle := 0
 
 
@@ -110,13 +111,19 @@ func _process(_dt: float) -> void:
 			if w.is_empty():
 				return
 			var ri: int = _interior.current_room
+			if _expect_landing:
+				_expect_landing = false
+				if not _interior.plan.rooms[ri].is_stair: return _fail("a climb should end on the stairwell landing")
 			print("room ", ri, " (", _interior.plan.rooms[ri].kind, ") floor ", _interior.plan.floor, " options: ", w, "  progress ", _interior.progress(), "  old floor alive: ", _interior._old_floor != null)
 			if _interior._old_floor != null: return _fail("old floor should be dropped after arriving")
 			if _typist.buffer != "": return _fail("buffer should be empty between prompts")
+			if (w.has("up") or w.has("down")) and _interior.plan.stair_opening(ri) < 0 and not _interior.plan.rooms[ri].is_stair:
+				return _fail("up/down offered without a door into the stairwell")
 			if _interior.plan.rooms[ri].is_stair:
-				return _fail("the rail must never stop inside the stairwell")
-			if (w.has("up") or w.has("down")) and _interior.plan.stair_opening(ri) < 0:
-				return _fail("up/down offered without an archway into the stairwell")
+				var director := _main.get_node("View/Viewport/World/Director")
+				for z in director.alive():
+					if z.room == ri and z.state == z.State.DORMANT:
+						return _fail("zombies must not spawn in the stairwell")
 			# the search rule: a closed door worth opening is offered here, or we were walked
 			# to a room that has one (or the stairwell / exit)
 			var unexplored: Array = _interior.unexplored_doors(ri)
@@ -131,6 +138,7 @@ func _process(_dt: float) -> void:
 				_type("up")
 				if not _player.is_moving(): return _fail("up should start the climb")
 				if _interior.plan.floor != _floor_before + 1: return _fail("up should build the storey above right away")
+				_expect_landing = true
 				print("climbing (%s stairwell); old floor kept: %s  zombies seeded before: %d" % ["core" if _interior.plan.stair_layout["kind"] == 0 else "wall", _interior._old_floor != null, seen_before])
 				return
 			if door_word != "" and (_opened_doors < 12 or _interior.plan.floor >= 1):

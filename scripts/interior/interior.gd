@@ -108,14 +108,22 @@ func _drop_old_floor() -> void:
 ## plan), then append exit_path() from the new plan.
 func climb_path(up: bool) -> PackedVector3Array:
 	var pts := PackedVector3Array()
-	var di := plan.stair_opening(current_room)
-	if di < 0 or plan.stair_layout.is_empty():
+	if plan.stair_layout.is_empty():
 		return pts
-	var d := plan.doors[di]
-	pts.append(d.pos)
-	pts.append(Stairwell.inside_point(plan, plan.stair_layout, d, 0.0))
+	if current_room != plan.stair_room:
+		var di := plan.stair_opening(current_room)
+		if di < 0:
+			return pts
+		var d := plan.doors[di]
+		pts.append(d.pos)
+		pts.append(Stairwell.inside_point(plan, plan.stair_layout, d, 0.0))
 	pts.append_array(Stairwell.climb_points(plan, plan.stair_layout, up))
 	return pts
+
+
+## Where the climb ends on the new storey: the landing inside the stairwell.
+func landing(from_below: bool) -> Vector3:
+	return Stairwell.landing_point(plan, plan.stair_layout, from_below)
 
 
 ## Which room to step into from the stairwell on this (new) storey: one with zombies or
@@ -125,30 +133,17 @@ func stair_exit_room() -> int:
 	var best_score := -1
 	for di in plan.rooms[plan.stair_room].doors:
 		var d := plan.doors[di]
-		if not d.open_always:
+		if d.b < 0:
 			continue
 		var o := plan.other_room(di, plan.stair_room)
 		var score := 0
 		if not is_room_cleared(o): score += 2
 		if not unexplored_doors(o).is_empty(): score += 1
+		if is_door_open(d): score += 1
 		if score > best_score:
 			best_score = score
 			best = o
 	return best
-
-
-## From inside the stairwell (arrival height = this storey) out through its opening into
-## `ri`, stopping at that room's threshold.
-func exit_path(ri: int) -> PackedVector3Array:
-	var pts := PackedVector3Array()
-	for di in plan.rooms[plan.stair_room].doors:
-		var d := plan.doors[di]
-		if d.open_always and plan.other_room(di, plan.stair_room) == ri:
-			pts.append(Stairwell.inside_point(plan, plan.stair_layout, d, 0.0))
-			pts.append(d.pos)
-			pts.append(threshold_world(di, ri))
-			break
-	return pts
 
 
 ## World point of the stairwell opening from room `ri` (label/facing anchor), or INF.
@@ -331,13 +326,20 @@ func _update_labels() -> void:
 			l.visible = (k == current_room)
 
 
-func _reveal(ri: int) -> void:
-	if ri < 0 or _revealed.has(ri):
+func _reveal(ri: int, hop := true) -> void:
+	if ri < 0:
 		return
-	_revealed[ri] = true
-	if not _room_nodes.has(ri):
-		_rebuild(ri)
-	_set_room_visible(ri, true)
+	if not _revealed.has(ri):
+		_revealed[ri] = true
+		if not _room_nodes.has(ri):
+			_rebuild(ri)
+		_set_room_visible(ri, true)
+	if hop:
+		# whatever you can see through this room's open doors and archways
+		for di in plan.rooms[ri].doors:
+			var d := plan.doors[di]
+			if d.b >= 0 and is_door_open(d):
+				_reveal(plan.other_room(di, ri), false)
 
 
 func _rebuild(ri: int) -> void:
@@ -369,8 +371,6 @@ func options() -> Array:
 	var room := plan.rooms[current_room]
 	for di in room.doors:
 		var d := plan.doors[di]
-		if d.open_always:
-			continue
 		if d.b < 0:
 			out.append({ "word": "exit", "kind": "exit", "door": di })
 		else:
@@ -380,9 +380,10 @@ func options() -> Array:
 	var er := entrance_room()
 	if er >= 0 and current_room != er and not route(current_room, er).is_empty():
 		out.append({ "word": "exit", "kind": "exit", "door": plan.entrance_door })
-	# the stairwell archway in this room: the storeys it leads to
+	# the stairwell archway in this room (or the flights, standing in the stairwell): the
+	# storeys they lead to
 	var so := plan.stair_opening(current_room)
-	if so >= 0:
+	if so >= 0 or room.is_stair:
 		if plan.floor < plan.floors_total - 1:
 			out.append({ "word": "up", "kind": "up", "door": so })
 		if plan.floor > 0:
@@ -438,7 +439,10 @@ func option_pos(opt: Dictionary) -> Vector3:
 		"door", "exit":
 			return plan.doors[opt["door"]].pos
 		"up", "down":
-			return plan.doors[opt["door"]].pos + Vector3(0, 1.4, 0)
+			if opt["door"] >= 0:
+				return plan.doors[opt["door"]].pos + Vector3(0, 1.4, 0)
+			var lps := Stairwell.label_points(plan, plan.stair_layout)
+			return lps.get(opt["kind"], Vector3.INF)
 	return Vector3.INF
 
 
@@ -521,7 +525,9 @@ func search_target(from: int) -> int:
 	while i < order.size():
 		var r := order[i]
 		i += 1
-		if r != plan.stair_room and not unexplored_doors(r).is_empty():
+		if r != from and (not is_room_cleared(r) or not unexplored_doors(r).is_empty()):
+			return r
+		if r == from and not unexplored_doors(r).is_empty():
 			return r
 		for di in plan.rooms[r].doors:
 			var d := plan.doors[di]
@@ -531,18 +537,20 @@ func search_target(from: int) -> int:
 			if not seen.has(o):
 				seen[o] = true
 				order.append(o)
-	var stair_room_near := -1
+	# this storey is done: the stairwell (or the nearest room with a door to it) when other
+	# storeys are not, else the entrance to leave
+	var stair_near := -1
 	for r in order:
-		if r != plan.stair_room and plan.stair_opening(r) >= 0:
-			stair_room_near = r
+		if r == plan.stair_room or plan.stair_opening(r) >= 0:
+			stair_near = r
 			break
-	if stair_room_near >= 0 and other_floors_uncleared():
-		return stair_room_near
+	if stair_near >= 0 and other_floors_uncleared():
+		return stair_near
 	var er := entrance_room()
 	if er >= 0 and seen.has(er):
 		return er
-	if stair_room_near >= 0:
-		return stair_room_near
+	if stair_near >= 0:
+		return stair_near
 	return from
 
 

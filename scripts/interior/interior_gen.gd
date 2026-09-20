@@ -148,10 +148,6 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 		if fp.stair_room >= 0 and (pick[2] == fp.stair_room or pick[3] == fp.stair_room) and fp.rooms[fp.stair_room].doors.size() >= 2:
 			continue
 		_add_door(fp, pick[0], pick[1], pick[2], pick[3])
-	# stairwell connections are open archways
-	for door in fp.doors:
-		if fp.stair_room >= 0 and (door.a == fp.stair_room or door.b == fp.stair_room):
-			door.open_always = true
 
 	# --- street entrance on the ground floor, at the facade door position
 	if floor == 0:
@@ -182,7 +178,7 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 	var chosen: Array[String] = []
 	chosen.append_array(RESERVED)
 	for door in fp.doors:
-		if door.b < 0 or door.open_always:
+		if door.b < 0:
 			continue
 		var w := ""
 		var tries := 0

@@ -85,7 +85,10 @@ func _process(dt: float) -> void:
 	# rolls again a beat after; once you have typed where to go next it keeps going
 	var lock_close: bool = typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive() \
 		and typist.locked.global_position.distance_to(player.global_position) < HALT_RANGE
-	if not _moving_on and (director.threat_within(HALT_RANGE) != null or lock_close):
+	var threat: Zombie = director.threat_within(HALT_RANGE)
+	if threat != null and _moving_on and threat.room < 0 and mode == Mode.INSIDE:
+		threat = null   # a street zombie seen through a window does not stop you indoors
+	if threat != null or (lock_close and not _moving_on):
 		player.halt = true
 		_resume_beat = 0.7
 	elif player.halt:
@@ -111,6 +114,8 @@ func _process(dt: float) -> void:
 			z = typist.locked
 		else:
 			z = director.threat_within(AIM_RANGE)
+		if z == null:
+			z = director.nearest_awake(2.6)
 		if z != null:
 			player.face_toward(z.global_position)
 	if not director.get_meta("no_street", false):
@@ -216,8 +221,7 @@ func _on_arrived(id: String) -> void:
 		interior.set_room(ri)
 		_populate_room(ri)
 		_refresh_prompts()
-		if not typist.in_combat():
-			_face_room()
+		_face_arrival(ri)
 		if interior.is_room_cleared(ri):
 			_queue_search(0.35)
 		return
@@ -227,21 +231,19 @@ func _on_arrived(id: String) -> void:
 		interior.set_room(ri)
 		_populate_room(ri)
 		_refresh_prompts()
-		if not typist.in_combat():
-			_face_room()
+		_face_arrival(ri)
 		return
-	if id.begins_with("stairs:"):
-		# emerged from the stairwell into a room on the new storey
+	if id == "stairs":
+		# standing on the landing of the new storey: look through the archways, shoot,
+		# then type the archway of the room you want (or up/down again)
 		_climbing = false
 		interior.finish_floor_change()
-		var ri := int(id.substr(7))
+		var ri: int = interior.plan.stair_room
 		interior.set_room(ri)
-		_populate_room(ri)
+		interior.mark_room_cleared(ri)
 		_refresh_prompts()
-		if not typist.in_combat():
-			_face_room()
-		if interior.is_room_cleared(ri):
-			_queue_search(0.35)
+		_face_arrival(ri)
+		_queue_search(0.35)
 		return
 	if id == "exit":
 		director.clear_room_zombies()
@@ -336,6 +338,34 @@ func _seed_floor() -> void:
 		director.spawn_in_room(interior.building, fp, ri)
 
 
+## On arrival: the nearest zombie in this room (awake or not) if it is close, else the
+## most useful thing in the room. In the stairwell: the archway of the room to clear next.
+func _face_arrival(ri: int) -> void:
+	if typist.in_combat():
+		return
+	var z: Zombie = null
+	var bd := 8.0
+	for c in director.alive():
+		if c.room != ri and c.global_position.distance_to(player.global_position) > 3.0:
+			continue
+		var d: float = c.global_position.distance_to(player.global_position)
+		if d < bd:
+			bd = d
+			z = c
+	if z != null:
+		player.face_toward(z.global_position)
+		return
+	if ri == interior.plan.stair_room:
+		var target: int = interior.stair_exit_room()
+		var fp: FloorPlan = interior.plan
+		for di in fp.rooms[ri].doors:
+			var d: FloorPlan.Door = fp.doors[di]
+			if d.b >= 0 and fp.other_room(di, ri) == target:
+				player.face_toward(d.pos)
+				return
+	_face_room()
+
+
 ## Look at the most useful thing in the room: a door still worth opening, else the stairs
 ## (when the rest of the building is upstairs/downstairs), else the exit, else any door we
 ## did not come through. The other options stay readable at the screen edges.
@@ -426,17 +456,19 @@ func _on_option(opt: Dictionary) -> void:
 			director.clear_room_zombies()
 			_spawned_rooms.clear()
 			var up: bool = opt["kind"] == "up"
+			# from a room: the stairwell door has to come down first
+			var sd: int = opt["door"]
+			if sd >= 0 and not interior.is_door_open(interior.plan.doors[sd]):
+				interior.open_door(sd)
+				sfx.play("door", -2.0, 0.1)
+				player.shake(0.18)
 			var pts: PackedVector3Array = interior.climb_path(up)
 			interior.begin_floor_change(1 if up else -1)
 			_seed_floor()
-			var out_room: int = interior.stair_exit_room()
-			if out_room < 0:
-				out_room = interior.plan.rooms[interior.plan.stair_room].doors.size()   # unreachable in practice
-			pts.append_array(interior.exit_path(out_room))
-			interior._reveal(out_room)
+			pts.append(interior.landing(up))
 			sfx.play("creak", -8.0, 0.15)
 			_climbing = true
-			player.push_local(pts, "stairs:%d" % out_room, 2.2)
+			player.push_local(pts, "stairs", 2.2)
 	_refresh_hud()
 
 
