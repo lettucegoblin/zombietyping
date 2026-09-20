@@ -157,6 +157,14 @@ func _process(_dt: float) -> void:
 			_idle += 1
 			if _idle > 400: return _fail("stuck in room %d with options %s and no auto-return" % [ri, w])
 		"exiting":
+			# anything in sight on the way out holds the rail until it is shot
+			if _typist.in_combat():
+				var director := _main.get_node("View/Viewport/World/Director")
+				director._update_los()
+				for z in director.targetable():
+					_type(z.word.substr(z.typed))
+					_kills += 1
+				return
 			if _main.mode == _main.Mode.STREET and not _interior.is_inside():
 				if not _climbed: return _fail("never climbed")
 				print("auto-return legs seen: ", _auto_returns, "  doors opened: ", _opened_doors)
