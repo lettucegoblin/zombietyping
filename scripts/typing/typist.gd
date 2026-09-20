@@ -134,8 +134,9 @@ func _prompt_key(ch: String) -> void:
 ## bullet only when it matches a target, otherwise it types the door/stairs/exit words.
 ##   1. it continues the word you are already typing
 ##   2. it is the next letter of the zombie you are locked on
-##   3. it starts one of the prompt words
-##   4. it is the next letter of some zombie in your sights
+##   3. it is the next letter of some zombie in your sights (zombies first: their first
+##      letters are unique, and a door word can always be started with its own)
+##   4. it starts one of the prompt words
 ##   5. otherwise: a miss (in a fight) or a mistype
 func _letter(ch: String) -> void:
 	if buffer != "" and _prompt_prefix(buffer + ch):
@@ -144,13 +145,13 @@ func _letter(ch: String) -> void:
 	if _lock_alive() and locked.next_letter() == ch:
 		_combat_key(ch)
 		return
-	if buffer == "" and _prompt_prefix(ch):
-		_prompt_key(ch)
-		return
 	if director != null and director.nearest_matching(ch) != null:
 		if buffer != "":
 			buffer = ""       # abandon the half-typed word for the shot
 		_combat_key(ch)
+		return
+	if buffer == "" and _prompt_prefix(ch):
+		_prompt_key(ch)
 		return
 	if in_combat():
 		missed.emit()

@@ -16,6 +16,7 @@ var _opened_doors := 0
 var _climbed := false
 var _kills := 0
 var _auto_returns := 0
+var _floor_before := 0
 var _idle := 0
 
 
@@ -112,8 +113,10 @@ func _process(_dt: float) -> void:
 			print("room ", ri, " (", _interior.plan.rooms[ri].kind, ") floor ", _interior.plan.floor, " options: ", w, "  progress ", _interior.progress(), "  old floor alive: ", _interior._old_floor != null)
 			if _interior._old_floor != null: return _fail("old floor should be dropped after arriving")
 			if _typist.buffer != "": return _fail("buffer should be empty between prompts")
-			if _interior.plan.rooms[ri].is_stair and _interior.plan.rooms[ri].rect.size != Vector2i.ONE:
-				return _fail("the stairwell should be its own 1x1 room")
+			if _interior.plan.rooms[ri].is_stair:
+				return _fail("the rail must never stop inside the stairwell")
+			if (w.has("up") or w.has("down")) and _interior.plan.stair_opening(ri) < 0:
+				return _fail("up/down offered without an archway into the stairwell")
 			# the search rule: a closed door worth opening is offered here, or we were walked
 			# to a room that has one (or the stairwell / exit)
 			var unexplored: Array = _interior.unexplored_doors(ri)
@@ -124,9 +127,11 @@ func _process(_dt: float) -> void:
 			if w.has("up") and not _climbed:
 				_climbed = true
 				var seen_before: int = _main.get_node("View/Viewport/World/Director").alive().size()
+				_floor_before = _interior.plan.floor
 				_type("up")
 				if not _player.is_moving(): return _fail("up should start the climb")
-				print("climbing; old floor kept: ", _interior._old_floor != null, "  zombies seeded on floor 0: ", seen_before)
+				if _interior.plan.floor != _floor_before + 1: return _fail("up should build the storey above right away")
+				print("climbing (%s stairwell); old floor kept: %s  zombies seeded before: %d" % ["core" if _interior.plan.stair_layout["kind"] == 0 else "wall", _interior._old_floor != null, seen_before])
 				return
 			if door_word != "" and (_opened_doors < 12 or _interior.plan.floor >= 1):
 				_opened_doors += 1

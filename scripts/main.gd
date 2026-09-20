@@ -139,6 +139,17 @@ func _unhandled_input(event: InputEvent) -> void:
 		director._spawn(ZombieType.runner(), player.global_position + f * 7.0 + Vector3(-f.z, 0, f.x) * 0.6)
 	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F6:
 		player.facing = -player.facing   # look behind (debug)
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F8:
+		print("RAIL moving=%s halt=%s hold=%s leg=%s local=%d pos=%s room=%d mode=%d moving_on=%s pending=%s searching=%s threats=%s" % [
+			player.is_moving(), player.halt, player.hold, player._cur.get("id", "-"), player._local.size(), player.global_position,
+			interior.current_room, mode, _moving_on, _search_pending, _searching, director.targetable_words()])
+	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F7:
+		# debug: dump the minimap labels with storey counts (for scripted playtests)
+		var parts: Array[String] = []
+		for l in minimap.labels.keys():
+			var b := World.building_by_id(minimap.labels[l])
+			parts.append("%s=%d" % [l, b.floors if b else 0])
+		print("LABELS ", " ".join(parts))
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2:
 		var d: float = post_mat.get_shader_parameter("dither_strength")
 		post_mat.set_shader_parameter("dither_strength", 0.0 if d > 0.0 else 0.04)
@@ -219,14 +230,17 @@ func _on_arrived(id: String) -> void:
 		if not typist.in_combat():
 			_face_room()
 		return
-	if id == "stairs":
+	if id.begins_with("stairs:"):
+		# emerged from the stairwell into a room on the new storey
 		_climbing = false
 		interior.finish_floor_change()
-		_seed_floor()
-		_populate_room(interior.plan.stair_room)
+		var ri := int(id.substr(7))
+		interior.set_room(ri)
+		_populate_room(ri)
 		_refresh_prompts()
-		_face_room()
-		if interior.is_room_cleared(interior.plan.stair_room):
+		if not typist.in_combat():
+			_face_room()
+		if interior.is_room_cleared(ri):
 			_queue_search(0.35)
 		return
 	if id == "exit":
@@ -333,8 +347,9 @@ func _face_room() -> void:
 	if not unexplored.is_empty():
 		player.face_toward(fp.doors[unexplored[0]].pos)
 		return
-	if room.is_stair and interior.other_floors_uncleared():
-		player.face_toward(interior.stair_pos() + Vector3(0, 1.0, 0))
+	var so: int = fp.stair_opening(ri)
+	if so >= 0 and interior.other_floors_uncleared():
+		player.face_toward(fp.doors[so].pos)
 		return
 	var best := Vector3.INF
 	var best_score := -1
@@ -343,11 +358,10 @@ func _face_room() -> void:
 		var score := 0
 		if d.b < 0: score += 3
 		if di != _last_door: score += 2
+		if d.open_always: score -= 1
 		if score > best_score:
 			best_score = score
 			best = d.pos
-	if room.is_stair and best_score < 2:
-		best = interior.stair_pos()
 	if best != Vector3.INF:
 		player.face_toward(best)
 
@@ -367,6 +381,8 @@ func _search_step() -> void:
 	if here < 0 or not interior.is_room_cleared(here):
 		return
 	var target: int = interior.search_target(here)
+	if OS.is_debug_build():
+		print("search: room %d -> %d (unexplored here: %s, options %s)" % [here, target, interior.unexplored_doors(here), interior.options().map(func(o): return o["word"])])
 	if target == here or target < 0:
 		return
 	var pts: PackedVector3Array = interior.path_to_room(target)
@@ -405,19 +421,22 @@ func _on_option(opt: Dictionary) -> void:
 			_searching = false
 			player.push_local(interior.path_to_street(), "exit", 2.6)
 		"up", "down":
+			# through the archway, up/down the flights, out into a room on the next storey
 			_last_door = -1
 			director.clear_room_zombies()
 			_spawned_rooms.clear()
 			var up: bool = opt["kind"] == "up"
-			var pts: PackedVector3Array
-			if up:
-				pts = PackedVector3Array([interior.stair_foot(), interior.stair_top()])
-			else:
-				pts = PackedVector3Array([interior.stair_down_top(), interior.stair_down_foot()])
+			var pts: PackedVector3Array = interior.climb_path(up)
 			interior.begin_floor_change(1 if up else -1)
+			_seed_floor()
+			var out_room: int = interior.stair_exit_room()
+			if out_room < 0:
+				out_room = interior.plan.rooms[interior.plan.stair_room].doors.size()   # unreachable in practice
+			pts.append_array(interior.exit_path(out_room))
+			interior._reveal(out_room)
 			sfx.play("creak", -8.0, 0.15)
 			_climbing = true
-			player.push_local(pts, "stairs", 1.8)
+			player.push_local(pts, "stairs:%d" % out_room, 2.2)
 	_refresh_hud()
 
 
@@ -578,7 +597,7 @@ func _refresh_hud() -> void:
 		Mode.INSIDE:
 			var p: Vector2i = interior.progress() if interior.is_inside() else Vector2i.ZERO
 			var fl: int = interior.plan.floor + 1 if interior.is_inside() else 0
-			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]dead end — heading back[/color]" if _searching else ""])
+			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]nothing left here — moving on[/color]" if _searching else ""])
 	var parts: Array[String] = []
 	for p in typist.prompts():
 		var w: String = p["word"]

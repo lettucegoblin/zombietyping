@@ -17,19 +17,6 @@ const FLOOR_COL := {
 const WALL_COLS := [Color("#fdf6e3"), Color("#c39bd3"), Color("#99f6e4"), Color("#d9f99d"), Color("#fdba74")]
 const CEIL_COL := Color("#fdf6e3")
 const DOOR_COL := Color("#5a3d28")
-const STAIR_COL := Color("#8c8c90")
-const STAIR_STEPS := 8
-const STAIR_RUN := 0.25      ## flight = 2.0 m, inside the 2.5 m stair cell
-const STAIR_W := 1.1
-const STAIR_FOOT := -1.05    ## along the run direction from the cell centre
-const STAIR_LAND := 1.12     ## landing point past the top step (still inside the cell)
-
-
-## Flights alternate direction each storey (switchback): the landing of one is the foot of
-## the next, so you never climb into the next flight's geometry.
-static func stair_dir(floor: int) -> float:
-	return 1.0 if floor % 2 == 0 else -1.0
-
 static var _door_mat: StandardMaterial3D
 
 
@@ -50,22 +37,14 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 	var p00 := fp.cell_to_world(Vector2(room.rect.position))
 	var p11 := fp.cell_to_world(Vector2(room.rect.end))
 	var slab := Rect2(p00.x, p00.z, p11.x - p00.x, p11.z - p00.z)
-	var hole := Rect2()
 	var floor_hole := Rect2()
 	var ceil_hole := Rect2()
 	if room.is_stair:
-		var cc := fp.cell_to_world(Vector2(fp.stair_cell) + Vector2(0.5, 0.5))
-		# the flight below comes up through THIS floor (its direction is the floor below's)
+		# the storey below's flights come up through this floor; ours go through the ceiling
 		if fp.floor > 0:
-			var db := stair_dir(fp.floor - 1)
-			var x0 := cc.x + minf(STAIR_FOOT * db, (STAIR_FOOT + STAIR_RUN * STAIR_STEPS) * db) - 0.15
-			var x1 := cc.x + maxf(STAIR_FOOT * db, (STAIR_FOOT + STAIR_RUN * STAIR_STEPS) * db) + 0.15
-			floor_hole = Rect2(x0, cc.z - STAIR_W * 0.5 - 0.15, x1 - x0, STAIR_W + 0.3)
+			floor_hole = Stairwell.shaft_rect(fp, fp.stair_layout, fp.floor - 1)
 		if fp.floor < fp.floors_total - 1:
-			var dt := stair_dir(fp.floor)
-			var x0 := cc.x + minf(STAIR_FOOT * dt, (STAIR_FOOT + STAIR_RUN * STAIR_STEPS) * dt) - 0.15
-			var x1 := cc.x + maxf(STAIR_FOOT * dt, (STAIR_FOOT + STAIR_RUN * STAIR_STEPS) * dt) + 0.15
-			ceil_hole = Rect2(x0, cc.z - STAIR_W * 0.5 - 0.15, x1 - x0, STAIR_W + 0.3)
+			ceil_hole = Stairwell.shaft_rect(fp, fp.stair_layout, fp.floor)
 	_slab(st, slab, p00.y + 0.02, Vector3.UP, FLOOR_COL[b.district], floor_hole)
 	_slab(st, slab, p00.y + H - 0.06, Vector3.DOWN, CEIL_COL, ceil_hole)
 
@@ -145,35 +124,9 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 							holes.append([maxf(ta, 0.0), minf(tb, seg_len), win_lo, WIN_HI])
 				_wall_with_holes(st, p0, p1, normal, H, holes, wall_col)
 
-	# stairs
-	if room.is_stair:
-		var c := fp.cell_to_world(Vector2(fp.stair_cell) + Vector2(0.5, 0.5))
-		var steps := STAIR_STEPS
-		var rise := (H - 0.2) / steps
-		var dirn := stair_dir(fp.floor)
-		var run := STAIR_RUN * dirn
-		var w := STAIR_W
-		var side_col := STAIR_COL.darkened(0.45)
-		var x_start := c.x + STAIR_FOOT * dirn
-		for i in steps:
-			var sx0 := x_start + i * run
-			var sy := c.y + (i + 1) * rise
-			# tread
-			SectorMesher._quad(st, Vector3(sx0, sy, c.z - w * 0.5), Vector3(sx0 + run, sy, c.z - w * 0.5),
-				Vector3(sx0 + run, sy, c.z + w * 0.5), Vector3(sx0, sy, c.z + w * 0.5), Vector3.UP, STAIR_COL)
-			# riser
-			SectorMesher._quad(st, Vector3(sx0, sy - rise, c.z - w * 0.5), Vector3(sx0, sy - rise, c.z + w * 0.5),
-				Vector3(sx0, sy, c.z + w * 0.5), Vector3(sx0, sy, c.z - w * 0.5), Vector3(-dirn, 0, 0), STAIR_COL.darkened(0.3))
-			# side panels: the solid stepped profile (floor up to this tread)
-			SectorMesher._quad(st, Vector3(sx0, c.y, c.z - w * 0.5), Vector3(sx0 + run, c.y, c.z - w * 0.5),
-				Vector3(sx0 + run, sy, c.z - w * 0.5), Vector3(sx0, sy, c.z - w * 0.5), Vector3(0, 0, -1), side_col)
-			SectorMesher._quad(st, Vector3(sx0, c.y, c.z + w * 0.5), Vector3(sx0 + run, c.y, c.z + w * 0.5),
-				Vector3(sx0 + run, sy, c.z + w * 0.5), Vector3(sx0, sy, c.z + w * 0.5), Vector3(0, 0, 1), side_col)
-		# back: closes the solid behind the top step
-		var xe := x_start + run * steps
-		var top := c.y + steps * rise
-		SectorMesher._quad(st, Vector3(xe, c.y, c.z - w * 0.5), Vector3(xe, c.y, c.z + w * 0.5),
-			Vector3(xe, top, c.z + w * 0.5), Vector3(xe, top, c.z - w * 0.5), Vector3(dirn, 0, 0), side_col)
+	# this storey's flights (up to the next storey)
+	if room.is_stair and fp.floor < fp.floors_total - 1:
+		Stairwell.build_flights(st, fp, fp.stair_layout, fp.floor, 0.0)
 
 	var mi := MeshInstance3D.new()
 	mi.name = "Mesh"
@@ -186,6 +139,29 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 			for cs in c.get_children():
 				if cs is CollisionShape3D and cs.shape is ConcavePolygonShape3D:
 					cs.shape.backface_collision = true   # rays from the street must hit the outside of the walls too
+	if room.is_stair:
+		# the storey below's flights + a pit slab, seen down the shaft (hidden while that
+		# storey is actually built, during a climb), and a cap over the ceiling hole for
+		# when the storey above is not built
+		if fp.floor > 0:
+			var ds := SurfaceTool.new()
+			ds.begin(Mesh.PRIMITIVE_TRIANGLES)
+			Stairwell.build_flights(ds, fp, fp.stair_layout, fp.floor - 1, -H)
+			Stairwell.build_pit(ds, fp, fp.stair_layout, fp.floor)
+			var dm := MeshInstance3D.new()
+			dm.name = "DownFlights"
+			dm.mesh = ds.commit()
+			dm.material_override = SectorMesher.flat_material()
+			root.add_child(dm)
+		if fp.floor < fp.floors_total - 1:
+			var cs2 := SurfaceTool.new()
+			cs2.begin(Mesh.PRIMITIVE_TRIANGLES)
+			Stairwell.build_cap(cs2, fp, fp.stair_layout, fp.floor)
+			var cm := MeshInstance3D.new()
+			cm.name = "ShaftCap"
+			cm.mesh = cs2.commit()
+			cm.material_override = SectorMesher.flat_material()
+			root.add_child(cm)
 
 	# door words as 3D labels on this room's side of each door (shown only while you're in
 	# this room — see Interior.set_room)
@@ -195,15 +171,16 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 	for di in room.doors:
 		var d := fp.doors[di]
 		var into := Vector2(-d.dir) if d.a == ri else Vector2(d.dir)
+		var lp := d.pos + Vector3(into.x, 0, into.y) * 0.3
+		if d.open_always:
+			# an archway into the stairwell: the storeys you can reach from here
+			if fp.floor < fp.floors_total - 1:
+				labels.add_child(_label("up", lp + Vector3(0, DOOR_H * 0.78, 0)))
+			if fp.floor > 0:
+				labels.add_child(_label("down", lp + Vector3(0, DOOR_H * 0.5, 0)))
+			continue
 		# on the upper half of the leaf, so it is in view even when you stand right at it
-		var lp := d.pos + Vector3(into.x, 0, into.y) * 0.3 + Vector3(0, DOOR_H * 0.7, 0)
-		labels.add_child(_label(d.word, lp))
-	if room.is_stair:
-		var c := fp.cell_to_world(Vector2(fp.stair_cell) + Vector2(0.5, 0.5))
-		if fp.floor < fp.floors_total - 1:
-			labels.add_child(_label("up", c + Vector3(0, 2.9, 0)))
-		if fp.floor > 0:
-			labels.add_child(_label("down", c + Vector3(0, 2.3, 0)))
+		labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.7, 0)))
 	root.add_child(labels)
 	return root
 
@@ -266,8 +243,10 @@ static func build_door_leaf(d: FloorPlan.Door, is_open: bool, col_a := Color.WHI
 	fst.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var hw := DOOR_W * 0.5 + 0.03
 	var hh := DOOR_H + 0.03
-	SectorMesher._quad(fst, Vector3(-hw, -0.05, 0.01), Vector3(hw, -0.05, 0.01), Vector3(hw, hh, 0.01), Vector3(-hw, hh, 0.01), Vector3(0, 0, 1), col_a.darkened(0.12))
-	SectorMesher._quad(fst, Vector3(-hw, -0.05, -0.01), Vector3(hw, -0.05, -0.01), Vector3(hw, hh, -0.01), Vector3(-hw, hh, -0.01), Vector3(0, 0, -1), col_b.darkened(0.12))
+	# each backing sits just BEHIND the leaf as seen from its own room (room a looks
+	# along -z at the door, so its backing is at -z, facing +z)
+	SectorMesher._quad(fst, Vector3(-hw, -0.05, -0.012), Vector3(hw, -0.05, -0.012), Vector3(hw, hh, -0.012), Vector3(-hw, hh, -0.012), Vector3(0, 0, 1), col_a.darkened(0.12))
+	SectorMesher._quad(fst, Vector3(-hw, -0.05, 0.012), Vector3(hw, -0.05, 0.012), Vector3(hw, hh, 0.012), Vector3(-hw, hh, 0.012), Vector3(0, 0, -1), col_b.darkened(0.12))
 	fill.mesh = fst.commit()
 	fill.material_override = SectorMesher.flat_material()
 	root.add_child(fill)

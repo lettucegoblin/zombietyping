@@ -66,13 +66,16 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 			for x in range(r.rect.position.x, r.rect.end.x):
 				fp.cell_room[y * fp.cells.x + x] = i
 
-	# --- stairwell: one anchored cell per building (so storeys connect at one spot), carved
-	# out of whatever BSP room it landed in as its own little room. Stairs never sit in the
-	# middle of a room you have to fight in.
-	if b.floors > 1:
-		var h := b.seed_hash
-		fp.stair_cell = Vector2i(h % fp.cells.x, (h >> 8) % fp.cells.y)
-		_carve_stairwell(fp)
+	# --- stairwell: one strip per building (same on every storey), carved out of the BSP
+	# rooms it overlaps as its own pass-through room. See Stairwell.
+	var ecell := _entrance_cell(b, fp, fpr)
+	var lay := Stairwell.layout(b, fp.cells, ecell)
+	if not lay.is_empty():
+		fp.stair_layout = lay
+		fp.stair_cell = Stairwell.entry_cell(lay)
+		fp.stair_room = _carve_rect(fp, lay["rect"])
+		fp.rooms[fp.stair_room].is_stair = true
+		fp.rooms[fp.stair_room].kind = "stair"
 
 	# --- doors: candidates per adjacent pair, spanning tree + loops
 	var cands := {}   # "i-j" -> Array of [cell, dir] (from room i side)
@@ -95,9 +98,9 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 	var pairs := cands.keys()
 	_shuffle(pairs, rng)
 	if fp.stair_room >= 0:
-		# stairwell doors: prefer the wall at the foot of this floor's flight (you walk in
-		# and straight up), else the side walls; never the wall behind the top step
-		var foot := Vector2i(-int(InteriorMesher.stair_dir(floor)), 0)
+		# stairwell openings only where the layout allows (the entry landing / the walkway
+		# side); pairs with a preferred edge come first so the spanning tree uses them
+		var tiers: Array = Stairwell.allowed_edges(fp.stair_layout)
 		var front: Array = []
 		var rest: Array = []
 		for key in pairs:
@@ -105,17 +108,23 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 			if opts[0][2] != fp.stair_room and opts[0][3] != fp.stair_room:
 				rest.append(key)
 				continue
-			var tiers := [[], [], []]
+			var pref: Array = []
+			var okay: Array = []
 			for o in opts:
+				var cell: Vector2i = o[0] if o[2] == fp.stair_room else o[0] + o[1]
 				var d: Vector2i = o[1] if o[2] == fp.stair_room else -o[1]   # from the stair room's side
-				var tier := 0 if d == foot else (1 if d.x == 0 else 2)
-				tiers[tier].append(o)
-			var best: Array = tiers[0] if not tiers[0].is_empty() else (tiers[1] if not tiers[1].is_empty() else tiers[2])
-			cands[key] = best
-			if not tiers[0].is_empty():
+				if [cell, d] in tiers[0]:
+					pref.append(o)
+				elif [cell, d] in tiers[1]:
+					okay.append(o)
+			if not pref.is_empty():
+				cands[key] = pref
 				front.append(key)
-			else:
+			elif not okay.is_empty():
+				cands[key] = okay
 				rest.append(key)
+			else:
+				cands.erase(key)     # not a place an opening may go
 		pairs = front + rest
 	var parent := PackedInt32Array()
 	parent.resize(fp.rooms.size())
@@ -136,22 +145,20 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 			continue
 		var opts: Array = cands[key]
 		var pick: Array = opts[rng.randi_range(0, opts.size() - 1)]
+		if fp.stair_room >= 0 and (pick[2] == fp.stair_room or pick[3] == fp.stair_room) and fp.rooms[fp.stair_room].doors.size() >= 2:
+			continue
 		_add_door(fp, pick[0], pick[1], pick[2], pick[3])
+	# stairwell connections are open archways
+	for door in fp.doors:
+		if fp.stair_room >= 0 and (door.a == fp.stair_room or door.b == fp.stair_room):
+			door.open_always = true
 
 	# --- street entrance on the ground floor, at the facade door position
 	if floor == 0:
 		var d := b.road_tile - b.door_tile
 		var T := World.TILE_M
 		var dc := Vector2((b.door_tile.x + 0.5) * T, (b.door_tile.y + 0.5) * T)
-		var cell := Vector2i.ZERO
-		if d == Vector2i(0, -1):
-			cell = Vector2i(clampi(int((dc.x - fpr.position.x) / fp.cell_size.x), 0, fp.cells.x - 1), 0)
-		elif d == Vector2i(0, 1):
-			cell = Vector2i(clampi(int((dc.x - fpr.position.x) / fp.cell_size.x), 0, fp.cells.x - 1), fp.cells.y - 1)
-		elif d == Vector2i(1, 0):
-			cell = Vector2i(fp.cells.x - 1, clampi(int((dc.y - fpr.position.y) / fp.cell_size.y), 0, fp.cells.y - 1))
-		else:
-			cell = Vector2i(0, clampi(int((dc.y - fpr.position.y) / fp.cell_size.y), 0, fp.cells.y - 1))
+		var cell := _entrance_cell(b, fp, fpr)
 		var ra := fp.room_at_cell(cell)
 		var door := FloorPlan.Door.new()
 		door.index = fp.doors.size()
@@ -175,7 +182,7 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 	var chosen: Array[String] = []
 	chosen.append_array(RESERVED)
 	for door in fp.doors:
-		if door.b < 0:
+		if door.b < 0 or door.open_always:
 			continue
 		var w := ""
 		var tries := 0
@@ -194,35 +201,64 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 	return fp
 
 
-## Make the stair cell its own 1x1 room by splitting the BSP room around it into up to four
-## rectangles (left/right blocks, the column above and below). 1-wide leftovers read as halls.
-static func _carve_stairwell(fp: FloorPlan) -> void:
-	var s := fp.stair_cell
-	var ri := fp.room_at_cell(s)
-	var R: Rect2i = fp.rooms[ri].rect
-	var pieces: Array[Rect2i] = []
-	if s.x > R.position.x:
-		pieces.append(Rect2i(R.position.x, R.position.y, s.x - R.position.x, R.size.y))
-	if s.x + 1 < R.end.x:
-		pieces.append(Rect2i(s.x + 1, R.position.y, R.end.x - s.x - 1, R.size.y))
-	if s.y > R.position.y:
-		pieces.append(Rect2i(s.x, R.position.y, 1, s.y - R.position.y))
-	if s.y + 1 < R.end.y:
-		pieces.append(Rect2i(s.x, s.y + 1, 1, R.end.y - s.y - 1))
-	var stair := fp.rooms[ri]
-	stair.rect = Rect2i(s, Vector2i.ONE)
-	stair.is_stair = true
-	stair.kind = "stair"
-	for pr in pieces:
+## The footprint cell the street door opens into.
+static func _entrance_cell(b: BuildingData, fp: FloorPlan, fpr: Rect2) -> Vector2i:
+	var d := b.road_tile - b.door_tile
+	var T := World.TILE_M
+	var dc := Vector2((b.door_tile.x + 0.5) * T, (b.door_tile.y + 0.5) * T)
+	if d == Vector2i(0, -1):
+		return Vector2i(clampi(int((dc.x - fpr.position.x) / fp.cell_size.x), 0, fp.cells.x - 1), 0)
+	elif d == Vector2i(0, 1):
+		return Vector2i(clampi(int((dc.x - fpr.position.x) / fp.cell_size.x), 0, fp.cells.x - 1), fp.cells.y - 1)
+	elif d == Vector2i(1, 0):
+		return Vector2i(fp.cells.x - 1, clampi(int((dc.y - fpr.position.y) / fp.cell_size.y), 0, fp.cells.y - 1))
+	return Vector2i(0, clampi(int((dc.y - fpr.position.y) / fp.cell_size.y), 0, fp.cells.y - 1))
+
+
+## Carve `S` out of the BSP rooms it overlaps and make it a room of its own (returned
+## index). Each overlapped room is split into up to four rectangles around S; 1-wide
+## leftovers read as halls. Rooms are re-indexed (this runs before doors exist).
+static func _carve_rect(fp: FloorPlan, S: Rect2i) -> int:
+	var kept: Array[Rect2i] = []
+	var kinds: Array[String] = []
+	for r in fp.rooms:
+		var R: Rect2i = r.rect
+		if not R.intersects(S):
+			kept.append(R)
+			kinds.append(r.kind)
+			continue
+		var I := R.intersection(S)
+		var pieces: Array[Rect2i] = []
+		if I.position.x > R.position.x:
+			pieces.append(Rect2i(R.position.x, R.position.y, I.position.x - R.position.x, R.size.y))
+		if I.end.x < R.end.x:
+			pieces.append(Rect2i(I.end.x, R.position.y, R.end.x - I.end.x, R.size.y))
+		if I.position.y > R.position.y:
+			pieces.append(Rect2i(I.position.x, R.position.y, I.size.x, I.position.y - R.position.y))
+		if I.end.y < R.end.y:
+			pieces.append(Rect2i(I.position.x, I.end.y, I.size.x, R.end.y - I.end.y))
+		for pr in pieces:
+			kept.append(pr)
+			kinds.append("hall" if (pr.size.x == 1 or pr.size.y == 1) else "room")
+	fp.rooms.clear()
+	for i in kept.size():
 		var r := FloorPlan.Room.new()
-		r.index = fp.rooms.size()
-		r.rect = pr
-		r.kind = "hall" if (pr.size.x == 1 or pr.size.y == 1) else "room"
+		r.index = i
+		r.rect = kept[i]
+		r.kind = kinds[i]
 		fp.rooms.append(r)
-		for y in range(pr.position.y, pr.end.y):
-			for x in range(pr.position.x, pr.end.x):
+	var stair := FloorPlan.Room.new()
+	stair.index = fp.rooms.size()
+	stair.rect = S
+	stair.kind = "stair"
+	stair.is_stair = true
+	fp.rooms.append(stair)
+	fp.cell_room.fill(-1)
+	for r in fp.rooms:
+		for y in range(r.rect.position.y, r.rect.end.y):
+			for x in range(r.rect.position.x, r.rect.end.x):
 				fp.cell_room[y * fp.cells.x + x] = r.index
-	fp.stair_room = ri
+	return stair.index
 
 
 static func _add_door(fp: FloorPlan, cell: Vector2i, dir: Vector2i, ra: int, rb: int) -> void:

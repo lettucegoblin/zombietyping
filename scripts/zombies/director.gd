@@ -133,6 +133,8 @@ func spawn_street() -> Zombie:
 
 ## Deterministic zombie count for a room; 0 once the room is recorded as cleared.
 func room_count(b: BuildingData, fp: FloorPlan, ri: int) -> int:
+	if fp.rooms[ri].is_stair:
+		return 0
 	var h := Det.h3(World.seed, b.seed_hash, fp.floor, ri, 900)
 	var base := 0
 	match b.district:

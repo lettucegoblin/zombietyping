@@ -41,7 +41,19 @@ func _set_room_visible(ri: int, v: bool) -> void:
 		return
 	for c in n.get_children():
 		if c is MeshInstance3D:
-			c.visible = v
+			c.visible = v and not c.get_meta("hidden", false)
+
+
+## Hide/show one part of a room's build (the stairwell's DownFlights / ShaftCap while the
+## storey they stand in for is really there, during a climb).
+func _set_part_hidden(node: Node3D, part: String, hidden: bool) -> void:
+	if node == null:
+		return
+	var c: Node3D = node.get_node_or_null(part)
+	if c == null:
+		return
+	c.set_meta("hidden", hidden)
+	c.visible = not hidden and c.get_parent().get_node("Mesh").visible
 
 
 ## Start a stair transition: the current storey stays visible (parked under _old_floor)
@@ -51,6 +63,10 @@ func begin_floor_change(delta: int) -> void:
 	_old_floor = Node3D.new()
 	_old_floor.name = "OldFloor"
 	add_child(_old_floor)
+	var old_stair: Node3D = _room_nodes.get(plan.stair_room)
+	# the two storeys overlap in the stairwell: the old one's stand-ins for the storey we
+	# are moving to go away, and the new one's stand-ins for the old storey stay hidden
+	_set_part_hidden(old_stair, "ShaftCap" if delta > 0 else "DownFlights", true)
 	for n in _room_nodes.values():
 		var l: Node3D = n.get_node_or_null("Labels")
 		if l != null:
@@ -64,12 +80,19 @@ func begin_floor_change(delta: int) -> void:
 	plan = InteriorGen.generate(World.seed, building, plan.floor + delta)
 	current_room = -1
 	_build_all()
+	_set_part_hidden(_room_nodes.get(plan.stair_room), "DownFlights" if delta > 0 else "ShaftCap", true)
+	_pending_part = "DownFlights" if delta > 0 else "ShaftCap"
 	_reveal(plan.stair_room)
+
+
+var _pending_part := ""
 
 
 func finish_floor_change() -> void:
 	_drop_old_floor()
-	set_room(plan.stair_room)
+	if _pending_part != "":
+		_set_part_hidden(_room_nodes.get(plan.stair_room), _pending_part, false)
+		_pending_part = ""
 
 
 func _drop_old_floor() -> void:
@@ -78,32 +101,60 @@ func _drop_old_floor() -> void:
 	_old_floor = null
 
 
-## Stair geometry helpers (world space): the foot of the ramp on this storey and the landing
-## on the storey above. The ramp runs along +x through the stair cell.
-## Foot of this storey's flight (floor level) and its landing on the storey above.
-func stair_foot() -> Vector3:
-	var c := stair_pos()
-	var d := InteriorMesher.stair_dir(plan.floor)
-	return c + Vector3(InteriorMesher.STAIR_FOOT * d, 0, 0)
+# ------------------------------------------------------------------ stairwell
+
+## The rail through the stairwell from the opening of the current room to the opening
+## of `out_room` on the storey above/below. Call BEFORE begin_floor_change (this storey's
+## plan), then append exit_path() from the new plan.
+func climb_path(up: bool) -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	var di := plan.stair_opening(current_room)
+	if di < 0 or plan.stair_layout.is_empty():
+		return pts
+	var d := plan.doors[di]
+	pts.append(d.pos)
+	pts.append(Stairwell.inside_point(plan, plan.stair_layout, d, 0.0))
+	pts.append_array(Stairwell.climb_points(plan, plan.stair_layout, up))
+	return pts
 
 
-func stair_top() -> Vector3:
-	var c := stair_pos()
-	var d := InteriorMesher.stair_dir(plan.floor)
-	return c + Vector3(InteriorMesher.STAIR_LAND * d, World.FLOOR_M, 0)
+## Which room to step into from the stairwell on this (new) storey: one with zombies or
+## closed doors left, else any. -1 if the stairwell has no opening (should not happen).
+func stair_exit_room() -> int:
+	var best := -1
+	var best_score := -1
+	for di in plan.rooms[plan.stair_room].doors:
+		var d := plan.doors[di]
+		if not d.open_always:
+			continue
+		var o := plan.other_room(di, plan.stair_room)
+		var score := 0
+		if not is_room_cleared(o): score += 2
+		if not unexplored_doors(o).is_empty(): score += 1
+		if score > best_score:
+			best_score = score
+			best = o
+	return best
 
 
-## The flight that comes DOWN from this storey (built by the floor below): foot/landing.
-func stair_down_top() -> Vector3:
-	var c := stair_pos()
-	var d := InteriorMesher.stair_dir(plan.floor - 1)
-	return c + Vector3(InteriorMesher.STAIR_LAND * d, 0, 0)
+## From inside the stairwell (arrival height = this storey) out through its opening into
+## `ri`, stopping at that room's threshold.
+func exit_path(ri: int) -> PackedVector3Array:
+	var pts := PackedVector3Array()
+	for di in plan.rooms[plan.stair_room].doors:
+		var d := plan.doors[di]
+		if d.open_always and plan.other_room(di, plan.stair_room) == ri:
+			pts.append(Stairwell.inside_point(plan, plan.stair_layout, d, 0.0))
+			pts.append(d.pos)
+			pts.append(threshold_world(di, ri))
+			break
+	return pts
 
 
-func stair_down_foot() -> Vector3:
-	var c := stair_pos()
-	var d := InteriorMesher.stair_dir(plan.floor - 1)
-	return c + Vector3(InteriorMesher.STAIR_FOOT * d, -World.FLOOR_M, 0)
+## World point of the stairwell opening from room `ri` (label/facing anchor), or INF.
+func stair_opening_pos(ri: int) -> Vector3:
+	var di := plan.stair_opening(ri)
+	return plan.doors[di].pos if di >= 0 else Vector3.INF
 
 
 ## Keep a point inside room `ri` (world space), `margin` metres off its walls.
@@ -206,7 +257,7 @@ func floor_state() -> Dictionary:
 
 
 func is_door_open(d: FloorPlan.Door) -> bool:
-	return d.b < 0 or floor_state()["opened"].has(d.key())
+	return d.b < 0 or d.open_always or floor_state()["opened"].has(d.key())
 
 
 func open_door(di: int) -> void:
@@ -290,8 +341,6 @@ func _reveal(ri: int) -> void:
 
 
 func _rebuild(ri: int) -> void:
-	if not _revealed.has(ri):
-		return
 	if _room_nodes.has(ri):
 		_room_nodes[ri].queue_free()
 	var node := InteriorMesher.build_room(plan, ri, building, floor_state()["opened"])
@@ -303,7 +352,7 @@ func _rebuild(ri: int) -> void:
 	# door leaves are shared between two rooms: build once per floor
 	for di in plan.rooms[ri].doors:
 		var d := plan.doors[di]
-		if d.b < 0 or _door_nodes.has(di):
+		if d.b < 0 or d.open_always or _door_nodes.has(di):
 			continue
 		var leaf := InteriorMesher.build_door_leaf(d, is_door_open(d), InteriorMesher.wall_color(building, d.a), InteriorMesher.wall_color(building, d.b))
 		add_child(leaf)
@@ -320,6 +369,8 @@ func options() -> Array:
 	var room := plan.rooms[current_room]
 	for di in room.doors:
 		var d := plan.doors[di]
+		if d.open_always:
+			continue
 		if d.b < 0:
 			out.append({ "word": "exit", "kind": "exit", "door": di })
 		else:
@@ -329,11 +380,13 @@ func options() -> Array:
 	var er := entrance_room()
 	if er >= 0 and current_room != er and not route(current_room, er).is_empty():
 		out.append({ "word": "exit", "kind": "exit", "door": plan.entrance_door })
-	if room.is_stair:
+	# the stairwell archway in this room: the storeys it leads to
+	var so := plan.stair_opening(current_room)
+	if so >= 0:
 		if plan.floor < plan.floors_total - 1:
-			out.append({ "word": "up", "kind": "up", "door": -1 })
+			out.append({ "word": "up", "kind": "up", "door": so })
 		if plan.floor > 0:
-			out.append({ "word": "down", "kind": "down", "door": -1 })
+			out.append({ "word": "down", "kind": "down", "door": so })
 	return out
 
 
@@ -345,10 +398,10 @@ func path_through_door(di: int) -> PackedVector3Array:
 	return PackedVector3Array([d.pos, threshold_world(di, other)])
 
 
-## A point 1.3 m inside room `ri` from door `di` (the stairwell uses its foot instead).
+## A point 1.3 m inside room `ri` from door `di` (inside the stairwell: on its walkway).
 func threshold_world(di: int, ri: int) -> Vector3:
 	if ri == plan.stair_room:
-		return plan.room_stand_world(ri)
+		return Stairwell.inside_point(plan, plan.stair_layout, plan.doors[di], 0.0)
 	var d := plan.doors[di]
 	var into := Vector3(d.dir.x, 0, d.dir.y) if d.b == ri else Vector3(-d.dir.x, 0, -d.dir.y)
 	return d.pos + into * 1.3
@@ -374,7 +427,8 @@ func path_to_room(target: int) -> PackedVector3Array:
 		var d: FloorPlan.Door = plan.doors[di]
 		pts.append(d.pos)
 		r = plan.other_room(di, r)
-		pts.append(plan.room_stand_world(r))
+		# through the stairwell: keep to its walkway, never across the flights
+		pts.append(threshold_world(di, r) if r == plan.stair_room else plan.room_stand_world(r))
 	return pts
 
 
@@ -383,10 +437,8 @@ func option_pos(opt: Dictionary) -> Vector3:
 	match opt["kind"]:
 		"door", "exit":
 			return plan.doors[opt["door"]].pos
-		"up":
-			return stair_pos() + Vector3(0, 1.4, 0)
-		"down":
-			return stair_down_top()
+		"up", "down":
+			return plan.doors[opt["door"]].pos + Vector3(0, 1.4, 0)
 	return Vector3.INF
 
 
@@ -457,8 +509,9 @@ func other_floors_uncleared() -> bool:
 
 
 ## The manual search: from `from`, the nearest room (through open doors) that still has a
-## closed door worth opening. When this storey is done: the stairwell if other storeys are
-## not, else the entrance (to exit), else the stairwell. Returns `from` if nothing better.
+## closed door worth opening. When this storey is done: the nearest room with a stairwell
+## archway if other storeys are not, else the entrance (to exit), else a stairwell room.
+## Never the stairwell itself. Returns `from` if nothing better.
 func search_target(from: int) -> int:
 	if plan == null or from < 0:
 		return from
@@ -468,7 +521,7 @@ func search_target(from: int) -> int:
 	while i < order.size():
 		var r := order[i]
 		i += 1
-		if not unexplored_doors(r).is_empty():
+		if r != plan.stair_room and not unexplored_doors(r).is_empty():
 			return r
 		for di in plan.rooms[r].doors:
 			var d := plan.doors[di]
@@ -478,26 +531,18 @@ func search_target(from: int) -> int:
 			if not seen.has(o):
 				seen[o] = true
 				order.append(o)
-	var stair_ok := plan.stair_room >= 0 and seen.has(plan.stair_room)
-	if stair_ok and other_floors_uncleared():
-		return plan.stair_room
+	var stair_room_near := -1
+	for r in order:
+		if r != plan.stair_room and plan.stair_opening(r) >= 0:
+			stair_room_near = r
+			break
+	if stair_room_near >= 0 and other_floors_uncleared():
+		return stair_room_near
 	var er := entrance_room()
 	if er >= 0 and seen.has(er):
 		return er
-	if stair_ok:
-		return plan.stair_room
+	if stair_room_near >= 0:
+		return stair_room_near
 	return from
 
 
-func stair_pos() -> Vector3:
-	return plan.cell_to_world(Vector2(plan.stair_cell) + Vector2(0.5, 0.5))
-
-
-## Switch storey in place. Returns the stair position on the new floor.
-func change_floor(delta: int) -> Vector3:
-	var b := building
-	var f := plan.floor + delta
-	enter(b, f)
-	var sp := stair_pos()
-	set_room(plan.stair_room)
-	return sp

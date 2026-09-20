@@ -21,6 +21,7 @@ class Door:
 	var dir: Vector2i           ## a -> b direction (unit)
 	var pos: Vector3            ## world position of the opening centre, on the wall plane, floor height
 	var word: String
+	var open_always := false    ## a doorless opening (into the stairwell): no leaf, no word
 	func key() -> String:
 		return "%d,%d:%d,%d" % [cell.x, cell.y, dir.x, dir.y]
 
@@ -34,7 +35,8 @@ var rooms: Array[Room] = []
 var doors: Array[Door] = []
 var entrance_door := -1
 var stair_room := -1
-var stair_cell := Vector2i.ZERO
+var stair_cell := Vector2i.ZERO        ## entry cell of the stairwell (see Stairwell.layout)
+var stair_layout: Dictionary = {}      ## Stairwell.layout() result, {} for single-storey buildings
 
 ## per-cell room index, row-major
 var cell_room: PackedInt32Array
@@ -54,13 +56,23 @@ func room_center_world(ri: int) -> Vector3:
 	return cell_to_world(rooms[ri].center_cell())
 
 
-## Where the survivor stands when "in" a room: its centre, except in the stairwell where the
-## centre is on the flight itself — stand at the foot instead.
+## Where the survivor stands when "in" a room: its centre. (You never stand in the
+## stairwell; its entry cell centre is returned for pass-through paths.)
 func room_stand_world(ri: int) -> Vector3:
 	if ri == stair_room and stair_room >= 0:
-		var c := cell_to_world(Vector2(stair_cell) + Vector2(0.5, 0.5))
-		return c + Vector3(InteriorMesher.STAIR_FOOT * InteriorMesher.stair_dir(floor) + 0.15 * InteriorMesher.stair_dir(floor), 0, 0)
+		return cell_to_world(Vector2(stair_cell) + Vector2(0.5, 0.5))
 	return room_center_world(ri)
+
+
+## The opening from room `ri` into the stairwell, or -1.
+func stair_opening(ri: int) -> int:
+	if stair_room < 0 or ri < 0 or ri == stair_room:
+		return -1
+	for di in rooms[ri].doors:
+		var d := doors[di]
+		if d.open_always and (d.a == stair_room or d.b == stair_room):
+			return di
+	return -1
 
 
 ## World position of the door opening centre (on the wall plane, floor height).
