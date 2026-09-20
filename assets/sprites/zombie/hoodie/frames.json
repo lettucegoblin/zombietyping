@@ -1,0 +1,422 @@
+{
+ "size": [
+  132,
+  132
+ ],
+ "anims": {
+  "idle": {
+   "south": [
+    "idle/south_0.png"
+   ],
+   "south-east": [
+    "idle/south-east_0.png"
+   ],
+   "east": [
+    "idle/east_0.png"
+   ],
+   "north-east": [
+    "idle/north-east_0.png"
+   ],
+   "north": [
+    "idle/north_0.png"
+   ],
+   "north-west": [
+    "idle/north-west_0.png"
+   ],
+   "west": [
+    "idle/west_0.png"
+   ],
+   "south-west": [
+    "idle/south-west_0.png"
+   ]
+  },
+  "death": {
+   "south": [
+    "death/south_0.png",
+    "death/south_1.png",
+    "death/south_2.png",
+    "death/south_3.png",
+    "death/south_4.png",
+    "death/south_5.png",
+    "death/south_6.png",
+    "death/south_7.png",
+    "death/south_8.png"
+   ],
+   "north-west": [
+    "death/north-west_0.png",
+    "death/north-west_1.png",
+    "death/north-west_2.png",
+    "death/north-west_3.png",
+    "death/north-west_4.png",
+    "death/north-west_5.png",
+    "death/north-west_6.png",
+    "death/north-west_7.png",
+    "death/north-west_8.png"
+   ],
+   "east": [
+    "death/east_0.png",
+    "death/east_1.png",
+    "death/east_2.png",
+    "death/east_3.png",
+    "death/east_4.png",
+    "death/east_5.png",
+    "death/east_6.png",
+    "death/east_7.png",
+    "death/east_8.png"
+   ],
+   "north-east": [
+    "death/north-east_0.png",
+    "death/north-east_1.png",
+    "death/north-east_2.png",
+    "death/north-east_3.png",
+    "death/north-east_4.png",
+    "death/north-east_5.png",
+    "death/north-east_6.png",
+    "death/north-east_7.png",
+    "death/north-east_8.png"
+   ],
+   "south-west": [
+    "death/south-west_0.png",
+    "death/south-west_1.png",
+    "death/south-west_2.png",
+    "death/south-west_3.png",
+    "death/south-west_4.png",
+    "death/south-west_5.png",
+    "death/south-west_6.png",
+    "death/south-west_7.png",
+    "death/south-west_8.png"
+   ],
+   "south-east": [
+    "death/south-east_0.png",
+    "death/south-east_1.png",
+    "death/south-east_2.png",
+    "death/south-east_3.png",
+    "death/south-east_4.png",
+    "death/south-east_5.png",
+    "death/south-east_6.png",
+    "death/south-east_7.png",
+    "death/south-east_8.png"
+   ],
+   "north": [
+    "death/north_0.png",
+    "death/north_1.png",
+    "death/north_2.png",
+    "death/north_3.png",
+    "death/north_4.png",
+    "death/north_5.png",
+    "death/north_6.png",
+    "death/north_7.png",
+    "death/north_8.png"
+   ],
+   "west": [
+    "death/west_0.png",
+    "death/west_1.png",
+    "death/west_2.png",
+    "death/west_3.png",
+    "death/west_4.png",
+    "death/west_5.png",
+    "death/west_6.png",
+    "death/west_7.png",
+    "death/west_8.png"
+   ]
+  },
+  "flinch_b": {
+   "south": [
+    "flinch_b/south_0.png",
+    "flinch_b/south_1.png",
+    "flinch_b/south_2.png",
+    "flinch_b/south_3.png"
+   ],
+   "north": [
+    "flinch_b/north_0.png",
+    "flinch_b/north_1.png",
+    "flinch_b/north_2.png",
+    "flinch_b/north_3.png"
+   ],
+   "north-east": [
+    "flinch_b/north-east_0.png",
+    "flinch_b/north-east_1.png",
+    "flinch_b/north-east_2.png",
+    "flinch_b/north-east_3.png"
+   ],
+   "north-west": [
+    "flinch_b/north-west_0.png",
+    "flinch_b/north-west_1.png",
+    "flinch_b/north-west_2.png",
+    "flinch_b/north-west_3.png"
+   ],
+   "east": [
+    "flinch_b/east_0.png",
+    "flinch_b/east_1.png",
+    "flinch_b/east_2.png",
+    "flinch_b/east_3.png"
+   ],
+   "south-east": [
+    "flinch_b/south-east_0.png",
+    "flinch_b/south-east_1.png",
+    "flinch_b/south-east_2.png",
+    "flinch_b/south-east_3.png"
+   ],
+   "west": [
+    "flinch_b/west_0.png",
+    "flinch_b/west_1.png",
+    "flinch_b/west_2.png",
+    "flinch_b/west_3.png"
+   ],
+   "south-west": [
+    "flinch_b/south-west_0.png",
+    "flinch_b/south-west_1.png",
+    "flinch_b/south-west_2.png",
+    "flinch_b/south-west_3.png"
+   ]
+  },
+  "idle_breathe": {
+   "north": [
+    "idle_breathe/north_0.png",
+    "idle_breathe/north_1.png",
+    "idle_breathe/north_2.png",
+    "idle_breathe/north_3.png"
+   ],
+   "south-east": [
+    "idle_breathe/south-east_0.png",
+    "idle_breathe/south-east_1.png",
+    "idle_breathe/south-east_2.png",
+    "idle_breathe/south-east_3.png"
+   ],
+   "south": [
+    "idle_breathe/south_0.png",
+    "idle_breathe/south_1.png",
+    "idle_breathe/south_2.png",
+    "idle_breathe/south_3.png"
+   ],
+   "west": [
+    "idle_breathe/west_0.png",
+    "idle_breathe/west_1.png",
+    "idle_breathe/west_2.png",
+    "idle_breathe/west_3.png"
+   ],
+   "north-west": [
+    "idle_breathe/north-west_0.png",
+    "idle_breathe/north-west_1.png",
+    "idle_breathe/north-west_2.png",
+    "idle_breathe/north-west_3.png"
+   ],
+   "north-east": [
+    "idle_breathe/north-east_0.png",
+    "idle_breathe/north-east_1.png",
+    "idle_breathe/north-east_2.png",
+    "idle_breathe/north-east_3.png"
+   ],
+   "south-west": [
+    "idle_breathe/south-west_0.png",
+    "idle_breathe/south-west_1.png",
+    "idle_breathe/south-west_2.png",
+    "idle_breathe/south-west_3.png"
+   ],
+   "east": [
+    "idle_breathe/east_0.png",
+    "idle_breathe/east_1.png",
+    "idle_breathe/east_2.png",
+    "idle_breathe/east_3.png"
+   ]
+  },
+  "run": {
+   "north": [
+    "run/north_0.png",
+    "run/north_1.png",
+    "run/north_2.png",
+    "run/north_3.png",
+    "run/north_4.png",
+    "run/north_5.png",
+    "run/north_6.png",
+    "run/north_7.png"
+   ],
+   "south-east": [
+    "run/south-east_0.png",
+    "run/south-east_1.png",
+    "run/south-east_2.png",
+    "run/south-east_3.png",
+    "run/south-east_4.png",
+    "run/south-east_5.png",
+    "run/south-east_6.png",
+    "run/south-east_7.png"
+   ],
+   "south": [
+    "run/south_0.png",
+    "run/south_1.png",
+    "run/south_2.png",
+    "run/south_3.png",
+    "run/south_4.png",
+    "run/south_5.png",
+    "run/south_6.png",
+    "run/south_7.png"
+   ],
+   "west": [
+    "run/west_0.png",
+    "run/west_1.png",
+    "run/west_2.png",
+    "run/west_3.png",
+    "run/west_4.png",
+    "run/west_5.png",
+    "run/west_6.png",
+    "run/west_7.png"
+   ],
+   "north-west": [
+    "run/north-west_0.png",
+    "run/north-west_1.png",
+    "run/north-west_2.png",
+    "run/north-west_3.png",
+    "run/north-west_4.png",
+    "run/north-west_5.png",
+    "run/north-west_6.png",
+    "run/north-west_7.png"
+   ],
+   "south-west": [
+    "run/south-west_0.png",
+    "run/south-west_1.png",
+    "run/south-west_2.png",
+    "run/south-west_3.png",
+    "run/south-west_4.png",
+    "run/south-west_5.png",
+    "run/south-west_6.png",
+    "run/south-west_7.png"
+   ],
+   "north-east": [
+    "run/north-east_0.png",
+    "run/north-east_1.png",
+    "run/north-east_2.png",
+    "run/north-east_3.png",
+    "run/north-east_4.png",
+    "run/north-east_5.png",
+    "run/north-east_6.png",
+    "run/north-east_7.png"
+   ],
+   "east": [
+    "run/east_0.png",
+    "run/east_1.png",
+    "run/east_2.png",
+    "run/east_3.png",
+    "run/east_4.png",
+    "run/east_5.png",
+    "run/east_6.png",
+    "run/east_7.png"
+   ]
+  },
+  "flinch_a": {
+   "east": [
+    "flinch_a/east_0.png",
+    "flinch_a/east_1.png",
+    "flinch_a/east_2.png",
+    "flinch_a/east_3.png"
+   ],
+   "south": [
+    "flinch_a/south_0.png",
+    "flinch_a/south_1.png",
+    "flinch_a/south_2.png",
+    "flinch_a/south_3.png"
+   ],
+   "south-west": [
+    "flinch_a/south-west_0.png",
+    "flinch_a/south-west_1.png",
+    "flinch_a/south-west_2.png",
+    "flinch_a/south-west_3.png"
+   ],
+   "north-west": [
+    "flinch_a/north-west_0.png",
+    "flinch_a/north-west_1.png",
+    "flinch_a/north-west_2.png",
+    "flinch_a/north-west_3.png"
+   ],
+   "south-east": [
+    "flinch_a/south-east_0.png",
+    "flinch_a/south-east_1.png",
+    "flinch_a/south-east_2.png",
+    "flinch_a/south-east_3.png"
+   ],
+   "north-east": [
+    "flinch_a/north-east_0.png",
+    "flinch_a/north-east_1.png",
+    "flinch_a/north-east_2.png",
+    "flinch_a/north-east_3.png"
+   ],
+   "west": [
+    "flinch_a/west_0.png",
+    "flinch_a/west_1.png",
+    "flinch_a/west_2.png",
+    "flinch_a/west_3.png"
+   ],
+   "north": [
+    "flinch_a/north_0.png",
+    "flinch_a/north_1.png",
+    "flinch_a/north_2.png",
+    "flinch_a/north_3.png"
+   ]
+  },
+  "attack": {
+   "south": [
+    "attack/south_0.png",
+    "attack/south_1.png",
+    "attack/south_2.png",
+    "attack/south_3.png",
+    "attack/south_4.png",
+    "attack/south_5.png"
+   ],
+   "south-east": [
+    "attack/south-east_0.png",
+    "attack/south-east_1.png",
+    "attack/south-east_2.png",
+    "attack/south-east_3.png",
+    "attack/south-east_4.png",
+    "attack/south-east_5.png"
+   ],
+   "north-west": [
+    "attack/north-west_0.png",
+    "attack/north-west_1.png",
+    "attack/north-west_2.png",
+    "attack/north-west_3.png",
+    "attack/north-west_4.png",
+    "attack/north-west_5.png"
+   ],
+   "west": [
+    "attack/west_0.png",
+    "attack/west_1.png",
+    "attack/west_2.png",
+    "attack/west_3.png",
+    "attack/west_4.png",
+    "attack/west_5.png"
+   ],
+   "east": [
+    "attack/east_0.png",
+    "attack/east_1.png",
+    "attack/east_2.png",
+    "attack/east_3.png",
+    "attack/east_4.png",
+    "attack/east_5.png"
+   ],
+   "north-east": [
+    "attack/north-east_0.png",
+    "attack/north-east_1.png",
+    "attack/north-east_2.png",
+    "attack/north-east_3.png",
+    "attack/north-east_4.png",
+    "attack/north-east_5.png"
+   ],
+   "south-west": [
+    "attack/south-west_0.png",
+    "attack/south-west_1.png",
+    "attack/south-west_2.png",
+    "attack/south-west_3.png",
+    "attack/south-west_4.png",
+    "attack/south-west_5.png"
+   ],
+   "north": [
+    "attack/north_0.png",
+    "attack/north_1.png",
+    "attack/north_2.png",
+    "attack/north_3.png",
+    "attack/north_4.png",
+    "attack/north_5.png"
+   ]
+  }
+ }
+}

@@ -1,0 +1,218 @@
+extends Node3D
+## The survivor moves on rails. Two queues: street legs (typed on the map, A* over road
+## tiles) and local legs (door -> room, stairs, exit) which always run first. After a street
+## leg the player HOLDS at the door until main resumes it (typed door / window timeout).
+
+signal arrived(id: String)
+signal queue_changed
+signal tile_changed(tile: Vector2i)
+
+@export var street_speed := 7.0
+@export var turn_speed := 6.0
+@export var reveal_radius := 7
+
+var tile: Vector2i = Vector2i(16, 0)
+var facing := Vector3(1, 0, 0)
+var hold := false
+var halt := false      ## combat: stop in place (keeps the current leg for later)
+
+var _street: Array[Dictionary] = []   # {id, tiles: Array[Vector2i]}
+var _local: Array[Dictionary] = []    # {id, points: PackedVector3Array, speed}
+var _cur: Dictionary = {}             # {id, points, tiles (or []), speed}
+var _seg_i := 0
+var _seg_t := 0.0
+var _yaw := 0.0
+var _shake := 0.0
+
+@onready var cam: Camera3D = $Camera3D
+
+
+func _ready() -> void:
+	global_position = World.tile_to_world(tile)
+	World.mark_explored(tile, reveal_radius)
+	_yaw = atan2(-facing.x, -facing.z)
+	_update_cam(1.0)
+
+
+func is_moving() -> bool:
+	return not _cur.is_empty() or not _local.is_empty()
+
+
+## Speed of the leg being walked right now (0 when standing, held or halted).
+func current_speed() -> float:
+	if halt or _cur.is_empty():
+		return 0.0
+	return _cur["speed"]
+
+
+func queued_ids() -> Array[String]:
+	var out: Array[String] = []
+	if not _cur.is_empty() and _cur.has("tiles") and not (_cur["tiles"] as Array).is_empty():
+		out.append(_cur["id"])
+	for l in _street:
+		out.append(l["id"])
+	return out
+
+
+func has_street_queue() -> bool:
+	return not _street.is_empty()
+
+
+func plan_end_tile() -> Vector2i:
+	if not _street.is_empty():
+		var t: Array = _street[-1]["tiles"]
+		return t[-1]
+	if not _cur.is_empty() and _cur.has("tiles") and not (_cur["tiles"] as Array).is_empty():
+		var t: Array = _cur["tiles"]
+		return t[-1]
+	return tile
+
+
+## Street destination. Returns false if no route exists.
+func enqueue(building_id: String) -> bool:
+	var b := World.building_by_id(building_id)
+	if b == null:
+		return false
+	var path := World.find_path(plan_end_tile(), b.road_tile)
+	if path.is_empty():
+		return false
+	_street.append({ "id": building_id, "tiles": path })
+	queue_changed.emit()
+	return true
+
+
+func clear_queue() -> void:
+	_street.clear()
+	if not _cur.is_empty() and _cur.has("tiles") and not (_cur["tiles"] as Array).is_empty():
+		# finish only the current segment, then stop
+		var pts: PackedVector3Array = _cur["points"]
+		var keep := PackedVector3Array()
+		for i in range(_seg_i, mini(_seg_i + 2, pts.size())):
+			keep.append(pts[i])
+		_cur = { "id": "", "points": keep, "tiles": [], "speed": _cur["speed"] }
+		_seg_i = 0
+	queue_changed.emit()
+
+
+## Immediate move (inside buildings, door approach). Runs before any street leg.
+func push_local(points: PackedVector3Array, id: String, speed := 3.2) -> void:
+	_local.append({ "id": id, "points": points, "speed": speed })
+
+
+func resume() -> void:
+	hold = false
+
+
+## Turn (smoothly) to look at a world point; used when arriving in a room so the door
+## words are in view.
+func face_toward(p: Vector3) -> void:
+	var d := p - global_position
+	d.y = 0.0
+	if d.length() > 0.01:
+		facing = d.normalized()
+
+
+func all_paths() -> Array:
+	var out := []
+	if not _cur.is_empty() and _cur.has("tiles") and not (_cur["tiles"] as Array).is_empty():
+		out.append(_cur["tiles"])
+	for l in _street:
+		out.append(l["tiles"])
+	return out
+
+
+func _start_next() -> bool:
+	if not _local.is_empty():
+		var l: Dictionary = _local.pop_front()
+		var pts := PackedVector3Array([global_position])
+		pts.append_array(l["points"])
+		_cur = { "id": l["id"], "points": pts, "tiles": [], "speed": l["speed"] }
+	elif not hold and not _street.is_empty():
+		var s: Dictionary = _street.pop_front()
+		var tiles: Array = s["tiles"]
+		var pts := PackedVector3Array()
+		for t in tiles:
+			pts.append(World.tile_to_world(t))
+		_cur = { "id": s["id"], "points": pts, "tiles": tiles, "speed": street_speed }
+		queue_changed.emit()
+	else:
+		return false
+	_seg_i = 0
+	_seg_t = 0.0
+	return true
+
+
+func _process(dt: float) -> void:
+	if halt:
+		_update_cam(dt)
+		return
+	if _cur.is_empty() and not _start_next():
+		_update_cam(dt)
+		return
+	var pts: PackedVector3Array = _cur["points"]
+	if pts.size() < 2:
+		_finish()
+		_update_cam(dt)
+		return
+	var speed: float = _cur["speed"]
+	var remaining := dt * speed
+	while remaining > 0.0:
+		var a := pts[_seg_i]
+		var b := pts[_seg_i + 1]
+		var seg_len := a.distance_to(b)
+		if seg_len > 0.001:
+			facing = (b - a) / seg_len
+		var left := (1.0 - _seg_t) * seg_len
+		if remaining < left:
+			_seg_t += remaining / seg_len
+			remaining = 0.0
+		else:
+			remaining -= left
+			_seg_i += 1
+			_seg_t = 0.0
+			_on_point(_seg_i)
+			if _seg_i >= pts.size() - 1:
+				global_position = pts[-1]
+				_finish()
+				_update_cam(dt)
+				return
+	global_position = pts[_seg_i].lerp(pts[_seg_i + 1], _seg_t)
+	_update_cam(dt)
+
+
+func _on_point(i: int) -> void:
+	var tiles: Array = _cur["tiles"]
+	if tiles.is_empty() or i >= tiles.size():
+		return
+	var t: Vector2i = tiles[i]
+	if t != tile:
+		tile = t
+		World.mark_explored(tile, reveal_radius)
+		tile_changed.emit(tile)
+
+
+func _finish() -> void:
+	var leg := _cur
+	_cur = {}
+	_seg_i = 0
+	_seg_t = 0.0
+	var is_street: bool = not (leg["tiles"] as Array).is_empty()
+	if is_street:
+		hold = true
+	queue_changed.emit()
+	if leg["id"] != "":
+		arrived.emit(leg["id"])
+
+
+func shake(amount: float) -> void:
+	_shake = maxf(_shake, amount)
+
+
+func _update_cam(dt: float) -> void:
+	var target_yaw := atan2(-facing.x, -facing.z)
+	_yaw = lerp_angle(_yaw, target_yaw, clampf(dt * turn_speed, 0.0, 1.0))
+	_shake = maxf(_shake - dt * 2.2, 0.0)
+	var jx := randf_range(-1.0, 1.0) * _shake * 0.14
+	var jy := randf_range(-1.0, 1.0) * _shake * 0.09
+	cam.rotation = Vector3(0.0, _yaw, randf_range(-1.0, 1.0) * _shake * 0.03)
+	cam.position = Vector3(jx, 1.65 + jy, 0)
