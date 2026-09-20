@@ -28,8 +28,9 @@ var _search_pending := false          # room done: decide where the rail takes u
 var _search_beat := 0.0
 var _searching := false               # a "search:" leg is running (walking back to a frontier)
 var _moving_on := false               # you typed a door/stairs/exit: zombies in view no longer stop the rail
-const HALT_RANGE := 9.0               # a zombie in your sights this close stops the rail
-const AIM_RANGE := 7.0                # ...and this close turns you to face it when you are idle
+const ENGAGE_FAR := 40.0              # facing on arrival: anything in your sights at all
+const HALT_RANGE := 14.0              # a zombie you can fire at (in sight, in range) stops the rail
+const AIM_RANGE := 14.0               # ...and turns you to face it whenever you are not walking
 
 @onready var player: Node3D = $View/Viewport/World/Player
 @onready var streamer: Node3D = $View/Viewport/World/Streamer
@@ -109,9 +110,9 @@ func _process(dt: float) -> void:
 			_leave_door()
 			player.resume()
 		_refresh_hud()
-	# auto-aim: standing still and not mid-word on a door, face the zombie you are
-	# shooting, else the closest one in your sights that is near enough to be a threat
-	if not player.is_moving() and typist.buffer == "":
+	# auto-aim: standing still (or held by a threat) and not mid-word on a door, face the
+	# zombie you are shooting, else the closest one you can fire at
+	if (not player.is_moving() or player.halt) and typist.buffer == "":
 		var z: Zombie = null
 		if typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive():
 			z = typist.locked
@@ -345,17 +346,21 @@ func _seed_floor() -> void:
 ## On arrival: the nearest zombie in this room (awake or not) if it is close, else the
 ## most useful thing in the room. In the stairwell: the archway of the room to clear next.
 func _face_arrival(ri: int) -> void:
-	if typist.in_combat():
-		return
+	# whatever you can fire at first; else any zombie standing in this room, however far
 	var z: Zombie = null
-	var bd := 8.0
-	for c in director.alive():
-		if c.room != ri and c.global_position.distance_to(player.global_position) > 3.0:
-			continue
-		var d: float = c.global_position.distance_to(player.global_position)
-		if d < bd:
-			bd = d
-			z = c
+	if typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive():
+		z = typist.locked
+	else:
+		z = director.threat_within(ENGAGE_FAR)
+	if z == null:
+		var bd := 1e9
+		for c in director.alive():
+			var d: float = c.global_position.distance_to(player.global_position)
+			if c.room != ri and d > 3.0:
+				continue
+			if d < bd:
+				bd = d
+				z = c
 	if z != null:
 		player.face_toward(z.global_position)
 		return
