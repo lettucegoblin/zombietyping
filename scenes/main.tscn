@@ -1,4 +1,4 @@
-[gd_scene load_steps=18 format=3]
+[gd_scene load_steps=19 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/streamer.gd" id="2_streamer"]
@@ -12,6 +12,7 @@
 [ext_resource type="Script" path="res://scripts/map/minimap.gd" id="10_minimap"]
 [ext_resource type="Script" path="res://scripts/audio/sfx.gd" id="11_sfx"]
 [ext_resource type="Script" path="res://scripts/world/ash.gd" id="12_ash"]
+[ext_resource type="Script" path="res://scripts/world/sky_life.gd" id="13_sky"]
 
 [sub_resource type="ShaderMaterial" id="post_mat"]
 shader = ExtResource("7_post")
@@ -83,6 +84,9 @@ script = ExtResource("5_interior")
 
 [node name="Director" type="Node3D" parent="View/Viewport/World"]
 script = ExtResource("8_director")
+
+[node name="SkyLife" type="Node3D" parent="View/Viewport/World"]
+script = ExtResource("13_sky")
 
 [node name="Player" type="Node3D" parent="View/Viewport/World"]
 script = ExtResource("3_player")

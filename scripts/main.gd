@@ -43,6 +43,7 @@ const AIM_RANGE := 7.0                # ...and this close turns you to face it w
 @onready var minimap: Control = $UI/Minimap
 @onready var sfx: Node = $Sfx
 @onready var ash: GPUParticles3D = $View/Viewport/World/Player/Ash
+@onready var sky: Node3D = $View/Viewport/World/SkyLife
 @onready var hud: RichTextLabel = $UI/HUD
 
 
@@ -52,6 +53,8 @@ func _ready() -> void:
 	streamer.prime(World.sector_of_tile(player.tile))
 	map.player = player
 	sfx.player = player
+	sky.player = player
+	sky.sfx = sfx
 	minimap.player = player
 	minimap.tab_map = map
 	typist.dest_labels = func(): return minimap.labels
@@ -526,6 +529,8 @@ func _on_shot(z: Zombie, killed: bool) -> void:
 	director.wake_by_noise(interior, interior.room_at_world(player.global_position) if interior.is_inside() else -1, 12.0, 1)
 	sfx.play("shot", -3.0, 0.1)
 	sfx.play_at("kill" if killed else "hit", z.global_position, 0.0 if killed else -6.0, 0.12)
+	if mode != Mode.INSIDE:
+		sky.startle(player.global_position, 30.0)
 	player.shake(0.32 if killed else 0.11)
 	_flash(Color(1, 1, 1, 0.16 if killed else 0.07), 0.07)
 	_spark(z.global_position + Vector3(0, 1.05, 0), 1.6 if killed else 1.0)
