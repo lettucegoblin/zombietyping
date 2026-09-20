@@ -305,7 +305,7 @@ func _rebuild(ri: int) -> void:
 		var d := plan.doors[di]
 		if d.b < 0 or _door_nodes.has(di):
 			continue
-		var leaf := InteriorMesher.build_door_leaf(d, is_door_open(d))
+		var leaf := InteriorMesher.build_door_leaf(d, is_door_open(d), InteriorMesher.wall_color(building, d.a), InteriorMesher.wall_color(building, d.b))
 		add_child(leaf)
 		_door_nodes[di] = leaf
 

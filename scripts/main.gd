@@ -27,6 +27,9 @@ var _door_label: WordLabel
 var _search_pending := false          # room done: decide where the rail takes us next
 var _search_beat := 0.0
 var _searching := false               # a "search:" leg is running (walking back to a frontier)
+var _moving_on := false               # you typed a door/stairs/exit: zombies in view no longer stop the rail
+const HALT_RANGE := 9.0               # a zombie in your sights this close stops the rail
+const AIM_RANGE := 7.0                # ...and this close turns you to face it when you are idle
 
 @onready var player: Node3D = $View/Viewport/World/Player
 @onready var streamer: Node3D = $View/Viewport/World/Streamer
@@ -78,8 +81,11 @@ func _process(dt: float) -> void:
 	if dead:
 		return
 	_invuln = maxf(_invuln - dt, 0.0)
-	# the rail stops the moment a zombie is in your sights, and rolls again a beat after
-	if typist.in_combat():
+	# the rail stops the moment a zombie is in your sights (close enough to matter) and
+	# rolls again a beat after; once you have typed where to go next it keeps going
+	var lock_close: bool = typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive() \
+		and typist.locked.global_position.distance_to(player.global_position) < HALT_RANGE
+	if not _moving_on and (director.threat_within(HALT_RANGE) != null or lock_close):
 		player.halt = true
 		_resume_beat = 0.7
 	elif player.halt:
@@ -97,17 +103,14 @@ func _process(dt: float) -> void:
 			_leave_door()
 			player.resume()
 		_refresh_hud()
-	# auto-aim: when standing still, look at the closest threat we can see
-	if not player.is_moving():
+	# auto-aim: standing still and not mid-word on a door, face the zombie you are
+	# shooting, else the closest one in your sights that is near enough to be a threat
+	if not player.is_moving() and typist.buffer == "":
 		var z: Zombie = null
-		var bd := 1e9
-		for t in director.targetable():
-			var d: float = t.global_position.distance_to(player.global_position)
-			if d < bd:
-				bd = d
-				z = t
-		if z == null:
-			z = director.nearest_alive(6.0)
+		if typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive():
+			z = typist.locked
+		else:
+			z = director.threat_within(AIM_RANGE)
 		if z != null:
 			player.face_toward(z.global_position)
 	if not director.get_meta("no_street", false):
@@ -196,6 +199,7 @@ func _on_queue_changed() -> void:
 
 
 func _on_arrived(id: String) -> void:
+	_moving_on = false
 	if id.begins_with("room:"):
 		var ri := int(id.substr(5))
 		interior.set_room(ri)
@@ -279,6 +283,7 @@ func _hide_door_label() -> void:
 
 func _enter_building() -> void:
 	var b := door_building
+	_moving_on = true
 	mode = Mode.INSIDE
 	door_timer = -1.0
 	typist.clear_prompts()
@@ -385,6 +390,7 @@ func _refresh_prompts() -> void:
 
 func _on_option(opt: Dictionary) -> void:
 	typist.clear_prompts()
+	_moving_on = true
 	match opt["kind"]:
 		"door":
 			var di: int = opt["door"]
@@ -574,16 +580,15 @@ func _refresh_hud() -> void:
 			var fl: int = interior.plan.floor + 1 if interior.is_inside() else 0
 			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]dead end — heading back[/color]" if _searching else ""])
 	var parts: Array[String] = []
+	for p in typist.prompts():
+		var w: String = p["word"]
+		var typed: String = typist.buffer if w.begins_with(typist.buffer) else ""
+		parts.append("[color=#ffd166][b]%s[/b][/color]%s" % [typed, w.substr(typed.length())])
 	if typist.in_combat():
 		var n: int = director.targetable().size()
-		parts.append("[color=#ff6fb5]%d zombie%s — type their words[/color]" % [n, "" if n == 1 else "s"])
+		parts.append("[color=#ff6fb5]%d zombie%s in sight[/color]" % [n, "" if n == 1 else "s"])
 		if OS.is_debug_build():
 			parts.append("[color=#94a3b8]" + " ".join(director.targetable_words()) + "[/color]")
-	else:
-		for p in typist.prompts():
-			var w: String = p["word"]
-			var typed: String = typist.buffer if w.begins_with(typist.buffer) else ""
-			parts.append("[color=#ffd166][b]%s[/b][/color]%s" % [typed, w.substr(typed.length())])
 	if not parts.is_empty():
 		lines.append("[font_size=24]" + "   ".join(parts) + "[/font_size]")
 	var bar := ""

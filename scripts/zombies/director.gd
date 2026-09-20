@@ -41,6 +41,18 @@ func has_targets() -> bool:
 	return not targetable().is_empty()
 
 
+## A zombie in your sights close enough to matter (the rail stops for these).
+func threat_within(dist: float) -> Zombie:
+	var best: Zombie = null
+	var bd := dist
+	for z in targetable():
+		var d := z.global_position.distance_to(player.global_position)
+		if d < bd:
+			bd = d
+			best = z
+	return best
+
+
 ## The zombie whose NEXT letter is `ch`: partially typed ones first (so a dropped lock can
 ## always be picked back up), then fresh words, nearest wins.
 func nearest_matching(ch: String) -> Zombie:

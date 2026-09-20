@@ -33,6 +33,10 @@ static func stair_dir(floor: int) -> float:
 static var _door_mat: StandardMaterial3D
 
 
+static func wall_color(b: BuildingData, ri: int) -> Color:
+	return WALL_COLS[(b.seed_hash >> (ri % 5)) % WALL_COLS.size()]
+
+
 static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Room_%d" % ri
@@ -40,7 +44,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 	var H := World.FLOOR_M
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var wall_col: Color = WALL_COLS[(b.seed_hash >> (ri % 5)) % WALL_COLS.size()]
+	var wall_col: Color = wall_color(b, ri)
 
 	# floor + ceiling (with a hole over the stairwell so the climb doesn't clip)
 	var p00 := fp.cell_to_world(Vector2(room.rect.position))
@@ -191,7 +195,8 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 	for di in room.doors:
 		var d := fp.doors[di]
 		var into := Vector2(-d.dir) if d.a == ri else Vector2(d.dir)
-		var lp := d.pos + Vector3(into.x, 0, into.y) * 0.35 + Vector3(0, DOOR_H + 0.35, 0)
+		# on the upper half of the leaf, so it is in view even when you stand right at it
+		var lp := d.pos + Vector3(into.x, 0, into.y) * 0.3 + Vector3(0, DOOR_H * 0.7, 0)
 		labels.add_child(_label(d.word, lp))
 	if room.is_stair:
 		var c := fp.cell_to_world(Vector2(fp.stair_cell) + Vector2(0.5, 0.5))
@@ -244,15 +249,28 @@ static func door_material() -> StandardMaterial3D:
 
 ## A closed door leaf standing in its frame (a quad on the wall plane + a collider so it
 ## blocks sightlines). Kicking it turns it into a loose physics body (see kick_in).
-static func build_door_leaf(d: FloorPlan.Door, is_open: bool) -> Node3D:
+## `col_a` / `col_b` are the wall colours of rooms a and b: a fill behind the leaf, one
+## side each, so the door sprite's transparent edges never show the (unbuilt) room beyond.
+static func build_door_leaf(d: FloorPlan.Door, is_open: bool, col_a := Color.WHITE, col_b := Color.WHITE) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Door_%d" % d.index
 	root.position = d.pos
-	var along := Vector3(-d.dir.y, 0, d.dir.x)
-	root.basis = Basis.looking_at(Vector3(d.dir.x, 0, d.dir.y), Vector3.UP)   # local +z faces room b
+	# looking_at points local -z along a->b: local +z faces room a, local -z faces room b
+	root.basis = Basis.looking_at(Vector3(d.dir.x, 0, d.dir.y), Vector3.UP)
 	root.set_meta("open", is_open)
 	if is_open:
 		return root    # an already-kicked door is simply gone
+	var fill := MeshInstance3D.new()
+	fill.name = "Fill"
+	var fst := SurfaceTool.new()
+	fst.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hw := DOOR_W * 0.5 + 0.03
+	var hh := DOOR_H + 0.03
+	SectorMesher._quad(fst, Vector3(-hw, -0.05, 0.01), Vector3(hw, -0.05, 0.01), Vector3(hw, hh, 0.01), Vector3(-hw, hh, 0.01), Vector3(0, 0, 1), col_a.darkened(0.12))
+	SectorMesher._quad(fst, Vector3(-hw, -0.05, -0.01), Vector3(hw, -0.05, -0.01), Vector3(hw, hh, -0.01), Vector3(-hw, hh, -0.01), Vector3(0, 0, -1), col_b.darkened(0.12))
+	fill.mesh = fst.commit()
+	fill.material_override = SectorMesher.flat_material()
+	root.add_child(fill)
 	var leaf := MeshInstance3D.new()
 	leaf.name = "Leaf"
 	var qm := QuadMesh.new()
@@ -283,10 +301,14 @@ static func kick_in(hinge: Node3D, d: FloorPlan.Door, from_room: int) -> void:
 	var block := hinge.get_node_or_null("Block")
 	if block != null:
 		block.queue_free()
+	var fill := hinge.get_node_or_null("Fill")
+	if fill != null:
+		fill.queue_free()
 	var leaf: MeshInstance3D = hinge.get_node_or_null("Leaf")
 	if leaf == null:
 		return
-	var away_local := Vector3(0, 0, 1) if d.a == from_room else Vector3(0, 0, -1)
+	# fly AWAY from the kicker: local +z faces room a, so from room a the leaf goes -z
+	var away_local := Vector3(0, 0, -1) if d.a == from_room else Vector3(0, 0, 1)
 	var away := hinge.global_transform.basis * away_local
 	var start := leaf.global_transform
 	leaf.queue_free()

@@ -111,6 +111,57 @@ func _dest_key(ch: String) -> void:
 	changed.emit()
 
 
+func _prompt_prefix(text: String) -> bool:
+	for w in _prompts.keys():
+		if (w as String).begins_with(text):
+			return true
+	return false
+
+
+func _prompt_key(ch: String) -> void:
+	buffer += ch
+	if _prompts.has(buffer):
+		var p: Dictionary = _prompts[buffer]
+		buffer = ""
+		changed.emit()
+		var cb: Callable = p["callback"]
+		cb.call()
+		return
+	changed.emit()
+
+
+## Where a letter goes. Zombies never take the keyboard away from you: a letter is a
+## bullet only when it matches a target, otherwise it types the door/stairs/exit words.
+##   1. it continues the word you are already typing
+##   2. it is the next letter of the zombie you are locked on
+##   3. it starts one of the prompt words
+##   4. it is the next letter of some zombie in your sights
+##   5. otherwise: a miss (in a fight) or a mistype
+func _letter(ch: String) -> void:
+	if buffer != "" and _prompt_prefix(buffer + ch):
+		_prompt_key(ch)
+		return
+	if _lock_alive() and locked.next_letter() == ch:
+		_combat_key(ch)
+		return
+	if buffer == "" and _prompt_prefix(ch):
+		_prompt_key(ch)
+		return
+	if director != null and director.nearest_matching(ch) != null:
+		if buffer != "":
+			buffer = ""       # abandon the half-typed word for the shot
+		_combat_key(ch)
+		return
+	if in_combat():
+		missed.emit()
+	if buffer != "":
+		buffer = ""
+		mistyped.emit(ch)
+	elif not in_combat():
+		mistyped.emit(ch)
+	changed.emit()
+
+
 func _input(event: InputEvent) -> void:
 	if not enabled:
 		return
@@ -137,45 +188,17 @@ func _input(event: InputEvent) -> void:
 			dest_buffer = ""
 			changed.emit()
 		return
-	if in_combat():
-		if k >= KEY_A and k <= KEY_Z and not event.echo:
-			_combat_key(char(97 + (k - KEY_A)))
-			get_viewport().set_input_as_handled()
-		return
-	if _prompts.is_empty():
-		return
-	var ch := ""
 	if k >= KEY_A and k <= KEY_Z:
-		ch = char(97 + (k - KEY_A))
-	elif k == KEY_BACKSPACE:
-		buffer = buffer.left(maxi(buffer.length() - 1, 0))
-		changed.emit()
+		if event.echo:
+			return
 		get_viewport().set_input_as_handled()
-		return
+		_letter(char(97 + (k - KEY_A)))
+	elif k == KEY_BACKSPACE:
+		if buffer != "":
+			buffer = buffer.left(buffer.length() - 1)
+			changed.emit()
+			get_viewport().set_input_as_handled()
 	elif k == KEY_ESCAPE:
-		buffer = ""
-		changed.emit()
-		return
-	else:
-		return
-	get_viewport().set_input_as_handled()
-	var next := buffer + ch
-	var any_prefix := false
-	for w in _prompts.keys():
-		if w.begins_with(next):
-			any_prefix = true
-			break
-	if not any_prefix:
-		buffer = ""
-		mistyped.emit(ch)
-		changed.emit()
-		return
-	buffer = next
-	if _prompts.has(buffer):
-		var p: Dictionary = _prompts[buffer]
-		buffer = ""
-		changed.emit()
-		var cb: Callable = p["callback"]
-		cb.call()
-		return
-	changed.emit()
+		if buffer != "":
+			buffer = ""
+			changed.emit()

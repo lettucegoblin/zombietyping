@@ -32,6 +32,8 @@ var _struck := false
 var interior: Node3D           ## set by the director when indoors (for door routing)
 var _route: Array = []         ## door indices towards the player's room
 var _route_t := 0.0
+var _best_dist := 1e9          ## closest we have got to the player (stuck detection)
+var _stuck_t := 0.0
 
 var sprite: AnimatedSprite3D
 var label: WordLabel
@@ -173,6 +175,16 @@ func _process(dt: float) -> void:
 		State.DORMANT:
 			pass
 		State.CHASE:
+			# a zombie that cannot get any closer for a long while (outside a window,
+			# wrong side of a wall) gives up and wanders off once you are not looking
+			if dist < _best_dist - 0.4:
+				_best_dist = dist
+				_stuck_t = 0.0
+			else:
+				_stuck_t += dt
+				if _stuck_t > 12.0 and not in_los and dist > 3.0:
+					queue_free()
+					return
 			if dist <= type.attack_range and _on_camera():
 				state = State.WINDUP
 				_timer = type.attack_windup
