@@ -6,6 +6,7 @@ func _ready() -> void:
 	World.seed = 1337
 	var checked := 0
 	var kinds := { 0: 0, 1: 0 }
+	var apartments := 0
 	var bad := 0
 	for sy in range(-2, 3):
 		for sx in range(-2, 3):
@@ -20,6 +21,25 @@ func _ready() -> void:
 					if f == 0:
 						lay0 = fp.stair_layout
 						kinds[int(lay0["kind"])] += 1
+						if b.kind == "apartments":
+							apartments += 1
+					if b.kind == "apartments" and fp.rooms[0].kind == "hall":
+						# every flat's front room opens onto the corridor; the stairwell too
+						for r in fp.rooms:
+							if r.kind == "flat":
+								var onto := false
+								for di in r.doors:
+									var o := fp.other_room(di, r.index)
+									if o == 0 or o == fp.stair_room:
+										onto = true
+								if not onto:
+									print("flat without a corridor/landing door: ", b.id(), " floor ", f); bad += 1
+						var stair_ok := false
+						for di in fp.rooms[fp.stair_room].doors:
+							if fp.other_room(di, fp.stair_room) == 0:
+								stair_ok = true
+						if not stair_ok:
+							print("apartment stairwell not on the corridor: ", b.id()); bad += 1
 					elif fp.stair_layout["rect"] != lay0["rect"] or fp.stair_layout["along"] != lay0["along"]:
 						print("stairwell moves between storeys: ", b.id()); bad += 1
 					# every cell belongs to a room
@@ -53,7 +73,7 @@ func _ready() -> void:
 						if pts.is_empty() or absf(pts[-1].y - (fp.origin.y + World.FLOOR_M)) > 0.01:
 							print("bad climb path: ", b.id()); bad += 1
 					checked += 1
-	print("checked %d storeys; core %d, wall %d buildings; problems %d" % [checked, kinds[0], kinds[1], bad])
+	print("checked %d storeys; core %d, wall %d buildings (%d apartment blocks); problems %d" % [checked, kinds[0], kinds[1], apartments, bad])
 	if bad > 0:
 		push_error("STAIRS FAIL")
 		get_tree().quit(1)

@@ -107,23 +107,92 @@ for k, cut in enumerate([1100, 900]):
 n = secs(0.3)
 save("creak", tone(lambda t: 240 + 120 * math.sin(2 * math.pi * 7 * t), n, lambda t: env(t, 0.03, 0.2) * 0.5, tri))
 
-# --- loops: wind outside, drone inside. Built as loops via a short crossfade at the seam.
-def loopify(xs, fade=0.25):
+# --- loops: wind outside, room tone inside. Built as loops via an equal-power crossfade
+# at the seam; DC removed so the seam never clicks.
+def loopify(xs, fade=0.6):
     f = secs(fade)
     for i in range(f):
         a = i / f
-        xs[i] = xs[i] * a + xs[len(xs) - f + i] * (1 - a)
+        ga = math.sin(a * math.pi / 2); gb = math.cos(a * math.pi / 2)
+        xs[i] = xs[i] * ga + xs[len(xs) - f + i] * gb
     return xs[: len(xs) - f]
+def brown_noise(n, leak=0.995, step=0.02):
+    out = []; y = 0.0
+    for v in noise(n):
+        y = (y + v * step) * leak; out.append(y)
+    return highpass(out, 25)
 
-n = secs(7.0)
-brown = []; y = 0.0
-for v in noise(n):
-    y = (y + v * 0.02) * 0.995; brown.append(y)
-wind = [b * (0.55 + 0.45 * math.sin(2 * math.pi * 0.11 * i / SR) * math.sin(2 * math.pi * 0.07 * i / SR + 1.3)) for i, b in enumerate(lowpass(brown, 500))]
-save("wind", loopify(wind))
+n = secs(14.0)
+gusts = [0.5 + 0.3 * math.sin(2 * math.pi * 0.09 * i / SR) * math.sin(2 * math.pi * 0.053 * i / SR + 1.3) + 0.2 * math.sin(2 * math.pi * 0.21 * i / SR + 0.4) for i in range(n)]
+wind = [b * g for b, g in zip(lowpass(brown_noise(n), 420), gusts)]
+# a whistle that rides the gusts (wind through the streets)
+whistle = tone(lambda t: 620 + 90 * math.sin(2 * math.pi * 0.17 * t), n, lambda t: 0.0)
+whistle = [w * 0.05 * max(0.0, gusts[i] - 0.55) * 4 for i, w in enumerate(tone(lambda t: 620 + 90 * math.sin(2 * math.pi * 0.17 * t), n, lambda t: 1.0))]
+save("wind", loopify(mix(wind, whistle)))
 
+# inside: a low room tone (ventilation rumble + faint hiss) with the wind far away
+n = secs(12.0)
+rumble = mix(tone(lambda t: 48, n, lambda t: 0.35 + 0.1 * math.sin(2 * math.pi * 0.31 * t)), tone(lambda t: 96.5, n, lambda t: 0.12))
+hiss = [v * 0.06 for v in highpass(lowpass(noise(n), 2600), 900)]
+far_wind = [b * 0.25 * g for b, g in zip(lowpass(brown_noise(n), 180), [0.6 + 0.4 * math.sin(2 * math.pi * 0.07 * i / SR) for i in range(n)])]
+save("room", loopify(mix(rumble, hiss, far_wind)))
+
+# --- atmosphere one-shots ------------------------------------------------------
+# crow: 1-3 harsh caws (pulse train through a bandpass), pitch jitter at play time
+def caw(dur, f0):
+    n = secs(dur)
+    out = []
+    for i in range(n):
+        t = i / SR
+        ph = 2 * math.pi * f0 * (1 + 0.15 * math.sin(2 * math.pi * 9 * t)) * t
+        out.append((1.0 if math.sin(ph) > 0.3 else -0.6) * env(t, 0.02, dur * 0.9))
+    return highpass(lowpass(out, 2200), 500)
+crow = []
+for k in range(2):
+    crow += caw(0.22, 330 + k * 20) + [0.0] * secs(0.12)
+save("crow1", crow)
+crow = caw(0.28, 300) + [0.0] * secs(0.15) + caw(0.2, 340) + [0.0] * secs(0.1) + caw(0.18, 360)
+save("crow2", crow)
+
+# pigeon flutter: rapid soft noise bursts (wingbeats)
+n = secs(0.9)
+flut = []
+for i in range(n):
+    t = i / SR
+    beat = 0.5 + 0.5 * math.sin(2 * math.pi * 11 * t)
+    flut.append(beat ** 3 * env(t, 0.05, 0.8))
+flut = [f * v for f, v in zip(flut, lowpass(noise(n), 1400))]
+save("flutter", flut)
+
+# distant siren (rare): slow two-tone wail, far away (lowpassed, quiet)
 n = secs(6.0)
-drone = mix(tone(lambda t: 55, n, lambda t: 0.5), tone(lambda t: 110.4, n, lambda t: 0.25), tone(lambda t: 164, n, lambda t: 0.08),
-            [v * 0.12 for v in lowpass(noise(n), 300)])
-drone = [d * (0.8 + 0.2 * math.sin(2 * math.pi * 0.23 * i / SR)) for i, d in enumerate(drone)]
-save("hum", loopify(drone))
+siren = tone(lambda t: 520 + 180 * math.sin(2 * math.pi * 0.45 * t), n, lambda t: 0.3 * env(t, 1.5, 4.0), tri)
+save("siren", lowpass(siren, 900))
+
+# far-off groan (a zombie somewhere): low, muffled
+n = secs(1.1)
+groan = tone(lambda t: 85 + 25 * math.sin(2 * math.pi * 3 * t) - 20 * t, n, lambda t: env(t, 0.15, 0.9), square)
+save("groan_far", lowpass(groan, 500))
+
+# metal clank (a can / gate somewhere)
+n = secs(0.5)
+clank = mix(tone(lambda t: 1250, n, lambda t: env(t, 0.001, 0.25)), tone(lambda t: 1890, n, lambda t: 0.6 * env(t, 0.001, 0.15)),
+            [v * env(i / SR, 0.001, 0.04) for i, v in enumerate(highpass(noise(n), 2000))])
+save("clank", clank)
+
+# indoors: water drip, wooden creak, distant thump, pipe knock
+n = secs(0.35)
+drip = tone(lambda t: 1500 * math.exp(-t * 14) + 700, n, lambda t: env(t, 0.002, 0.12))
+save("drip", drip)
+n = secs(0.7)
+creak2 = tone(lambda t: 180 + 140 * math.sin(2 * math.pi * 4 * t) + 60 * t, n, lambda t: 0.5 * env(t, 0.08, 0.5) * (0.6 + 0.4 * math.sin(2 * math.pi * 27 * t)), tri)
+save("creak2", creak2)
+n = secs(0.6)
+thump = mix(tone(lambda t: 60 - 20 * t, n, lambda t: env(t, 0.005, 0.35)), [v * env(i / SR, 0.002, 0.08) for i, v in enumerate(lowpass(noise(n), 400))])
+save("thump", thump)
+n = secs(0.8)
+knock = []
+for k in range(3):
+    seg = secs(0.22)
+    knock += [v * env(i / SR, 0.001, 0.09) for i, v in enumerate(mix(tone(lambda t: 480, seg, lambda t: 1.0), lowpass(noise(seg), 1500)))]
+save("knock", knock)

@@ -191,13 +191,13 @@ static func building_color(b: BuildingData) -> Color:
 
 
 static func _building(st: SurfaceTool, b: BuildingData) -> void:
-	var inset := 0.25 if b.district == District.Kind.DOWNTOWN else (0.7 if b.district == District.Kind.STRIP or b.district == District.Kind.INDUSTRIAL else 1.3)
-	var x0 := b.rect.position.x * T + inset
-	var z0 := b.rect.position.y * T + inset
-	var x1 := b.rect.end.x * T - inset
-	var z1 := b.rect.end.y * T - inset
+	var fpr := InteriorGen.footprint(b)   # one source of truth for the walls' footprint
+	var x0 := fpr.position.x
+	var z0 := fpr.position.y
+	var x1 := fpr.end.x
+	var z1 := fpr.end.y
 	var h := b.floors * FLOOR_H + (0.4 if b.district == District.Kind.INDUSTRIAL else 0.0)
-	var wc := wall_cell(b.district)
+	var wc := CELL_BRICK if b.kind == "apartments" else wall_cell(b.district)
 	# textured walls: neutral tint (brightness varies per building), texture carries the colour
 	var bright := 0.82 + float(b.seed_hash & 0xFF) / 255.0 * 0.18
 	var c := Color(bright, bright, bright)

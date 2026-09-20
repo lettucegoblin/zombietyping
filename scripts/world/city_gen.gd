@@ -347,6 +347,11 @@ static func _place_lots(sd: SectorData, rng: RandomNumberGenerator, p: Dictionar
 					# skew low so towers are the exception, not the rule
 					var t := rng.randf()
 					b.floors = fmin + int(round((fmax - fmin) * t * t))
+					# some residential / downtown lots are apartment blocks (3-5 storeys of flats
+					# off a corridor); decided from the hash so the rng stream stays put
+					if (sd.district == District.Kind.RESIDENTIAL or sd.district == District.Kind.DOWNTOWN) and w * h >= 6 and (b.seed_hash >> 12) % 100 < 35:
+						b.kind = "apartments"
+						b.floors = 3 + (b.seed_hash >> 20) % 3
 					b.door_tile = origin + best_door
 					b.road_tile = origin + best_road
 					sd.buildings.append(b)

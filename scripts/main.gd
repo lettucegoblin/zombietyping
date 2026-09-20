@@ -122,6 +122,7 @@ func _process(dt: float) -> void:
 		director.street_spawning = mode != Mode.INSIDE
 	sfx.set_inside(mode == Mode.INSIDE)
 	sfx.footsteps(dt, player.current_speed())
+	sfx.atmosphere(dt)
 	ash.emitting = mode != Mode.INSIDE
 	if Engine.get_process_frames() % 10 == 0:
 		_refresh_hud()
