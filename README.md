@@ -1,0 +1,258 @@
+# zombietyping
+
+A first-person, on-rails **typing survival game** in Godot 4.6.2 (GDScript) with pixel-art
+"Sunday Comic" zombies (PixelLab), set in an infinite procedural city. You never move
+yourself: you type where to go, type door words to breach, and every letter you type at a
+zombie's word is a bullet. Think *Typing of the Dead* meets a SWAT-style building clear.
+
+This README is the hand-off document: everything a fresh session needs to pick the project
+up. `NEXT_STEPS.md` holds the backlog and the open design questions.
+
+---
+
+## 1. Ground rules (from the owner, do not break)
+
+- **Project lives here (`~/zombietyping`).** Never put project files in `~/Projects/claude`
+  (that folder holds token/password files).
+- **Git:** commit freely at milestones. **No Claude attribution lines** (no `Co-Authored-By`,
+  no "Generated with"). Commit author is `lettuce <lettucetulip@gmail.com>`.
+- **Art:** one forced 21-colour palette (`assets/palette/palette.png`), kawaii/emoji zombie
+  faces, Vice-City poppy colours, thick outlines, weighted comic strides. Every PixelLab
+  generation passes the palette (`color_image_base64`) and every imported frame is quantized
+  onto it. **Seed new characters from a STATIC, forward-facing neutral pose** (mid-action
+  seeds made the motion clunky). Have the owner confirm a new character's idle pose before
+  spending generations on animations.
+- **No gun sprite.** Letters are the bullets.
+- **Nothing sees you before you see it.** Zombies wake by line of sight or gunfire only.
+- **Fair jumpscares are not jumpscares:** a zombie may only hurt you while its word is on
+  screen and has been readable for a beat.
+- Rails, not free movement. Tab pauses and opens the map. Buildings are labelled
+  relative to the map view (`1a`, `3b`, `10e` …), digit first so labels can be typed from
+  the HUD without opening the map.
+
+## 2. Running things
+
+| What | How |
+|---|---|
+| Godot binary | `/Users/lettuce/Documents/Godot.app` (4.6.2 stable) |
+| Open the editor | `open -a /Users/lettuce/Documents/Godot.app --args --path /Users/lettuce/zombietyping --editor` |
+| Run the game from the editor | via MCP: `python3 tools/live/run_and_shot.py run` (see §8) |
+| Headless test (scene) | `tools/gd.sh <seconds> res://scenes/tests/<name>.tscn` |
+| Parse every script | `tools/gd.sh 40 -s res://scripts/tests/parse_check.gd` |
+
+`tools/gd.sh` is a headless runner with a time cap (macOS has no `timeout`). Tests that need
+autoloads (`World`) **must run as scenes**; `-s` scripts never instantiate autoloads and
+report `Identifier not found: World` — ignore those lines from the parse check.
+
+### Tests (all headless, exit code 0 = pass)
+
+| Scene | Covers |
+|---|---|
+| `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
+| `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed label queues a trip and releases the door hold |
+| `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
+| `scenes/tests/check_stairs.tscn` | generator invariants over ~2k storeys: every multi-storey building has a stairwell with the same footprint on every floor, doors with words, full cell coverage, connectivity, apartment flats open onto the corridor/landing |
+| `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
+| `scenes/tests/print_plan.tscn` | prints ASCII floor plans of the first apartment blocks (debug) |
+
+Chaining all of them in one shell call blows the 10-minute tool limit; run the interior test
+on its own.
+
+## 3. Layout
+
+```
+project.godot            main scene res://scenes/main.tscn; autoloads World, _mcp_game_helper
+scenes/main.tscn         the whole game scene (see §4)
+scripts/
+  main.gd                game modes, prompts, arrivals, search rails, HUD, debug keys
+  world/                 infinite city: det.gd (hashes), district.gd, city_gen.gd, sector_data.gd,
+                         building_data.gd, world.gd (autoload: state, fog, A*), streamer.gd,
+                         sector_mesher.gd (facades, doorways, colliders), palette.gd,
+                         ash.gd (dust particles), sky_life.gd (clouds + crows)
+  interior/              floor_plan.gd (data), interior_gen.gd (BSP + apartment plans),
+                         stairwell.gd (stair layouts/geometry/paths), interior_mesher.gd
+                         (rooms, doors, glass, labels), interior.gd (the loaded storey)
+  player/rail_player.gd  the rail: street legs (A* tiles) + local legs (points), hold/halt
+  typing/                typist.gd (keyboard → prompts/zombies/destinations), word_label.gd,
+                         word_overlay.gd (draws words on the UI layer), words.gd (pool)
+  zombies/               zombie.gd (state machine), director.gd (spawns, LOS, targeting),
+                         zombie_type.gd (runner/shambler stats), zombie_frames.gd (SpriteFrames)
+  map/                   map_labels.gd (shared "1a" labelling), tab_map.gd, minimap.gd
+  audio/sfx.gd           one-shots, distance-faded one-shots, ambience beds + random events
+  tests/                 the scenes above + parse_check.gd
+shaders/                 cel.gdshader (city), flat.gdshader (interiors), palette_post.gdshader
+assets/                  palette/, textures/atlas.png (+ source tiles), sprites/zombie/<type>/,
+                         sprites/sky/, audio/*.wav (procedural, see tools/make_sounds.py)
+tools/                   gd.sh, import_character.py, make_sounds.py, live/ (MCP drivers, §8)
+design/                  contact sheets and reference screenshots from the art direction work
+```
+
+## 4. Scene and rendering
+
+`Main` → `View` (SubViewportContainer, stretch, shrink 2) → `Viewport` (SubViewport 640×360,
+nearest filter: the pixel look) → `World` (Env, Sun, Streamer, Interior, Director, SkyLife,
+Player+Camera3D+Ash) and a `Post` CanvasLayer with `PaletteQuantize` (palette_post shader:
+nearest-palette snap; F1 toggles it, F2 toggles dither). Beside the view: `Typist`, `Sfx`,
+and the `UI` CanvasLayer at full 1280×720: `HUD` (RichTextLabel with ink outline), `Minimap`
+(top right), `Words` (WordOverlay), `Flash`, `GameOver`, `TabMap`. UI node ORDER matters:
+Words must come after HUD/Minimap (draws above them) and before TabMap.
+
+- Sky: ProceduralSkyMaterial purple→hot pink (quantizes into comic bands). Depth fog
+  30–150 m lilac. Clouds have fog disabled.
+- City meshes use `cel.gdshader` (atlas cells via UV2, stochastic tile flips + noise
+  weathering to hide repetition). Interiors use unlit `flat.gdshader` with baked shading
+  (lit interiors + palette snap produced light-falloff blobs).
+- Godot front faces are CLOCKWISE; `SectorMesher._quad4` fixes winding from the normal.
+
+## 5. The city
+
+Deterministic and infinite from `World.seed`. Sector = 32×32 tiles, tile = 5 m. Arterial
+roads frame every sector (some hash-demoted), district from density + variation noise, local
+grids with pruning + connectivity check, lots placed per district params. Buildings have
+stable ids `"sx,sy:i"`, a `kind` (`plain` | `apartments`), floors, a door tile and a road
+tile (the A* node in front of the door). `World.state` is a sparse dictionary of building
+state (visited, door_kicked, floors/rooms cleared, progress); `World.explored` is a fog
+bitmask per sector. Streamer keeps a radius of sectors built (one per frame).
+
+Facades: walls from `InteriorGen.footprint(b)` (single source of truth for the inset), a real
+hole for the door, a dark "vestibule" box behind it (per-sector MultiMesh, hidden while that
+building's interior is loaded so you can see in), a door-leaf MultiMesh (collapsed once
+kicked; persisted in state), window sprite bands from the same `window_slots()` the interior
+uses, and one box collider per building (blocks line of sight; disabled for the building you
+are inside).
+
+## 6. Interiors
+
+`InteriorGen.generate(seed, building, floor)` → `FloorPlan` (cells of ~2.5 m, rooms, doors
+with typeable words, entrance on floor 0 exactly where the facade door is). Two planners:
+
+- **BSP** (`_plan_bsp`): rooms by BSP, a **stairwell strip** carved out of whatever it
+  overlaps, doors as a spanning tree + ~22% loops. Stairwell doors may only sit on the
+  entry landing / walkway side (`Stairwell.allowed_edges`).
+- **Apartments** (`_plan_apartments`, `BuildingData.kind == "apartments"`, ~35% of larger
+  residential/downtown lots, 3–5 storeys, brick): a corridor down the long axis, a
+  switchback core in its last two cells, flats off both sides (front room on the corridor,
+  back rooms behind; flats over the stairwell open onto its landing).
+
+**Stairwells** (`scripts/interior/stairwell.gd`): same footprint on every storey. `CORE` =
+1×2 switchback (two half-width flights, half-height landing, open shaft with the storey
+below's flights and a pit slab, a cap over the ceiling hole); `WALL` = 1×3 strip along an
+exterior wall with straight flights that stagger per storey and a walkway. No zombies ever
+spawn in a stairwell. They have ordinary doors. `climb_points` / `landing_point` /
+`label_points` give the rail its path and the word anchors.
+
+`Interior` (node) builds every room of the current storey on entry (unseen rooms are
+invisible but their walls collide; revealing a room also reveals what is visible through its
+open doors), keeps the old storey parked during a climb (`begin_floor_change` /
+`finish_floor_change`, toggling the stairwell's `DownFlights` / `ShaftCap` parts), routes
+through OPEN doors (`route`, `path_to_room`, `path_to_street`), answers `options()` (door
+words, `up`/`down` from a room with a stairwell door or from the landing, `exit` from any
+ground-floor room the front door is reachable from) and the search rules (§7).
+
+Doors: leaf quad + collider (blocks LOS) + wall-coloured fills behind the leaf (one per
+side). Kicking turns it into a RigidBody3D flung AWAY from the kicker (layer 2 so LOS rays
+ignore it), tumbling, fading. Windows are holes with invisible glass colliders: nothing sees
+in or out. Door size is unified (`DOOR_W 1.2`, `DOOR_H 2.2`) between facade and interiors.
+
+## 7. The rails, typing and combat
+
+**Modes** (`main.gd`): `STREET` (riding between typed destinations), `DOOR` (stopped at a
+building; type the door word — with more stops queued you get a 4 s window), `INSIDE`.
+
+**Typing** (`typist.gd`): keycode-driven. A digit opens a destination buffer (minimap labels).
+Otherwise a letter goes, in order, to: the word you are already typing → the locked zombie's
+next letter → any targetable zombie whose next letter it is → the start of a prompt word →
+miss/mistype. Zombies never take the keyboard away from you.
+
+**Rail rules**: it HALTS for any targetable zombie within 14 m (indoor ones always; street
+ones seen from inside are ignored once you have typed where to go — `_moving_on`) and rolls
+again 0.7 s after the last one drops. Idle or held, the camera faces: the locked zombie →
+the nearest you can fire at → a zombie within 2.6 m even off camera → (inside, room not
+clear) the nearest zombie still standing in the room (the "sweep"). Arrival in a room faces
+a zombie before any door. Idle in an uncleared room with the nearest zombie beyond 10 m: an
+**approach leg** walks you in until its word goes live.
+
+**Room flow**: you stop at the room's **threshold** (1.3 m in), zombies spawn away from the
+doors and come at you across the room. When a room is done and has no closed door worth
+opening, the **manual search** walks you back to the nearest room that has one (or to the
+stairwell if other storeys are uncleared, else the entrance) — never retype your way back.
+Uncleared rooms reachable through open doors count as targets.
+
+**Zombies** (`zombie.gd`): DORMANT → (notice beat 0.9 s, stunned) → CHASE → WINDUP → STRIKE
+→ RECOVER; STUN on every typed letter (knockback, alternating flinches); DEAD lies on the
+floor (street corpses fade after 40 s). Action-movie rule: they approach only inside the
+camera's front cone (28°), lurk otherwise; they attack only on camera AND when `fair()`
+(word visible ≥ 0.6 s). A door kicked within 3.6 m throws them 2.4 m back, stunned 1.5 s.
+They route through open doors; a street zombie enters a building via roads → door tile →
+doorway. Stuck ones (no progress 12 s) despawn out of sight. Types: runner (2.0 m/s, 3–5
+letter words) and shambler (0.8 m/s, 5–8 letters) — both wear the `hoodie` frames for now.
+
+**Director**: spawns street zombies dormant 7–20 tiles ahead every 4–8 s (max 3), seeds
+every uncleared room of a storey on entry (dormant, away from doors; 0 in stairwells),
+LOS check every 3 frames (frustum + raycast on layer 1 within 14 m), gunfire wakes zombies
+within earshot (same room / one open door away), 1.1 m separation.
+
+## 8. Live driving through the Godot MCP (`tools/live/`)
+
+The editor runs the `godot-ai` plugin (hi-godot/godot-ai **v3.2.5**, pinned; v4 needs Godot
+4.7) at `addons/godot_ai/`, registered at user scope; server on `127.0.0.1:8000/mcp`
+(streamable HTTP) and `:9500` (editor WS). When the MCP tools are not loaded in a session,
+`tools/live/mcpcall.py` talks JSON-RPC to it directly (re-inits on 404):
+
+```bash
+cd tools/live
+python3 run_and_shot.py run            # (re)launch the main scene from the editor
+python3 run_and_shot.py shot out.png   # screenshot of the running game
+python3 run_and_shot.py logs           # game log (print() output, script errors)
+python3 keys.py type:3b F7 F8          # inject keys (presses only; the game acts on presses)
+python3 play.py 3b                     # enter building 3b, fight to the first room, screenshot a door
+python3 -c "import mcpcall; mcpcall.call('filesystem_manage', {'op':'scan'})"
+```
+
+Rules of the road:
+- After writing NEW files (scripts with `class_name`, textures, wavs) run an MCP
+  `filesystem_manage scan`, or headless runs see unresolved classes / null textures.
+- Never edit `project.godot` on disk while the editor is open (it got overwritten once and
+  lost `run/main_scene`); use `project_manage set_main_scene` / `autoload_manage add`.
+  Editing `.tscn`/`.gd` files on disk is fine.
+- The headless dummy renderer returns identity MultiMesh transforms — don't test MultiMesh
+  contents headless. `_draw` doesn't run headless either; the word overlay exposes
+  `WordOverlay.anchor_for()` for tests.
+- Debug keys in debug builds: F1 palette snap, F2 dither, F5 spawn a runner 7 m ahead,
+  F6 look behind, F7 print minimap labels with ids/kinds, F8 print rail + nearby zombie state.
+- The MCP-driven "player" types slowly (~50 ms/key); two runners at 2.5 m can kill it. That
+  is a script limitation, not a balance verdict.
+
+## 9. Art pipeline (PixelLab)
+
+- Zombie character: PixelLab character group of the runner; the shipped state is **"Idle
+  Grin"** `769a67c0-fa6a-472d-a8ca-8da85059f771` (96 px, side view, 8 directions). Animations
+  on it: run 8f (v3), flinch_a/b 4f (v3; played from frame 1 — `ZombieType.flinch_mode
+  "skip_first"`), attack 6f (v3), idle_breathe (template `breathing-idle`), death = v3 custom
+  "collapses backward, ends flat on the ground" (group `6c409ca0-…`, 9f, 132 px canvas).
+  Bundle: `https://api.pixellab.ai/mcp/characters/<id>/download` (423 while jobs run; 8 job
+  slots max); `tools/live/pl_wait.sh <char_id> <outdir>` polls and unzips.
+- Import: `python3 tools/import_character.py <bundle.zip> hoodie assets/palette/palette.png
+  Idle_Grin --map death_floor=death --nudge death=4` → `assets/sprites/zombie/hoodie/<anim>/
+  <dir>_<i>.png` + `frames.json`. Pads every frame onto one common canvas (keeps the feet
+  line; `sprite.offset = (0, 46)`), `--map` renames, `--nudge` shifts an animation up N px.
+  Then MCP scan.
+- Other art: facade tiles/atlas (`assets/textures`, 4×4 cells of 64 px), sky sprites
+  (`assets/sprites/sky`: clouds, crow flying ×2, crow perched ×3) all via `create_image_pixflux`
+  with the palette. ~265 of 2000 monthly generations used (resets 2026-10-20).
+- Sounds are all procedural placeholders: `python3 tools/make_sounds.py` regenerates
+  `assets/audio/*.wav` (pure Python, no numpy on this Mac). Godot imports WAVs QOA-compressed,
+  so loop points must come from `get_length()`, never `data.size()`.
+
+## 10. Design decisions worth knowing before changing things
+
+- Words are drawn on the UI layer at full resolution (not Label3D) so distant words stay
+  readable; option words off screen pin to the edge with an arrow (behind you = bottom
+  edge ▼), zombie words clamp onto the screen when the zombie is in your face.
+- The old runner sprite set (`assets/sprites/zombie/runner/`) is kept only as reference.
+- Labels are a VIEW concern; the queue stores building ids, so panning never changes what
+  you asked for. The minimap relabels when you stop, drift 10+ tiles, or explore more.
+- Rooms count as cleared when no zombie assigned to them is alive — including ones that
+  were shot after wandering out through an open door.
+- `Interior._rebuild` must build every room (an early return for unrevealed rooms once made
+  "walls of unseen rooms" not exist; that bug caused most see-through-wall reports).
