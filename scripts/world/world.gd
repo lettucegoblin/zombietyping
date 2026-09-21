@@ -6,6 +6,7 @@ signal sector_generated(sd: SectorData)
 signal state_changed(building_id: String)
 signal materials_changed
 signal settlement_changed
+signal survivor_rescued(survivor: Dictionary)
 
 const S := SectorData.SIZE
 const TILE_M := 5.0                 ## metres per tile in 3D
@@ -19,6 +20,8 @@ const PLACEMENT_SIZE := {
 	"chair": Vector2(0.8, 0.8),
 	"farm": Vector2(3.6, 2.4),
 }
+const SURVIVOR_NAMES := ["Mara", "Dante", "June", "Inez", "Cal", "Priya", "Owen", "Rafi", "Tess", "Noor", "Bea", "Sol"]
+const SURVIVOR_TRAITS := ["medic", "mechanic", "grower", "scout", "builder", "teacher", "cook", "radio operator"]
 
 var seed: int = 1337
 var _sectors: Dictionary = {}       ## Vector2i -> SectorData
@@ -39,6 +42,8 @@ var materials: Dictionary = {
 }
 var supply_links: Array[PackedStringArray] = []
 var placements: Array[Dictionary] = []
+var survivors: Dictionary = {}       ## stable survivor id -> named/traited roster record
+var pending_survivors: Array[String] = [] ## rescued before a base exists
 var persistence_enabled := true
 var _save_queued := false
 
@@ -67,6 +72,8 @@ func save_snapshot() -> Dictionary:
 		"materials": materials.duplicate(true),
 		"supply_links": supply_links.duplicate(true),
 		"placements": placements.duplicate(true),
+		"survivors": survivors.duplicate(true),
+		"pending_survivors": pending_survivors.duplicate(),
 	}
 
 
@@ -84,6 +91,10 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	for link in snapshot.get("supply_links", []):
 		supply_links.append(PackedStringArray(link))
 	placements = (snapshot.get("placements", []) as Array).duplicate(true)
+	survivors = (snapshot.get("survivors", {}) as Dictionary).duplicate(true)
+	pending_survivors.clear()
+	for survivor_id in snapshot.get("pending_survivors", []):
+		pending_survivors.append(str(survivor_id))
 	_sectors.clear()
 	materials_changed.emit()
 	settlement_changed.emit()
@@ -377,6 +388,140 @@ func fortify_building(id: String) -> String:
 	return "perimeter fortified — this still does not claim the site"
 
 
+# ------------------------------------------------------------- survivor rescue
+
+func rescue_eligible(b: BuildingData) -> bool:
+	# Eligibility is seed-derived rather than rolled on entry, so reloading or approaching
+	# the same building from another route never changes who is trapped there.
+	return posmod(Det.h3(seed, b.seed_hash, b.floors, b.index, 1201), 3) == 0
+
+
+func _rescue_target(b: BuildingData) -> Dictionary:
+	var semantic: Array[Dictionary] = []
+	var fallback: Array[Dictionary] = []
+	for floor in b.floors:
+		var fp := InteriorGen.generate(seed, b, floor)
+		for ri in fp.rooms.size():
+			var room: FloorPlan.Room = fp.rooms[ri]
+			if room.is_stair or room.is_entrance:
+				continue
+			var target := { "floor": floor, "room": ri, "room_kind": room.kind }
+			fallback.append(target)
+			if room.kind in ["bedroom", "bathroom", "kitchen", "living", "office", "storage", "workshop", "conference"]:
+				semantic.append(target)
+	var choices := semantic if not semantic.is_empty() else fallback
+	if choices.is_empty():
+		return {}
+	var index := posmod(Det.h3(seed, b.seed_hash, b.index, choices.size(), 1202), choices.size())
+	return choices[index].duplicate()
+
+
+## Create (once) the deterministic rescue mission for an uncleared building. Buildings
+## cleared by older saves do not retroactively acquire survivors, while a mission created
+## on entry remains valid even if its room is the final one cleared.
+func ensure_rescue_candidate(id: String) -> Dictionary:
+	var b := building_by_id(id)
+	if b == null:
+		return {}
+	var st := building_state(id)
+	if st.has("rescue"):
+		var existing: Dictionary = st["rescue"]
+		return existing.duplicate(true) if existing.get("status", "") == "trapped" else {}
+	if st.get("cleared", false) or st.get("claimed", false) or not rescue_eligible(b):
+		return {}
+	var target := _rescue_target(b)
+	if target.is_empty():
+		return {}
+	var identity_hash := Det.h3(seed, b.seed_hash, target["floor"], target["room"], 1203)
+	var record := {
+		"id": "survivor:%s:%d" % [id, identity_hash],
+		"name": SURVIVOR_NAMES[posmod(identity_hash, SURVIVOR_NAMES.size())],
+		"trait": SURVIVOR_TRAITS[posmod(floori(float(identity_hash) / 17.0), SURVIVOR_TRAITS.size())],
+		"building": id,
+		"floor": int(target["floor"]),
+		"room": int(target["room"]),
+		"room_kind": str(target["room_kind"]),
+		"status": "trapped",
+		"word": "help",
+	}
+	st["rescue"] = record.duplicate(true)
+	state_changed.emit(id)
+	return record.duplicate(true)
+
+
+func active_rescue(id: String) -> Dictionary:
+	var mission: Dictionary = state.get(id, {}).get("rescue", {})
+	return mission.duplicate(true) if mission.get("status", "") == "trapped" else {}
+
+
+func rescue_at(id: String, floor: int, room: int) -> bool:
+	var mission := active_rescue(id)
+	return not mission.is_empty() and int(mission["floor"]) == floor and int(mission["room"]) == room
+
+
+func _nearest_claimed_base(from_building: BuildingData) -> String:
+	var best := ""
+	var best_dist := 0x7FFFFFFF
+	for id in claimed_ids():
+		var base := building_by_id(id)
+		if base == null:
+			continue
+		var dist: int = (base.road_tile - from_building.road_tile).length_squared()
+		if dist < best_dist or (dist == best_dist and (best == "" or id < best)):
+			best_dist = dist
+			best = id
+	return best
+
+
+func _assign_survivor_to_base(survivor_id: String, base_id: String) -> void:
+	if not survivors.has(survivor_id) or not building_state(base_id).get("claimed", false):
+		return
+	var survivor: Dictionary = survivors[survivor_id]
+	if survivor.get("base_id", "") != "":
+		return
+	survivor["status"] = "assigned"
+	survivor["base_id"] = base_id
+	survivors[survivor_id] = survivor
+	var base_state := building_state(base_id)
+	var residents: Array = base_state.get("resident_ids", [])
+	if not residents.has(survivor_id):
+		residents.append(survivor_id)
+		base_state["resident_ids"] = residents
+		base_state["citizens"] = int(base_state.get("citizens", 0)) + 1
+	pending_survivors.erase(survivor_id)
+	state_changed.emit(base_id)
+	settlement_changed.emit()
+
+
+func _assign_pending_to(base_id: String) -> void:
+	for survivor_id in pending_survivors.duplicate():
+		_assign_survivor_to_base(survivor_id, base_id)
+
+
+func complete_rescue(id: String) -> String:
+	var mission := active_rescue(id)
+	if mission.is_empty():
+		return "no survivor is waiting here"
+	var survivor_id: String = mission["id"]
+	mission["status"] = "rescued"
+	building_state(id)["rescue"] = mission.duplicate(true)
+	var survivor := mission.duplicate(true)
+	survivor["status"] = "pending"
+	survivor["base_id"] = ""
+	survivors[survivor_id] = survivor
+	var source := building_by_id(id)
+	var base_id := _nearest_claimed_base(source) if source != null else ""
+	if base_id == "":
+		if not pending_survivors.has(survivor_id):
+			pending_survivors.append(survivor_id)
+	else:
+		_assign_survivor_to_base(survivor_id, base_id)
+	state_changed.emit(id)
+	settlement_changed.emit()
+	survivor_rescued.emit(survivors[survivor_id].duplicate(true))
+	return "%s rescued (%s)%s" % [mission["name"], mission["trait"], " — waiting for a claimed base" if base_id == "" else " — assigned to " + base_id]
+
+
 func claimed_ids() -> Array[String]:
 	var out: Array[String] = []
 	for id in state:
@@ -443,11 +588,17 @@ func claim_building(id: String) -> String:
 	var cost := claim_cost(b)
 	if not spend(cost):
 		return "need " + cost_text(cost)
+	var first_base := claimed_ids().is_empty()
 	st["claimed"] = true
 	st["safe"] = true
-	st["citizens"] = 2
+	# The first shelter has one founding caretaker. Expansion sites start empty; named
+	# rescued survivors are the population source rather than two free citizens per claim.
+	st["founders"] = 1 if first_base else 0
+	st["citizens"] = int(st["founders"])
+	st["resident_ids"] = []
 	safezone_blocks["%d,%d:%d" % [b.sector.x, b.sector.y, b.block]] = true
 	state_changed.emit(id)
+	_assign_pending_to(id)
 	settlement_changed.emit()
 	return "building claimed — survivors can now live and build here"
 

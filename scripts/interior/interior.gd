@@ -447,6 +447,9 @@ func options() -> Array:
 			out.append({ "word": "up", "kind": "up", "door": so })
 		if plan.floor > 0:
 			out.append({ "word": "down", "kind": "down", "door": so })
+	if rescue_waiting_here() and is_room_cleared(current_room):
+		var mission := active_rescue()
+		out.append({ "word": mission.get("word", "help"), "kind": "rescue", "door": -1, "survivor": mission.get("id", "") })
 	return out
 
 
@@ -459,6 +462,11 @@ func door_retired(di: int, from: int) -> bool:
 	var d := plan.doors[di]
 	if d.b < 0:
 		return false
+	var mission := active_rescue()
+	if not mission.is_empty() and int(mission["floor"]) == plan.floor:
+		var rescue_path := route_any(from, int(mission["room"]))
+		if not rescue_path.is_empty() and rescue_path[0] == di:
+			return false
 	var start := plan.other_room(di, from)
 	# An already-open route into a cleared room is useful only when it is the first leg of
 	# the shortest route to the next frontier. Alternate loops and cleared side branches
@@ -488,6 +496,8 @@ func door_retired(di: int, from: int) -> bool:
 
 
 func floor_uncleared(floor: int) -> bool:
+	if floor_has_pending_rescue(floor):
+		return true
 	var bs := World.building_state(building.id())
 	var fp := plan if floor == plan.floor else InteriorGen.generate(World.seed, building, floor)
 	var fs: Dictionary = bs.get("floors", {}).get(str(floor), {})
@@ -505,6 +515,7 @@ func option_retired(kind: String, door: int) -> bool:
 	match kind:
 		"door": return door_retired(door, current_room)
 		"up": return not floors_above_uncleared()
+		"rescue": return false
 	return false
 
 
@@ -513,6 +524,9 @@ func option_retired(kind: String, door: int) -> bool:
 func recommended_option() -> Dictionary:
 	if plan == null or current_room < 0:
 		return {}
+	var rescue_option := recommended_rescue_option()
+	if not rescue_option.is_empty():
+		return rescue_option
 	var useful := unexplored_doors(current_room)
 	if not useful.is_empty():
 		var di: int = useful[0]
@@ -586,7 +600,98 @@ func option_pos(opt: Dictionary) -> Vector3:
 				return plan.doors[opt["door"]].pos + Vector3(0, 1.4, 0)
 			var lps := Stairwell.label_points(plan, plan.stair_layout)
 			return lps.get(opt["kind"], Vector3.INF)
+		"rescue":
+			return rescue_world_pos()
 	return Vector3.INF
+
+
+# ------------------------------------------------------------------ survivor rescue
+
+func active_rescue() -> Dictionary:
+	return World.active_rescue(building.id()) if building != null else {}
+
+
+func floor_has_pending_rescue(floor: int) -> bool:
+	var mission := active_rescue()
+	return not mission.is_empty() and int(mission["floor"]) == floor
+
+
+func rescue_waiting_here() -> bool:
+	return plan != null and current_room >= 0 and World.rescue_at(building.id(), plan.floor, current_room)
+
+
+func rescue_world_pos() -> Vector3:
+	var mission := active_rescue()
+	if mission.is_empty() or plan == null or int(mission["floor"]) != plan.floor:
+		return Vector3.INF
+	var ri := int(mission["room"])
+	if ri < 0 or ri >= plan.rooms.size():
+		return Vector3.INF
+	var centre := plan.room_stand_world(ri)
+	var offset_seed := Det.h(World.seed, building.seed_hash, ri, 1204)
+	var offset_bit := floori(float(offset_seed) / 2.0) % 2
+	var offset := Vector3(0.45 if offset_seed % 2 == 0 else -0.45, 0.85, 0.25 if offset_bit == 0 else -0.25)
+	return clamp_to_room(ri, centre + offset, 0.7)
+
+
+## Route through the generated room graph regardless of door state. Used only for rescue
+## guidance; actual movement still requires opening doors and `route()` still means open.
+func route_any(a: int, b: int) -> Array[int]:
+	if plan == null or a < 0 or b < 0 or a == b:
+		return []
+	var prev := { a: -1 }
+	var via := {}
+	var q: Array[int] = [a]
+	while not q.is_empty():
+		var r: int = q.pop_front()
+		if r == b:
+			break
+		for di in plan.rooms[r].doors:
+			var d := plan.doors[di]
+			if d.b < 0:
+				continue
+			var other := plan.other_room(di, r)
+			if prev.has(other):
+				continue
+			prev[other] = r
+			via[other] = di
+			q.append(other)
+	if not prev.has(b):
+		return []
+	var out: Array[int] = []
+	var cur := b
+	while cur != a:
+		out.push_front(via[cur])
+		cur = prev[cur]
+	return out
+
+
+func recommended_rescue_option() -> Dictionary:
+	var mission := active_rescue()
+	if mission.is_empty():
+		return {}
+	var target_floor := int(mission["floor"])
+	if target_floor == plan.floor:
+		var target_room := int(mission["room"])
+		if current_room == target_room:
+			if is_room_cleared(current_room):
+				return { "word": mission.get("word", "help"), "kind": "rescue", "door": -1, "survivor": mission["id"] }
+			return {}
+		var rescue_path := route_any(current_room, target_room)
+		if not rescue_path.is_empty():
+			var di: int = rescue_path[0]
+			return { "word": plan.doors[di].word, "kind": "door", "door": di }
+		return {}
+	var direction := "up" if target_floor > plan.floor else "down"
+	var so := plan.stair_opening(current_room)
+	if so >= 0 or plan.rooms[current_room].is_stair:
+		return { "word": direction, "kind": direction, "door": so }
+	if plan.stair_room >= 0:
+		var stair_path := route_any(current_room, plan.stair_room)
+		if not stair_path.is_empty():
+			var di: int = stair_path[0]
+			return { "word": plan.doors[di].word, "kind": "door", "door": di }
+	return {}
 
 
 # ------------------------------------------------------------------ search
@@ -629,6 +734,9 @@ func _uncleared_beyond(start: int, known: Dictionary) -> bool:
 	var q: Array[int] = [start]
 	while not q.is_empty():
 		var r: int = q.pop_front()
+		var mission := active_rescue()
+		if not mission.is_empty() and int(mission["floor"]) == plan.floor and int(mission["room"]) == r:
+			return true
 		if not is_room_cleared(r):
 			return true
 		for di in plan.rooms[r].doors:
@@ -648,6 +756,8 @@ func other_floors_uncleared() -> bool:
 	for f in building.floors:
 		if f == plan.floor:
 			continue
+		if floor_has_pending_rescue(f):
+			return true
 		var fp := InteriorGen.generate(World.seed, building, f)
 		var fs: Dictionary = bs.get("floors", {}).get(str(f), {})
 		if (fs.get("rooms", {}) as Dictionary).size() < fp.rooms.size():
@@ -662,6 +772,15 @@ func other_floors_uncleared() -> bool:
 func search_target(from: int) -> int:
 	if plan == null or from < 0:
 		return from
+	var mission := active_rescue()
+	if not mission.is_empty():
+		var target_floor := int(mission["floor"])
+		if target_floor == plan.floor:
+			var target_room := int(mission["room"])
+			if target_room == from:
+				return from
+			if not route(from, target_room).is_empty():
+				return target_room
 	var order: Array[int] = [from]
 	var seen := { from: true }
 	var i := 0
@@ -680,6 +799,12 @@ func search_target(from: int) -> int:
 			if not seen.has(o):
 				seen[o] = true
 				order.append(o)
+	# A survivor on another storey makes the nearest reachable stair the primary search
+	# destination even if every room on this floor has already been cleared.
+	if not mission.is_empty() and int(mission["floor"]) != plan.floor:
+		for r in order:
+			if r == plan.stair_room or plan.stair_opening(r) >= 0:
+				return r
 	# this storey is done: the stairwell (or the nearest room with a door to it) when other
 	# storeys are not, else the entrance to leave
 	var stair_near := -1

@@ -291,7 +291,7 @@ func _on_arrived(id: String) -> void:
 		_populate_room(ri)
 		_refresh_prompts()
 		_face_arrival(ri)
-		if interior.is_room_cleared(ri):
+		if interior.is_room_cleared(ri) and not interior.rescue_waiting_here():
 			_queue_search(0.35)
 		return
 	if id == "approach":
@@ -308,7 +308,7 @@ func _on_arrived(id: String) -> void:
 		# A search target can become complete while we are walking to it (for example a
 		# zero-zombie living room reached through several already-open service rooms).
 		# Continue the automatic search instead of idling among irrelevant open-door words.
-		if interior.is_room_cleared(ri) and interior.unexplored_doors(ri).is_empty():
+		if interior.is_room_cleared(ri) and interior.unexplored_doors(ri).is_empty() and not interior.rescue_waiting_here():
 			_queue_search(0.35)
 		return
 	if id == "stairs":
@@ -458,6 +458,7 @@ func _hide_door_label() -> void:
 
 func _enter_building() -> void:
 	var b := door_building
+	var rescue := World.ensure_rescue_candidate(b.id())
 	_moving_on = true
 	mode = Mode.INSIDE
 	door_timer = -1.0
@@ -476,6 +477,8 @@ func _enter_building() -> void:
 	player.face_toward(d.pos)
 	_seed_floor()
 	_startle_near(d.pos, ri)
+	if not rescue.is_empty():
+		minimap.flash("rescue lead: %s · %s · floor %d %s" % [rescue["name"], rescue["trait"], int(rescue["floor"]) + 1, rescue["room_kind"]])
 	_refresh_hud()
 	# a beat to watch the door tumble in (and see what is standing behind it), then walk
 	await get_tree().create_timer(0.55).timeout
@@ -554,6 +557,8 @@ func _search_step() -> void:
 	var here: int = interior.current_room
 	if here < 0 or not interior.is_room_cleared(here):
 		return
+	if interior.rescue_waiting_here():
+		return
 	var target: int = interior.search_target(here)
 	if OS.is_debug_build():
 		print("search: room %d -> %d (unexplored here: %s, options %s)" % [here, target, interior.unexplored_doors(here), interior.options().map(func(o): return o["word"])])
@@ -613,6 +618,15 @@ func _on_option(opt: Dictionary) -> void:
 			sfx.play_at("creak", player.global_position, -8.0, 0.15, 1.0, 16.0)
 			_climbing = true
 			player.push_local(pts, "stairs", 2.2)
+		"rescue":
+			_moving_on = false
+			var result := World.complete_rescue(interior.building.id())
+			minimap.flash(result)
+			interior._update_labels()
+			_refresh_prompts()
+			_face_room()
+			if interior.is_room_cleared(interior.current_room):
+				_queue_search(0.7)
 	_refresh_hud()
 
 
@@ -685,7 +699,7 @@ func _on_zombie_killed(z: Zombie) -> void:
 	if z.room >= 0 and interior.is_inside() and director.alive_in_room(z.room) == 0:
 		interior.mark_room_cleared(z.room)
 		_refresh_prompts()
-	if interior.is_inside():
+	if interior.is_inside() and not interior.rescue_waiting_here():
 		_queue_search(1.0)   # runs only once the room we stand in is clear and the fight is over
 	_refresh_hud()
 
@@ -770,6 +784,10 @@ func _refresh_hud() -> void:
 			var p: Vector2i = interior.progress() if interior.is_inside() else Vector2i.ZERO
 			var fl: int = interior.plan.floor + 1 if interior.is_inside() else 0
 			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]nothing left here — moving on[/color]" if _searching else ""])
+			var rescue: Dictionary = interior.active_rescue() if interior.is_inside() else {}
+			if not rescue.is_empty():
+				var location: String = "HERE — type %s" % rescue.get("word", "help") if interior.rescue_waiting_here() and interior.is_room_cleared(interior.current_room) else "floor %d · %s" % [int(rescue["floor"]) + 1, rescue["room_kind"]]
+				lines.append("[color=#f6c177]RESCUE [b]%s[/b] · %s · %s[/color]" % [rescue["name"], rescue["trait"], location])
 		Mode.SAFEZONE:
 			var build := "B: build mode  ·  U: dismantle last (50%, rounded up)"
 			if settlement.build_mode:

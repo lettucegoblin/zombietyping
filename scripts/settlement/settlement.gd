@@ -327,6 +327,18 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	var n := Node3D.new()
 	var citizen_key := "%s:%d" % [b.id(), index]
 	n.name = "Citizen_%s_%d" % [b.id(), index]
+	var base_state: Dictionary = World.state.get(b.id(), {})
+	var resident_ids: Array = base_state.get("resident_ids", [])
+	var resident_index := index - int(base_state.get("founders", 0))
+	if resident_index >= 0 and resident_index < resident_ids.size():
+		var survivor_id: String = resident_ids[resident_index]
+		var survivor: Dictionary = World.survivors.get(survivor_id, {})
+		if not survivor.is_empty():
+			citizen_key = survivor_id
+			n.name = "Survivor_%s" % str(survivor.get("name", "resident")).validate_node_name()
+			n.set_meta("survivor_id", survivor_id)
+			n.set_meta("survivor_name", survivor.get("name", ""))
+			n.set_meta("trait", survivor.get("trait", ""))
 	var body := MeshInstance3D.new()
 	var bm := CapsuleMesh.new()
 	bm.radius = 0.27
