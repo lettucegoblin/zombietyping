@@ -235,6 +235,16 @@ func clear_room_zombies() -> void:
 	zombies = zombies.filter(func(z): return is_instance_valid(z) and z.room < 0)
 
 
+## A claimed safe zone turns combat input off, so street threats cannot be allowed to
+## follow the player through its gate. Remove the small streamed street encounter set
+## immediately on entry; new street spawns stay disabled for the duration of SAFEZONE.
+func clear_street_zombies() -> void:
+	for z in zombies:
+		if is_instance_valid(z) and z.room < 0:
+			z.queue_free()
+	zombies = zombies.filter(func(z): return is_instance_valid(z) and z.room >= 0)
+
+
 func alive_in_room(ri: int) -> int:
 	var n := 0
 	for z in alive():

@@ -53,6 +53,7 @@ const AIM_RANGE := 14.0               # ...and turns you to face it whenever you
 
 func _ready() -> void:
 	World.seed = 1337
+	World.state_changed.connect(_on_world_state_changed)
 	streamer.target = player
 	streamer.prime(World.sector_of_tile(player.tile))
 	map.player = player
@@ -354,15 +355,40 @@ func _leave_door() -> void:
 func _enter_safezone(b: BuildingData) -> void:
 	mode = Mode.SAFEZONE
 	door_building = b
+	_search_pending = false
+	_searching = false
+	_moving_on = false
+	_climbing = false
 	typist.clear_prompts()
 	typist.enabled = false
 	_hide_door_label()
 	interior.enter(b, 0)
 	interior.reveal_all()
+	# A claim can complete while the survivor is on an upper floor. Free roam currently
+	# represents the generated ground floor, so keep the existing X/Z position and land it.
+	player.global_position.y = 0.0
 	settlement.enter(b.id())
 	director.clear_room_zombies()
+	director.clear_street_zombies()
 	minimap.flash("safe zone: WASD move · B build · Tab travel/manage")
 	_refresh_hud()
+
+
+## Settlement actions happen on the paused Tab map. If the player claims the site they
+## are standing at, enter its safe-zone mode as part of that same action instead of making
+## them leave and route back to it before the claim becomes usable.
+func _on_world_state_changed(id: String) -> void:
+	if mode == Mode.SAFEZONE or not World.building_state(id).get("claimed", false):
+		return
+	var here := false
+	if mode == Mode.DOOR and door_building != null:
+		here = door_building.id() == id
+	elif mode == Mode.INSIDE and interior.is_inside() and interior.building != null:
+		here = interior.building.id() == id
+	if here:
+		var b := World.building_by_id(id)
+		if b != null:
+			_enter_safezone(b)
 
 
 func _leave_safezone_for_travel() -> void:
