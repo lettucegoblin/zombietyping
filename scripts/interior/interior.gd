@@ -4,6 +4,8 @@ extends Node3D
 
 signal door_kicked(di: int)
 
+const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
+
 var building: BuildingData
 var plan: FloorPlan
 var current_room := -1
@@ -65,6 +67,44 @@ func salvage_nearest(world_pos: Vector3) -> String:
 		_rebuild(prop.room)
 		_set_room_visible(prop.room, true)
 	return result
+
+
+func nearest_lootable_prop(world_pos: Vector3, require_capacity := true) -> FloorPlan.Prop:
+	if plan == null or building == null or current_room < 0:
+		return null
+	var nearest: FloorPlan.Prop
+	var best := INF
+	for prop in plan.props:
+		if prop.room != current_room or prop.loot_table == "" \
+				or PropLootRules.is_looted(building.id(), prop.id) \
+				or PropSalvage.is_salvaged(building.id(), prop.id):
+			continue
+		if require_capacity and not World.can_carry(PropLootRules.contents(building.id(), prop)):
+			continue
+		var d := Vector2(prop.pos.x - world_pos.x, prop.pos.z - world_pos.z).length_squared()
+		if d < best:
+			best = d
+			nearest = prop
+	return nearest
+
+
+func has_loot_here(world_pos: Vector3) -> bool:
+	return nearest_lootable_prop(world_pos) != null
+
+
+func loot_hint(world_pos: Vector3) -> String:
+	var prop := nearest_lootable_prop(world_pos)
+	return "" if prop == null else "type LOOT to search %s" % prop.kind
+
+
+func loot_here(world_pos: Vector3) -> String:
+	var prop := nearest_lootable_prop(world_pos)
+	if prop == null:
+		var blocked := nearest_lootable_prop(world_pos, false)
+		if blocked != null:
+			return "backpack full — return to a safe zone to sort it"
+		return "nothing left to loot in this room"
+	return PropLootRules.loot(building.id(), prop)
 
 
 ## Every room is built up front so walls (and closed doors) block sightlines everywhere;
@@ -450,6 +490,8 @@ func options() -> Array:
 	if rescue_waiting_here() and is_room_cleared(current_room):
 		var mission := active_rescue()
 		out.append({ "word": mission.get("word", "help"), "kind": "rescue", "door": -1, "survivor": mission.get("id", "") })
+	if is_room_cleared(current_room) and has_loot_here(plan.room_stand_world(current_room)):
+		out.append({ "word": "loot", "kind": "loot", "door": -1 })
 	return out
 
 
@@ -527,6 +569,8 @@ func recommended_option() -> Dictionary:
 	var rescue_option := recommended_rescue_option()
 	if not rescue_option.is_empty():
 		return rescue_option
+	if is_room_cleared(current_room) and has_loot_here(plan.room_stand_world(current_room)):
+		return { "word": "loot", "kind": "loot", "door": -1 }
 	var useful := unexplored_doors(current_room)
 	if not useful.is_empty():
 		var di: int = useful[0]
@@ -605,6 +649,9 @@ func option_pos(opt: Dictionary) -> Vector3:
 			return lps.get(opt["kind"], Vector3.INF)
 		"rescue":
 			return rescue_world_pos()
+		"loot":
+			var prop := nearest_lootable_prop(plan.room_stand_world(current_room))
+			return prop.pos + Vector3(0, prop.size.y * 0.5, 0) if prop != null else Vector3.INF
 	return Vector3.INF
 
 

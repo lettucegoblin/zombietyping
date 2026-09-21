@@ -199,6 +199,9 @@ func _unhandled_input(event: InputEvent) -> void:
 					msg = interior.salvage_nearest(player.global_position)
 					if msg.begins_with("dismantled"):
 						sfx.play_at("creak", player.global_position, -7.0, 0.1, 0.9, 12.0)
+			KEY_V:
+				if not settlement.build_mode:
+					msg = World.break_down_backpack()
 			KEY_PAGEUP: msg = _safezone_floor(1)
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
@@ -546,7 +549,7 @@ func _face_arrival(ri: int) -> void:
 
 
 ## Look at the generator/state-aware next action. The same option receives the gold route
-## chevron; cleared dead ends remain visibly crossed out but cannot take keyboard input.
+## chevron; cleared branches remain visibly crossed out but can still be revisited.
 func _face_room() -> void:
 	var opt: Dictionary = interior.recommended_option()
 	if opt.is_empty():
@@ -571,6 +574,8 @@ func _search_step() -> void:
 	if here < 0 or not interior.is_room_cleared(here):
 		return
 	if interior.rescue_waiting_here():
+		return
+	if interior.has_loot_here(player.global_position):
 		return
 	var target: int = interior.search_target(here)
 	if OS.is_debug_build():
@@ -641,6 +646,16 @@ func _on_option(opt: Dictionary) -> void:
 			_refresh_prompts()
 			_face_room()
 			if interior.is_room_cleared(interior.current_room):
+				_queue_search(0.7)
+		"loot":
+			_moving_on = false
+			var result: String = interior.loot_here(player.global_position)
+			minimap.flash(result)
+			sfx.play_at("clank", player.global_position, -15.0, 0.12, 1.1, 10.0)
+			interior._update_labels()
+			_refresh_prompts()
+			_face_room()
+			if not interior.has_loot_here(player.global_position):
 				_queue_search(0.7)
 	_refresh_hud()
 
@@ -822,8 +837,12 @@ func _refresh_hud() -> void:
 			if not rescue.is_empty():
 				var location: String = "HERE — type %s" % rescue.get("word", "help") if interior.rescue_waiting_here() and interior.is_room_cleared(interior.current_room) else "floor %d · %s" % [int(rescue["floor"]) + 1, rescue["room_kind"]]
 				lines.append("[color=#f6c177]RESCUE [b]%s[/b] · %s · %s[/color]" % [rescue["name"], rescue["trait"], location])
+			var loot_text: String = interior.loot_hint(player.global_position) if interior.is_inside() else ""
+			if loot_text != "":
+				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
+			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
-			var build := "B: build mode  ·  U: dismantle last (50%, rounded up)"
+			var build := "B: build mode  ·  V: sort backpack  ·  U: dismantle last (50%, rounded up)"
 			if settlement.build_mode:
 				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
@@ -839,6 +858,7 @@ func _refresh_hud() -> void:
 				if salvage_text != "":
 					lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
+			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 	var parts: Array[String] = []
 	for p in typist.prompts():
 		var w: String = p["word"]

@@ -5,6 +5,7 @@ extends Node
 signal sector_generated(sd: SectorData)
 signal state_changed(building_id: String)
 signal materials_changed
+signal backpack_changed
 signal settlement_changed
 signal survivor_rescued(survivor: Dictionary)
 
@@ -13,8 +14,10 @@ const TILE_M := 5.0                 ## metres per tile in 3D
 const FLOOR_M := 3.6                ## metres per storey
 const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
 const WORK_CYCLE_SECONDS := 45.0
+const BACKPACK_CAPACITY := 12
 const WorkforceRules = preload("res://scripts/settlement/workforce.gd")
 const FacilityUpgradeRules = preload("res://scripts/settlement/facility_upgrade.gd")
+const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
 
 const PLACEMENT_SIZE := {
 	"wall": Vector2(2.4, 0.3),
@@ -43,6 +46,7 @@ var materials: Dictionary = {
 	"vehicle_parts": 0,
 	"tools": 0,
 }
+var backpack: Dictionary = {}        ## carried scavenged items, broken down at safe zones
 var supply_links: Array[PackedStringArray] = []
 var placements: Array[Dictionary] = []
 var survivors: Dictionary = {}       ## stable survivor id -> named/traited roster record
@@ -58,6 +62,7 @@ func _ready() -> void:
 	persistence_enabled = DisplayServer.get_name() != "headless"
 	state_changed.connect(func(_id): _queue_save())
 	materials_changed.connect(_queue_save)
+	backpack_changed.connect(_queue_save)
 	settlement_changed.connect(_queue_save)
 	if persistence_enabled:
 		load_now()
@@ -77,6 +82,7 @@ func save_snapshot() -> Dictionary:
 		"explored": explored.duplicate(true),
 		"safezone_blocks": safezone_blocks.duplicate(true),
 		"materials": materials.duplicate(true),
+		"backpack": backpack.duplicate(true),
 		"supply_links": supply_links.duplicate(true),
 		"placements": placements.duplicate(true),
 		"survivors": survivors.duplicate(true),
@@ -96,6 +102,7 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	var loaded_materials: Dictionary = snapshot.get("materials", {})
 	for key in materials:
 		materials[key] = int(loaded_materials.get(key, 0))
+	backpack = (snapshot.get("backpack", {}) as Dictionary).duplicate(true)
 	supply_links.clear()
 	for link in snapshot.get("supply_links", []):
 		supply_links.append(PackedStringArray(link))
@@ -108,6 +115,7 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	settlement_work_seconds = clampf(float(snapshot.get("settlement_work_seconds", 0.0)), 0.0, WORK_CYCLE_SECONDS)
 	_sectors.clear()
 	materials_changed.emit()
+	backpack_changed.emit()
 	settlement_changed.emit()
 	return true
 
@@ -261,6 +269,39 @@ func material_summary() -> String:
 		if n > 0 or key in ["building_materials", "wood", "metal"]:
 			out.append("%s %d" % [material_name(key), n])
 	return "  ·  ".join(out)
+
+
+func backpack_units() -> int:
+	return PropLootRules.bundle_units(backpack)
+
+
+func backpack_summary() -> String:
+	var used := backpack_units()
+	return "backpack %d/%d%s" % [used, BACKPACK_CAPACITY,
+		"" if backpack.is_empty() else " · " + PropLootRules.item_text(backpack)]
+
+
+func can_carry(bundle: Dictionary) -> bool:
+	return backpack_units() + PropLootRules.bundle_units(bundle) <= BACKPACK_CAPACITY
+
+
+func add_to_backpack(bundle: Dictionary) -> bool:
+	if not can_carry(bundle):
+		return false
+	for item in bundle:
+		backpack[item] = int(backpack.get(item, 0)) + int(bundle[item])
+	backpack_changed.emit()
+	return true
+
+
+func break_down_backpack() -> String:
+	if backpack.is_empty():
+		return "backpack is empty"
+	var recovered: Dictionary = PropLootRules.breakdown(backpack)
+	backpack.clear()
+	backpack_changed.emit()
+	add_materials(recovered)
+	return "sorted backpack into: " + cost_text(recovered)
 
 
 func add_materials(bundle: Dictionary) -> void:

@@ -51,7 +51,8 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | Scene | Covers |
 |---|---|
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
-| `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed label queues a trip and releases the door hold |
+| `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
+| `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, first base, required supply link for the second base, claim, and persistent furniture placement |
 | `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
 | `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
@@ -142,7 +143,8 @@ per frame).
 
 Settlement state autosaves to `user://settlement.save` through a versioned binary envelope.
 The atomic temp/backup rotation preserves Godot-native vectors, packed fog arrays, stable
-building state, materials, links, farms, furniture, and car teardown stages. Corrupt primary
+building state, searched containers, backpack contents, materials, links, farms, furniture,
+and car teardown stages. Corrupt primary
 saves fall back to the previous backup; headless tests never touch the player's save.
 
 Facades: walls from `InteriorGen.footprint(b)` (single source of truth for the inset), a real
@@ -157,7 +159,8 @@ are inside).
 Clearing a building is only a tactical milestone and never makes it claimable by itself.
 Click its label in the Tab map (or type `info <label>`) to open the building panel. The loop is:
 
-1. Clear all generated rooms, then salvage the generated furnishings into material classes.
+1. Clear generated rooms, search individual containers into the carried backpack, then
+   salvage the generated furnishings into material classes after claiming the site.
 2. Dismantle seed-placed street cars over four persistent visual stages, ending as a frame
    on blocks; stages yield metal, electronics, fuel, tools, and vehicle parts.
 3. Spend wood/metal/building materials to construct a gated perimeter.
@@ -174,6 +177,14 @@ and press `X` to dismantle that specific bed, television, fridge, rug, fixture, 
 the object disappears, its material-class yield is shown, and the removed ID persists in the
 save. Build mode provides a green/red placement ghost: `R` rotates, `F` confirms, `Esc`
 cancels, and `U` gives a ten-second full-refund undo before becoming a 50% dismantle action.
+
+Searchable dressers, cabinets, shelves, fridges, crates, televisions, stoves, and workbenches
+roll contents from their procedural loot-table tag and stable prop ID. Once a room is safe,
+`loot` searches the nearest unsearched container; the search rail waits while a fitting item
+bundle remains. The twelve-slot backpack persists between sessions. At a safe zone, `V`
+sorts all carried food, medicine, textiles, electronics, tools, fuel, fasteners, and other
+finds into the existing construction material classes. Only searched prop IDs are saved—the
+contents themselves regenerate deterministically from the world seed.
 
 Eligible uncleared buildings also receive a deterministic named survivor in a semantic room.
 The room/floor route takes priority over irrelevant cleared branches, the survivor emits a

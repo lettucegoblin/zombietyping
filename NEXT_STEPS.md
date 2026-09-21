@@ -3,8 +3,9 @@
 State as of 2026-09-21. Everything in `README.md` is implemented and the headless suite
 passes. City streets now use a continuous global hierarchy of warped avenues, collectors,
 and local streets; districts, lots, building uses, apartment units, semantic rooms, and
-furnishings are all procedural. Furnishings already expose stable prop ids, loot-table tags,
-and base-utility tags. This is the remaining backlog, roughly in the order the owner has
+furnishings are all procedural. Furnishings expose stable prop ids, deterministic searchable
+contents, and base-utility tags; the persistent backpack breaks scavenged items down into
+settlement material classes. This is the remaining backlog, roughly in the order the owner has
 brought things up, plus the rough edges found while building. Nothing here has been started
 unless noted.
 
@@ -19,9 +20,9 @@ unless noted.
 3. **Deeper survivor/base simulation.** Deterministic rescues, named rosters, trait-aware job
    assignment, facility roles, staffed farm/specialist production, intact utility capacity,
    construction, three-level utility-dependent facility upgrades, local outpost stockpiles,
-   and road delivery now exist and persist. Next: survivor needs/morale, injuries, deliberate
-   transfers between bases, and player-carried/container-by-container looting beyond
-   material-class salvage.
+   road delivery, and player-carried container-by-container looting now exist and persist.
+   Next: survivor needs/morale, injuries, deliberate transfers between bases, and backpack
+   upgrades or item use beyond breaking loot down into material classes.
 4. **Broader campaign persistence.** Settlement state, rescues, rosters, explored fog, seed,
    placements, and supply links save now. Player position, hp/kills, live combat, and active
    travel/rescue session state still need a deliberate checkpoint/resume policy.
