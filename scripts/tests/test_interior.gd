@@ -118,8 +118,8 @@ func _process(_dt: float) -> void:
 			print("room ", ri, " (", _interior.plan.rooms[ri].kind, ") floor ", _interior.plan.floor, " options: ", w, "  progress ", _interior.progress(), "  old floor alive: ", _interior._old_floor != null)
 			if _interior._old_floor != null: return _fail("old floor should be dropped after arriving")
 			if _typist.buffer != "": return _fail("buffer should be empty between prompts")
-			# Cleared branches remain as crossed-out spatial memory, never as keyboard input;
-			# exactly the state-aware next action carries the recommendation marker.
+			# Cleared branches remain as crossed-out, typeable spatial memory; exactly the
+			# state-aware next action carries the recommendation marker.
 			var labels: Node3D = _interior._room_nodes[ri].get_node("Labels")
 			var recommended: Dictionary = _interior.recommended_option()
 			# Rescue/help is an in-room action shown in the HUD rather than a doorway chevron.
@@ -129,7 +129,8 @@ func _process(_dt: float) -> void:
 				var label := node as WordLabel
 				if label.retired:
 					_retired_seen += 1
-					if w.has(label.word): return _fail("retired word remained typeable: " + label.word)
+					if not w.has(label.word): return _fail("retired word was not typeable: " + label.word)
+					if label.recommended: return _fail("retired word became the recommended route: " + label.word)
 				if label.recommended:
 					if label.option_kind != recommended.get("kind", "") or label.option_door != recommended.get("door", -2):
 						return _fail("wrong navigation recommendation")

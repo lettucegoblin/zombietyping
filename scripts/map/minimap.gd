@@ -134,6 +134,8 @@ func _draw() -> void:
 			bg = Color("#facc15", 0.85); fg = Color.BLACK
 		draw_rect(Rect2(p - Vector2(w * 0.5 + 2, fs * 0.6), Vector2(w + 4, fs * 1.1)), bg)
 		draw_string(_font, p + Vector2(-w * 0.5, fs * 0.35), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
+		if building_visited(b.id()):
+			draw_line(p + Vector2(-w * 0.5, 0), p + Vector2(w * 0.5, 0), fg, 1.5)
 	# player
 	var pp := _tile_to_screen(center, center)
 	var f: Vector3 = player.facing
@@ -153,3 +155,7 @@ func _draw() -> void:
 		var lw := _font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
 		draw_rect(Rect2(Vector2(size.x - lw - 10, size.y - 22), Vector2(lw + 8, 20)), Color(0, 0, 0, 0.7))
 		draw_string(_font, Vector2(size.x - lw - 6, size.y - 7), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#facc15"))
+
+
+func building_visited(id: String) -> bool:
+	return World.building_state(id).get("visited", false)

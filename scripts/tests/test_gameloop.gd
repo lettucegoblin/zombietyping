@@ -101,6 +101,16 @@ func _process(_dt: float) -> void:
 		print("typed %s on the HUD -> queue %s  mode %s" % [target, _player.queued_ids(), _main.mode])
 		if _player.queued_ids() != [minimap.labels[target]]: return _fail("HUD-typed label should queue that building")
 		if _main.mode != _main.Mode.STREET: return _fail("a new destination should release the door hold")
+		# Revisited building labels are struck through on the map and at the door, but the
+		# door word remains a valid prompt and visibly tracks typing progress.
+		if not minimap.building_visited(_queued[0]): return _fail("visited building missing minimap state")
+		_player.clear_queue()
+		_main._on_arrived(_queued[0])
+		if _main._door_label == null or not _main._door_label.retired:
+			return _fail("revisited door should be crossed out")
+		if not typist.has_prompt(_main.door_word): return _fail("revisited door word should remain typeable")
+		_main._door_label.match_buffer(_main.door_word.left(1))
+		if _main._door_label.typed != 1: return _fail("crossed-out door should show typing progress")
 		print("GAMELOOP OK")
 		get_tree().quit(0)
 	elif _frames > 6000:

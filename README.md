@@ -285,7 +285,9 @@ Uncleared rooms reachable through open doors count as targets. In a quiet room, 
 marked with a gold route chevron and the camera faces that same door/direction: unexplored
 door first, then the first leg of the shortest route to remaining work, another storey, or
 the exit. An opened branch that has no remaining frontier is retired unless it is on that
-route; its label is struck through and it is removed from the typist's active prompts.
+route; its label is struck through but stays typeable for intentional backtracking. Visited
+buildings use the same crossed-out-but-typeable language on the minimap, full map, and their
+door prompt, while only unfinished navigation receives the route recommendation.
 
 **Zombies** (`zombie.gd`): DORMANT → (notice beat 0.9 s, stunned) → CHASE → WINDUP → STRIKE
 → RECOVER; STUN on every typed letter (knockback, alternating flinches); DEAD lies on the

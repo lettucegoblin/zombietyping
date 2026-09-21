@@ -646,6 +646,8 @@ func _draw() -> void:
 			draw_rect(lr, bg)
 			_building_hitboxes.append({ "rect": lr, "id": b.id() })
 			draw_string(font, p + Vector2(-w * 0.5, fs * 0.38), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
+			if World.building_state(b.id()).get("visited", false):
+				draw_line(p + Vector2(-w * 0.5, 0), p + Vector2(w * 0.5, 0), fg, 1.5)
 			if qi >= 0:
 				draw_string(font, p + Vector2(w * 0.5 + 4, fs * 0.38), str(qi + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COL_ROUTE)
 	# player

@@ -344,6 +344,7 @@ func _on_arrived(id: String) -> void:
 	if b == null:
 		player.resume()
 		return
+	var was_visited: bool = World.building_state(id).get("visited", false)
 	World.set_building_state(id, "visited", true)
 	if World.building_state(id).get("claimed", false):
 		_enter_safezone(b)
@@ -355,7 +356,7 @@ func _on_arrived(id: String) -> void:
 	if fp0.entrance_door >= 0:
 		var dpos: Vector3 = fp0.doors[fp0.entrance_door].pos
 		player.face_toward(dpos)
-		_show_door_label(door_word, dpos + Vector3(fp0.doors[fp0.entrance_door].dir.x, 0, fp0.doors[fp0.entrance_door].dir.y) * 0.4 + Vector3(0, 2.75, 0))
+		_show_door_label(door_word, dpos + Vector3(fp0.doors[fp0.entrance_door].dir.x, 0, fp0.doors[fp0.entrance_door].dir.y) * 0.4 + Vector3(0, 2.75, 0), was_visited)
 	door_timer = DOOR_WINDOW if player.has_street_queue() else -1.0
 	typist.set_prompts([{ "id": "door", "word": door_word, "callback": _enter_building }])
 	_refresh_hud()
@@ -450,11 +451,12 @@ func _safezone_floor(delta: int) -> String:
 	return "safe-zone floor %d/%d" % [next_floor + 1, door_building.floors]
 
 
-func _show_door_label(word: String, pos: Vector3) -> void:
+func _show_door_label(word: String, pos: Vector3, visited := false) -> void:
 	_hide_door_label()
 	_door_label = WordLabel.new(word, 34)
 	_door_label.position = pos
 	_door_label.edge_hint = true
+	_door_label.retired = visited
 	world3d.add_child(_door_label)
 
 

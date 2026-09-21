@@ -381,7 +381,7 @@ func _update_labels() -> void:
 					w.retired = option_retired(w.option_kind, w.option_door)
 					w.recommended = not w.retired and not rec.is_empty() \
 						and w.option_kind == rec.get("kind", "") and w.option_door == rec.get("door", -2)
-					w.edge_hint = not w.retired
+					w.edge_hint = true
 
 
 func _reveal(ri: int, hop := true) -> void:
@@ -421,8 +421,8 @@ func _rebuild(ri: int) -> void:
 
 # ------------------------------------------------------------------ typed options
 
-## Active typed choices only. Retired labels stay in the room crossed out, but are omitted
-## here so Typist cannot accept them.
+## Every reachable typed choice. Fully explored branches stay crossed out so they no longer
+## compete for the recommendation, but remain typeable for deliberate backtracking.
 func options() -> Array:
 	var out := []
 	if current_room < 0:
@@ -432,7 +432,7 @@ func options() -> Array:
 		var d := plan.doors[di]
 		if d.b < 0:
 			out.append({ "word": "exit", "kind": "exit", "door": di })
-		elif not door_retired(di, current_room):
+		else:
 			out.append({ "word": d.word, "kind": "door", "door": di })
 	# on the ground floor "exit" works from any room the front door can be reached from:
 	# the rail walks you out through the doors you already opened
@@ -544,6 +544,9 @@ func recommended_option() -> Dictionary:
 		return { "word": "down", "kind": "down", "door": so }
 	for opt in options():
 		if opt["kind"] == "exit":
+			return opt
+	for opt in options():
+		if not option_retired(opt["kind"], opt.get("door", -1)):
 			return opt
 	return options()[0] if not options().is_empty() else {}
 
