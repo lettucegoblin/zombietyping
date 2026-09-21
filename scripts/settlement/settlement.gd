@@ -48,7 +48,7 @@ func enter(id: String) -> void:
 	build_mode = false
 	var b := World.building_by_id(id)
 	if b != null:
-		player.set_manual_zone(World.safe_rect_world(b))
+		player.set_manual_zone(World.safe_rect_world(b), b.road_tile)
 	_dirty = true
 
 
@@ -79,7 +79,7 @@ func place_selected() -> String:
 	if not build_mode or active_building_id == "" or player == null:
 		return "turn on build mode inside a safe zone"
 	var p: Vector3 = player.global_position + player.facing * 2.6
-	p.y = 0.05
+	p.y = player.global_position.y + 0.05
 	var msg := World.place_item(active_building_id, selected_kind(), p, atan2(player.facing.x, player.facing.z))
 	_dirty = true
 	return msg

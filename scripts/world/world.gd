@@ -39,10 +39,80 @@ var materials: Dictionary = {
 }
 var supply_links: Array[PackedStringArray] = []
 var placements: Array[Dictionary] = []
+var persistence_enabled := true
+var _save_queued := false
 
 
 func _ready() -> void:
 	_sectors.clear()
+	persistence_enabled = DisplayServer.get_name() != "headless"
+	state_changed.connect(func(_id): _queue_save())
+	materials_changed.connect(_queue_save)
+	settlement_changed.connect(_queue_save)
+	if persistence_enabled:
+		load_now()
+
+
+func _exit_tree() -> void:
+	if persistence_enabled and _save_queued:
+		save_now()
+
+
+func save_snapshot() -> Dictionary:
+	return {
+		"seed": seed,
+		"state": state.duplicate(true),
+		"explored": explored.duplicate(true),
+		"safezone_blocks": safezone_blocks.duplicate(true),
+		"materials": materials.duplicate(true),
+		"supply_links": supply_links.duplicate(true),
+		"placements": placements.duplicate(true),
+	}
+
+
+func restore_snapshot(snapshot: Dictionary) -> bool:
+	if snapshot.is_empty():
+		return false
+	seed = int(snapshot.get("seed", seed))
+	state = (snapshot.get("state", {}) as Dictionary).duplicate(true)
+	explored = (snapshot.get("explored", {}) as Dictionary).duplicate(true)
+	safezone_blocks = (snapshot.get("safezone_blocks", {}) as Dictionary).duplicate(true)
+	var loaded_materials: Dictionary = snapshot.get("materials", {})
+	for key in materials:
+		materials[key] = int(loaded_materials.get(key, 0))
+	supply_links.clear()
+	for link in snapshot.get("supply_links", []):
+		supply_links.append(PackedStringArray(link))
+	placements = (snapshot.get("placements", []) as Array).duplicate(true)
+	_sectors.clear()
+	materials_changed.emit()
+	settlement_changed.emit()
+	return true
+
+
+func save_now() -> Error:
+	_save_queued = false
+	if not persistence_enabled:
+		return OK
+	return SaveStore.write(save_snapshot())
+
+
+func load_now() -> bool:
+	if not persistence_enabled or not SaveStore.exists():
+		return false
+	return restore_snapshot(SaveStore.read())
+
+
+func erase_save() -> Error:
+	_save_queued = false
+	return SaveStore.erase()
+
+
+func _queue_save() -> void:
+	if not persistence_enabled or _save_queued:
+		return
+	_save_queued = true
+	call_deferred("save_now")
 
 
 # ------------------------------------------------------------- sectors / tiles
@@ -333,6 +403,8 @@ func link_supply(id: String) -> String:
 	var b := building_by_id(id)
 	if b == null:
 		return "building no longer exists"
+	if building_state(id).get("claimed", false):
+		return "claimed buildings cannot be linked to themselves"
 	var homes := claimed_ids()
 	if homes.is_empty():
 		return "the first base does not need a supply link"
@@ -340,9 +412,19 @@ func link_supply(id: String) -> String:
 		return "fortify the destination before linking it"
 	if has_supply_link(id):
 		return "site is already supplied"
-	var source := homes[0]
-	var sb := building_by_id(source)
-	if sb == null or find_path(sb.road_tile, b.road_tile).is_empty():
+	var source := ""
+	var best_path: Array[Vector2i] = []
+	for candidate in homes:
+		if candidate == id:
+			continue
+		var sb := building_by_id(candidate)
+		if sb == null:
+			continue
+		var route := find_path(sb.road_tile, b.road_tile)
+		if not route.is_empty() and (best_path.is_empty() or route.size() < best_path.size()):
+			source = candidate
+			best_path = route
+	if source == "":
 		return "no viable road supply route"
 	var cost := supply_cost()
 	if not spend(cost):
@@ -490,6 +572,8 @@ func placement_error(id: String, kind: String, pos: Vector3, yaw: float) -> Stri
 		return "building no longer exists"
 	if kind == "farm" and placement_count(id, "farm") >= farm_capacity(b):
 		return "farm capacity reached (%d plots)" % farm_capacity(b)
+	if kind == "farm" and pos.y > 0.5:
+		return "farm plots need open ground on the ground floor"
 	var fp := _placement_footprint(kind, pos, yaw)
 	var bounds := _footprint_bounds(fp)
 	var safe := safe_rect_world(b)
@@ -503,6 +587,9 @@ func placement_error(id: String, kind: String, pos: Vector3, yaw: float) -> Stri
 	for item in placements:
 		if item.get("building", "") != id:
 			continue
+		var other_pos: Vector3 = item.get("pos", Vector3.ZERO)
+		if absf(other_pos.y - pos.y) > 1.0:
+			continue # identical XZ is valid on a different storey
 		var other_kind: String = item.get("kind", "")
 		if not PLACEMENT_SIZE.has(other_kind):
 			continue
@@ -576,6 +663,7 @@ func mark_explored(t: Vector2i, radius: int) -> void:
 				fresh.resize(S * S)
 				explored[sc] = fresh
 			explored[sc][SectorData.idx(l.x, l.y)] = 1
+	_queue_save()
 
 
 func is_explored(t: Vector2i) -> bool:

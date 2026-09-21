@@ -2,6 +2,7 @@ extends Node
 ## Headless progression check for the procedural settlement economy.
 
 func _ready() -> void:
+	World.persistence_enabled = false
 	World.state.clear()
 	World.supply_links.clear()
 	World.placements.clear()
@@ -26,6 +27,10 @@ func _ready() -> void:
 	_assert_ok(World.claim_building(first.id()), "claim first")
 	if not World.building_state(first.id()).get("claimed", false):
 		_fail("first base was not claimed")
+		return
+	var self_link := World.link_supply(first.id())
+	if not self_link.contains("themselves"):
+		_fail("claimed base accepted a self supply link: " + self_link)
 		return
 	# A second cleared site must be fortified and supplied; clearing alone never claims it.
 	World.set_building_state(second.id(), "visited", true)
@@ -111,6 +116,27 @@ func _ready() -> void:
 	if World.materials != materials_before_limit:
 		_fail("rejected farm charged materials")
 		return
+	var save_path := "user://settlement_test.save"
+	SaveStore.erase(save_path)
+	var snapshot := World.save_snapshot()
+	if SaveStore.write(snapshot, save_path) != OK:
+		_fail("could not write settlement snapshot")
+		return
+	var loaded := SaveStore.read(save_path)
+	World.state.clear()
+	World.supply_links.clear()
+	World.placements.clear()
+	for key in World.materials:
+		World.materials[key] = 0
+	if not World.restore_snapshot(loaded):
+		_fail("could not restore settlement snapshot")
+		return
+	if not World.building_state(first.id()).get("claimed", false) or World.supply_links.size() != 1 \
+			or World.placements.size() != snapshot["placements"].size() \
+			or World.placements[0]["pos"] != snapshot["placements"][0]["pos"]:
+		_fail("restored snapshot lost typed settlement state")
+		return
+	SaveStore.erase(save_path)
 	print("SETTLEMENT OK  materials=", World.material_summary(), "  links=", World.supply_links.size(), "  placements=", World.placements.size())
 	get_tree().quit(0)
 

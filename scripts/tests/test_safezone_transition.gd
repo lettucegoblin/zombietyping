@@ -51,8 +51,32 @@ func _run() -> void:
 	if not street.is_queued_for_deletion():
 		_fail("the retained street zombie was not removed")
 		return
+	var gate_dir := Vector2(b.road_tile - b.door_tile).normalized()
+	var gate_world := World.tile_to_world(b.road_tile)
+	main.player.global_position = gate_world + Vector3(gate_dir.x, 0, gate_dir.y) * 1.9
+	main.player.facing = Vector3(gate_dir.x, 0, gate_dir.y)
+	main.player._manual_move_vector(Vector2(0, -1), 0.25)
+	if main.mode != 0 or main.player.manual_control: # Main.Mode.STREET
+		_fail("walking through the visible gate did not leave SAFEZONE")
+		return
+	var tower: BuildingData
+	for candidate in World.get_sector(0, 0).buildings:
+		if candidate.floors > 1:
+			tower = candidate
+			break
+	if tower == null:
+		_fail("test sector had no multi-storey claimed building")
+		return
+	World.set_building_state(tower.id(), "claimed", true)
+	World.set_building_state(tower.id(), "safe", true)
+	main.player.snap_to_road(tower.road_tile)
+	main._enter_safezone(tower)
+	var floor_result: String = main._safezone_floor(1)
+	if main.interior.plan.floor != 1 or main.player.global_position.y < World.FLOOR_M or not floor_result.contains("2/"):
+		_fail("claimed multi-storey navigation did not reach floor 2: " + floor_result)
+		return
 
-	print("SAFEZONE TRANSITION OK")
+	print("SAFEZONE TRANSITION OK  gate exit + multi-storey free roam")
 	get_tree().quit(0)
 
 

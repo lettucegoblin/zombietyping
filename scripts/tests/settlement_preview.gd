@@ -6,6 +6,7 @@ func _ready() -> void:
 
 func _setup() -> void:
 	await get_tree().process_frame
+	World.persistence_enabled = false
 	var main: Node = get_parent()
 	var player: Node3D = main.player
 	var sd := World.get_sector(0, 0)

@@ -53,6 +53,8 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed label queues a trip and releases the door hold |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, first base, required supply link for the second base, claim, and persistent furniture placement |
+| `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
+| `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
@@ -131,6 +133,11 @@ hold the procedural settlement economy and player construction;
 `World.explored` is a fog bitmask per sector. Streamer keeps a radius of sectors built (one
 per frame).
 
+Settlement state autosaves to `user://settlement.save` through a versioned binary envelope.
+The atomic temp/backup rotation preserves Godot-native vectors, packed fog arrays, stable
+building state, materials, links, farms, furniture, and car teardown stages. Corrupt primary
+saves fall back to the previous backup; headless tests never touch the player's save.
+
 Facades: walls from `InteriorGen.footprint(b)` (single source of truth for the inset), a real
 hole for the door, a dark "vestibule" box behind it (per-sector MultiMesh, hidden while that
 building's interior is loaded so you can see in), a door-leaf MultiMesh (collapsed once
@@ -149,9 +156,11 @@ Click its label in the Tab map (or type `info <label>`) to open the building pan
 3. Spend wood/metal/building materials to construct a gated perimeter.
 4. The first base can then be claimed; later sites require a road-valid supply line from an
    existing claim before claiming.
-5. Arriving at a claimed building enters safe-zone mode: WASD moves inside the walls, `B`
-   toggles build mode, `Q/E` selects wall/crate/bed/chair/farm, and `F` places it. Farms
-   produce food and seed-derived citizens walk deterministic waypoints inside the perimeter.
+5. Arriving at—or claiming while standing in—a claimed building enters safe-zone mode:
+   WASD moves with generated wall/door collision, walking through the visible gate restores
+   typed street travel, and `PageUp/PageDown` changes storeys. `B` toggles build mode, `Q/E`
+   selects wall/crate/bed/chair/farm, and `F` places it. Farms produce food and seed-derived
+   citizens walk deterministic waypoints inside the perimeter.
 
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only

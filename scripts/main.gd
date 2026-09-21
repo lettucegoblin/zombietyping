@@ -52,7 +52,6 @@ const AIM_RANGE := 14.0               # ...and turns you to face it whenever you
 
 
 func _ready() -> void:
-	World.seed = 1337
 	World.state_changed.connect(_on_world_state_changed)
 	streamer.target = player
 	streamer.prime(World.sector_of_tile(player.tile))
@@ -71,6 +70,7 @@ func _ready() -> void:
 	player.queue_changed.connect(_on_queue_changed)
 	player.arrived.connect(_on_arrived)
 	player.tile_changed.connect(func(t): map.mark_fog_dirty_around(World.sector_of_tile(t)))
+	player.manual_zone_exited.connect(_on_safezone_gate_exit)
 	typist.changed.connect(_refresh_hud)
 	typist.changed.connect(_on_typing)
 	typist.mistyped.connect(func(_c): _refresh_hud())
@@ -185,6 +185,8 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_Q: msg = "selected " + settlement.cycle_build(-1)
 			KEY_E: msg = "selected " + settlement.cycle_build(1)
 			KEY_F: msg = settlement.place_selected()
+			KEY_PAGEUP: msg = _safezone_floor(1)
+			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
 			minimap.flash(msg)
 			_refresh_hud()
@@ -399,6 +401,35 @@ func _leave_safezone_for_travel() -> void:
 	typist.enabled = true
 	if b != null:
 		player.snap_to_road(b.road_tile)
+
+
+func _on_safezone_gate_exit() -> void:
+	if mode != Mode.SAFEZONE:
+		return
+	var b := World.building_by_id(settlement.active_building_id)
+	interior.unload()
+	settlement.leave()
+	mode = Mode.STREET
+	typist.enabled = true
+	if b != null:
+		player.snap_to_road(b.road_tile)
+	minimap.flash("left the safe zone — typed travel restored")
+	_refresh_hud()
+
+
+func _safezone_floor(delta: int) -> String:
+	if mode != Mode.SAFEZONE or not interior.is_inside() or door_building == null:
+		return "enter a claimed building first"
+	var next_floor: int = interior.plan.floor + delta
+	if next_floor < 0 or next_floor >= door_building.floors:
+		return "no storey in that direction"
+	interior.enter(door_building, next_floor)
+	interior.reveal_all()
+	if interior.plan.stair_room >= 0:
+		player.global_position = interior.plan.room_stand_world(interior.plan.stair_room) + Vector3(0, 0.05, 0)
+	else:
+		player.global_position.y = next_floor * World.FLOOR_M + 0.05
+	return "safe-zone floor %d/%d" % [next_floor + 1, door_building.floors]
 
 
 func _show_door_label(word: String, pos: Vector3) -> void:
@@ -733,7 +764,8 @@ func _refresh_hud() -> void:
 			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]nothing left here — moving on[/color]" if _searching else ""])
 		Mode.SAFEZONE:
 			var build := "[color=#ffd166]BUILD %s[/color]  Q/E select · F place" % settlement.selected_kind() if settlement.build_mode else "B: build mode"
-			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  Tab manage/travel" % build)
+			var floor_text := "floor %d/%d  ·  PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
+			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  %s  ·  Tab manage/travel" % [build, floor_text])
 			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
 	var parts: Array[String] = []
 	for p in typist.prompts():

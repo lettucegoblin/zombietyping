@@ -6,6 +6,7 @@ extends Node3D
 signal arrived(id: String)
 signal queue_changed
 signal tile_changed(tile: Vector2i)
+signal manual_zone_exited
 
 @export var street_speed := 7.0
 @export var turn_speed := 6.0
@@ -18,6 +19,8 @@ var halt := false      ## combat: stop in place (keeps the current leg for later
 var manual_control := false
 var manual_speed := 4.2
 var _manual_bounds := Rect2()
+var _manual_gate := Vector2.INF
+var _manual_shape: SphereShape3D
 
 var _street: Array[Dictionary] = []   # {id, tiles: Array[Vector2i]}
 var _local: Array[Dictionary] = []    # {id, points: PackedVector3Array, speed}
@@ -108,9 +111,12 @@ func resume() -> void:
 	hold = false
 
 
-func set_manual_zone(bounds: Rect2) -> void:
+func set_manual_zone(bounds: Rect2, gate_tile: Vector2i = Vector2i(0x7FFFFFFF, 0)) -> void:
 	manual_control = true
 	_manual_bounds = bounds.grow(-0.45)
+	_manual_gate = Vector2.INF if gate_tile.x == 0x7FFFFFFF else Vector2(World.tile_to_world(gate_tile).x, World.tile_to_world(gate_tile).z)
+	_manual_shape = SphereShape3D.new()
+	_manual_shape.radius = 0.3
 	hold = false
 	halt = false
 	_cur.clear()
@@ -122,6 +128,8 @@ func set_manual_zone(bounds: Rect2) -> void:
 func clear_manual_zone() -> void:
 	manual_control = false
 	_manual_bounds = Rect2()
+	_manual_gate = Vector2.INF
+	_manual_shape = null
 
 
 func snap_to_road(t: Vector2i) -> void:
@@ -145,15 +153,33 @@ func _manual_move(dt: float) -> void:
 	var v := _manual_vector()
 	if v == Vector2.ZERO:
 		return
+	_manual_move_vector(v, dt)
+
+
+func _manual_move_vector(v: Vector2, dt: float) -> void:
 	# Movement is camera-relative: W follows the survivor's gaze, A/D strafe.
 	var forward := Vector2(facing.x, facing.z).normalized()
 	var right := Vector2(-forward.y, forward.x)
 	var d := (right * v.x + forward * -v.y).normalized()
-	var p := Vector2(global_position.x, global_position.z) + d * manual_speed * dt
+	var current := Vector2(global_position.x, global_position.z)
+	var p := current + d * manual_speed * dt
+	if not _manual_bounds.has_point(p) and global_position.y < 1.0 and _manual_gate != Vector2.INF and current.distance_to(_manual_gate) < 3.2:
+		clear_manual_zone()
+		manual_zone_exited.emit()
+		return
 	p.x = clampf(p.x, _manual_bounds.position.x, _manual_bounds.end.x)
 	p.y = clampf(p.y, _manual_bounds.position.y, _manual_bounds.end.y)
-	global_position.x = p.x
-	global_position.z = p.y
+	var next := Vector3(p.x, global_position.y, p.y)
+	if _manual_position_clear(next):
+		global_position = next
+	else:
+		# Axis retries make wall contact slide instead of feeling like an invisible snag.
+		var slide_x := Vector3(p.x, global_position.y, current.y)
+		var slide_z := Vector3(current.x, global_position.y, p.y)
+		if _manual_position_clear(slide_x):
+			global_position = slide_x
+		elif _manual_position_clear(slide_z):
+			global_position = slide_z
 	if d.length() > 0.01:
 		facing = Vector3(d.x, 0, d.y)
 	var next_tile := World.world_to_tile(global_position)
@@ -161,6 +187,18 @@ func _manual_move(dt: float) -> void:
 		tile = next_tile
 		World.mark_explored(tile, reveal_radius)
 		tile_changed.emit(tile)
+
+
+func _manual_position_clear(pos: Vector3) -> bool:
+	if _manual_shape == null or not is_inside_tree():
+		return true
+	var query := PhysicsShapeQueryParameters3D.new()
+	query.shape = _manual_shape
+	query.transform = Transform3D(Basis.IDENTITY, pos + Vector3(0, 0.85, 0))
+	query.collision_mask = 1
+	query.collide_with_areas = false
+	query.collide_with_bodies = true
+	return get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
 ## Turn (smoothly) to look at a world point; used when arriving in a room so the door
