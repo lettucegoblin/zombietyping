@@ -34,6 +34,7 @@ var _route: Array = []         ## door indices towards the player's room
 var _route_t := 0.0
 var _best_dist := 1e9          ## closest we have got to the player (stuck detection)
 var _stuck_t := 0.0
+var _label_time := 0.0         ## seconds the word has been continuously readable
 
 var sprite: AnimatedSprite3D
 var label: WordLabel
@@ -57,6 +58,7 @@ func _ready() -> void:
 	add_child(sprite)
 	label = WordLabel.new(word, 26)
 	label.position = Vector3(0, 2.15, 0)
+	label.keep_on_screen = true   # a zombie in your face still shows its whole word
 	add_child(label)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash(word) + int(global_position.x * 7.0)
@@ -121,11 +123,19 @@ func set_locked(v: bool) -> void:
 	label.set_locked(v)
 
 
+## First sight of you: a beat of staring (stunned) before the charge, never straight in.
 func wake() -> void:
 	if state == State.DORMANT:
-		state = State.CHASE
-		_play("run")
+		state = State.STUN
+		_timer = NOTICE_BEAT
+		_play("idle")
+		_punch(0.9, 1.12)
 		_sfx_at("growl1" if randf() < 0.5 else "growl2", -4.0, 0.15)
+
+
+## Can this zombie hurt you right now? Only with its word on screen long enough to read.
+func fair() -> bool:
+	return label.visible and _label_time >= FAIR_READ
 
 
 func _sfx_at(name: String, db: float, pitch_var: float, pitch := 1.0) -> void:
@@ -134,27 +144,31 @@ func _sfx_at(name: String, db: float, pitch_var: float, pitch := 1.0) -> void:
 		sfx.play_at(name, global_position, db, pitch_var, pitch)
 
 
-## A door just burst open next to it: hop back, face the noise, take a beat before
-## charging. Gives you the first shot instead of a zombie already in your face.
+## A door just burst open onto it: thrown back into the room, down for a moment, then
+## up and staring. Gives you the first shot instead of a zombie already in your face.
 func startle(from: Vector3) -> void:
-	if state == State.DEAD or state == State.STUN:
+	if state == State.DEAD:
 		return
 	var away := global_position - from
 	away.y = 0.0
 	if away.length() < 0.05:
 		away = -facing
 	away = away.normalized()
-	var to := global_position + away * 1.3
+	var to := global_position + away * THROW_DIST
 	if interior != null and interior.is_inside() and room >= 0:
 		to = interior.clamp_to_room(room, to, 0.45)
 	facing = -away
 	state = State.STUN
-	_timer = 0.85
+	_timer = THROW_STUN
 	_play("flinch_b", true)
-	_punch(0.78, 1.32)
 	_sfx_at("startle", -2.0, 0.2)
 	var tw := create_tween()
-	tw.tween_property(self, "global_position", to, 0.26).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.set_parallel(true)
+	tw.tween_property(self, "global_position", to, 0.42).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	# a hop arc and a splat on landing
+	tw.tween_property(sprite, "position:y", 0.7, 0.2).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	tw.chain().tween_property(sprite, "position:y", 0.0, 0.22).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN)
+	tw.chain().tween_callback(func(): _punch(1.35, 0.6))
 
 
 # ------------------------------------------------------------------ update
@@ -168,6 +182,7 @@ func _process(dt: float) -> void:
 	# the word exists only while you have a sightline (or a fresh lock on it)
 	var show := state != State.DEAD and state != State.DORMANT and (in_los or (locked and Time.get_ticks_msec() / 1000.0 - last_seen < 0.8))
 	label.visible = show
+	_label_time = _label_time + dt if show else 0.0
 	var to_player := target.global_position - global_position
 	to_player.y = 0.0
 	var dist := to_player.length()
@@ -185,14 +200,14 @@ func _process(dt: float) -> void:
 				if _stuck_t > 12.0 and not in_los and dist > 3.0:
 					queue_free()
 					return
-			if dist <= type.attack_range and _on_camera():
+			if dist <= type.attack_range and _on_camera() and fair():
 				state = State.WINDUP
 				_timer = type.attack_windup
 				_struck = false
 				facing = to_player.normalized()
 				_play("attack", true)
 			elif dist <= type.attack_range:
-				facing = to_player.normalized()   # in reach but off camera: lurk, never swing
+				facing = to_player.normalized()   # in reach but off camera / word not readable yet: lurk
 			else:
 				_move(dt, to_player, dist)
 		State.WINDUP:
@@ -204,7 +219,7 @@ func _process(dt: float) -> void:
 		State.STRIKE:
 			if not _struck:
 				_struck = true
-				if dist <= type.attack_range + 0.4:
+				if dist <= type.attack_range + 0.4 and fair():
 					hit_player.emit(self, type.damage)
 			_timer -= dt
 			if _timer <= 0.0:
@@ -234,6 +249,10 @@ func _process(dt: float) -> void:
 
 
 const CONE_DEG := 28.0     ## half-angle of the camera's "front": zombies approach only inside it
+const NOTICE_BEAT := 0.9   ## seconds a zombie stands and stares when it first spots you
+const FAIR_READ := 0.6     ## its word must have been readable this long before it may hurt you
+const THROW_DIST := 2.4    ## how far a door throws a zombie standing behind it
+const THROW_STUN := 1.5
 
 
 ## Is this zombie inside the camera's front cone (so its whole word is on screen)?

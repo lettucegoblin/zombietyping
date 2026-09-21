@@ -94,6 +94,21 @@ func nearest_awake(max_dist: float) -> Zombie:
 	return best
 
 
+## Nearest zombie standing in room `ri` (awake or not): the sweep target when the room
+## has gone quiet but is not clear yet.
+func nearest_in_room(ri: int) -> Zombie:
+	var best: Zombie = null
+	var bd := 1e9
+	for z in alive():
+		if z.room != ri:
+			continue
+		var d := z.global_position.distance_to(player.global_position)
+		if d < bd:
+			bd = d
+			best = z
+	return best
+
+
 func nearest_alive(max_dist: float) -> Zombie:
 	var best: Zombie = null
 	var bd := max_dist
@@ -141,7 +156,8 @@ func spawn_street() -> Zombie:
 		if World.road_at(t) == 0:
 			continue
 		var kind := ZombieType.runner() if rng.randf() < 0.35 else ZombieType.shambler()
-		return _spawn(kind, World.tile_to_world(t) + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5)))
+		# standing there until you look at it (or fire near it): nothing sees you first
+		return _spawn(kind, World.tile_to_world(t) + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5)), -1, true)
 	return null
 
 

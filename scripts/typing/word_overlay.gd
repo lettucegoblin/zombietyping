@@ -1,3 +1,4 @@
+class_name WordOverlay
 extends Control
 ## Draws every visible WordLabel in the 3D world onto the UI layer at screen resolution.
 ## Words flagged edge_hint that fall outside the view are pinned to the nearest screen edge
@@ -44,7 +45,9 @@ func _draw() -> void:
 		if not behind:
 			sp = cam.unproject_position(p) * scale
 		if behind or not inner.has_point(sp):
-			if not w.edge_hint:
+			if w.keep_on_screen and not behind:
+				sp = sp.clamp(inner.position, inner.end)
+			elif not w.edge_hint:
 				if behind or sp.x < -200 or sp.y < -100 or sp.x > size.x + 200 or sp.y > size.y + 100:
 					continue
 			else:
@@ -94,6 +97,21 @@ func _draw() -> void:
 		if r != "":
 			draw_string_outline(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, oc)
 			draw_string(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, CREAM)
+
+
+## Screen anchor of a world point for a label with `keep`: {pos, on_screen}. Shared with
+## the tests so "the word is readable" can be checked headless.
+static func anchor_for(cam: Camera3D, p: Vector3, vp_size: Vector2, ui_size: Vector2, keep: bool) -> Dictionary:
+	if cam.is_position_behind(p):
+		return { "pos": Vector2.ZERO, "on_screen": false }
+	var scale := ui_size / vp_size
+	var sp := cam.unproject_position(p) * scale
+	var inner := Rect2(EDGE_MARGIN, ui_size - EDGE_MARGIN * 2.0)
+	if inner.has_point(sp):
+		return { "pos": sp, "on_screen": true }
+	if keep:
+		return { "pos": sp.clamp(inner.position, inner.end), "on_screen": true }
+	return { "pos": sp, "on_screen": false }
 
 
 ## Where a ray from the centre of `r` along `dir` leaves it.

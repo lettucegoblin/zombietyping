@@ -120,6 +120,10 @@ func _process(dt: float) -> void:
 			z = director.threat_within(AIM_RANGE)
 		if z == null:
 			z = director.nearest_awake(2.6)
+		if z == null and mode == Mode.INSIDE and interior.is_inside() and not player.is_moving():
+			# the room has gone quiet but is not clear: sweep to whatever is still standing
+			# in it (nothing sees you before you see it, so you have to look)
+			z = director.nearest_in_room(interior.current_room)
 		if z != null:
 			player.face_toward(z.global_position)
 	if not director.get_meta("no_street", false):
@@ -484,24 +488,18 @@ func _on_option(opt: Dictionary) -> void:
 ## Zombies standing right behind a door we just kicked jump back in surprise.
 func _startle_near(door_pos: Vector3, ri: int) -> void:
 	for z in director.alive():
-		if z.room == ri and z.global_position.distance_to(door_pos) < 2.8:
+		if z.room == ri and z.global_position.distance_to(door_pos) < 3.6:
 			z.startle(door_pos)
 
 
 func _populate_room(ri: int) -> void:
 	if interior.is_room_cleared(ri):
 		return
-	# zombies were seeded on entry (dormant; the director wakes the ones you can see, and
-	# the rest notice you a couple of seconds after you step in);
-	# a room with none left counts as cleared on arrival
+	# zombies were seeded on entry, dormant: nothing sees you before you see it. The
+	# director wakes the ones in your sight; gunfire wakes the rest within earshot.
+	# A room with none left counts as cleared on arrival.
 	if director.alive_in_room(ri) == 0:
 		interior.mark_room_cleared(ri)
-		return
-	await get_tree().create_timer(2.2).timeout
-	if mode == Mode.INSIDE and interior.is_inside() and interior.current_room == ri:
-		for z in director.alive():
-			if z.room == ri:
-				z.wake()
 
 
 var _last_typed_len := 0

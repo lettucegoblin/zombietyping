@@ -11,6 +11,9 @@ var scale_with_distance := true
 ## Option words (doors, stairs, exit): when off-screen they are pinned to the screen edge
 ## with an arrow pointing the way, so every choice in a room is always readable.
 var edge_hint := false
+## Zombie words: when the anchor is in front of the camera but off the screen (a zombie
+## right against you), the word is clamped onto the screen instead of dropped.
+var keep_on_screen := false
 
 
 func _init(w := "", size := 28) -> void:

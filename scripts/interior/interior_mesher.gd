@@ -64,6 +64,11 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 	elif dvec == Vector2i(1, 0): door_wall = 2; door_along = dc.y - z0
 	else: door_wall = 3; door_along = z1 - dc.y
 	var win_lo := WIN_LO
+	# invisible "glass": line-of-sight rays stop at windows, so nothing sees in or out
+	var glass := StaticBody3D.new()
+	glass.name = "Glass"
+	glass.collision_layer = 1
+	glass.collision_mask = 0
 
 	for y in range(room.rect.position.y, room.rect.end.y):
 		for x in range(room.rect.position.x, room.rect.end.x):
@@ -121,8 +126,20 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 								ta = a0 - slot[1]; tb = a0 - slot[0]
 							if tb <= 0.0 or ta >= seg_len:
 								continue
-							holes.append([maxf(ta, 0.0), minf(tb, seg_len), win_lo, WIN_HI])
+							var wa := maxf(ta, 0.0)
+							var wb := minf(tb, seg_len)
+							holes.append([wa, wb, win_lo, WIN_HI])
+							var cs := CollisionShape3D.new()
+							var box := BoxShape3D.new()
+							box.size = Vector3(wb - wa, WIN_HI - win_lo, 0.04)
+							cs.shape = box
+							var mid := p0 + seg_dir * ((wa + wb) * 0.5) + Vector3(0, (win_lo + WIN_HI) * 0.5, 0)
+							cs.position = mid
+							cs.rotation.y = 0.0 if absf(normal.z) > 0.5 else PI * 0.5
+							glass.add_child(cs)
 				_wall_with_holes(st, p0, p1, normal, H, holes, wall_col)
+	if glass.get_child_count() > 0:
+		root.add_child(glass)
 
 	# this storey's flights (up to the next storey)
 	if room.is_stair and fp.floor < fp.floors_total - 1:
