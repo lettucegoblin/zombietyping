@@ -62,6 +62,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_survivor_cue.tscn` | stable positional rescue cadence, range gating, 3D attenuation/panning, movement, and permanent shutdown on resolution |
 | `scenes/tests/test_facility_profile.tscn` | generated room/prop utility totals, dismantled-prop subtraction, deterministic facility role, and claim-aware readiness |
 | `scenes/tests/test_workforce.tscn` | trait-aware jobs, staffed farm output, disconnected local stock, supply-route delivery, work cycles, and persistence |
+| `scenes/tests/test_survivor_needs.tscn` | backpack deposits, base provisions, hunger, morale, injury treatment, labor gating, and needs persistence |
 | `scenes/tests/test_facility_upgrade.tscn` | role locking, material/staffing gates, production bonuses, utility damage taking upgrades offline, and save/load |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
@@ -181,10 +182,11 @@ cancels, and `U` gives a ten-second full-refund undo before becoming a 50% disma
 Searchable dressers, cabinets, shelves, fridges, crates, televisions, stoves, and workbenches
 roll contents from their procedural loot-table tag and stable prop ID. Once a room is safe,
 `loot` searches the nearest unsearched container; the search rail waits while a fitting item
-bundle remains. The twelve-slot backpack persists between sessions. At a safe zone, `V`
-sorts all carried food, medicine, textiles, electronics, tools, fuel, fasteners, and other
-finds into the existing construction material classes. Only searched prop IDs are saved—the
-contents themselves regenerate deterministically from the world seed.
+bundle remains. The twelve-slot backpack persists between sessions. Searched containers are
+dimmed and marked `EMPTY` on return. At a safe zone, `G` stashes carried items for residents,
+`V` sorts them into existing construction material classes, `H` uses bandages, and `J` eats
+packaged food. Only searched prop IDs are saved—the contents themselves regenerate
+deterministically from the world seed.
 
 Eligible uncleared buildings also receive a deterministic named survivor in a semantic room.
 The room/floor route takes priority over irrelevant cleared branches, the survivor emits a
@@ -213,6 +215,13 @@ electronics recovery. The first upgrade locks the role to that physical building
 required beds, storage, water, or power takes it offline until those utilities are restored.
 Installed levels add a role-coloured rooftop beacon; an offline facility's beacon turns dim
 red, so utility damage is visible in the safe zone as well as the management panel.
+
+Every work cycle also advances resident health, hunger, and morale. One food unit feeds two
+people; deposited packaged food and bandages are consumed before connected material stores,
+while a cut-off outpost can use only its own stockpile. Injured residents recover with
+medicine, risky jobs can cause deterministic accidents, and starving, critically hurt, or
+intermittently demoralized residents stop contributing labor. The Tab building panel reports
+base need status and each named resident's condition; all values and incidents persist.
 
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only

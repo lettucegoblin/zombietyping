@@ -14,6 +14,7 @@ func _run() -> void:
 	World.supply_links.clear()
 	World.placements.clear()
 	World.safezone_blocks.clear()
+	World.backpack.clear()
 	for key in World.materials:
 		World.materials[key] = 0
 
@@ -75,8 +76,25 @@ func _run() -> void:
 	if main.interior.plan.floor != 1 or main.player.global_position.y < World.FLOOR_M or not floor_result.contains("2/"):
 		_fail("claimed multi-storey navigation did not reach floor 2: " + floor_result)
 		return
+	main.hp = 60
+	World.backpack = { "bandages": 1 }
+	var heal_key := InputEventKey.new()
+	heal_key.pressed = true
+	heal_key.keycode = KEY_H
+	main._unhandled_input(heal_key)
+	if main.hp != 90 or not World.backpack.is_empty():
+		_fail("safe-zone bandage control did not consume carried medicine")
+		return
+	World.backpack = { "circuits": 1 }
+	var stash_key := InputEventKey.new()
+	stash_key.pressed = true
+	stash_key.keycode = KEY_G
+	main._unhandled_input(stash_key)
+	if not World.backpack.is_empty() or int(World.building_state(tower.id()).get("stored_items", {}).get("circuits", 0)) != 1:
+		_fail("safe-zone stash control did not deposit carried loot")
+		return
 
-	print("SAFEZONE TRANSITION OK  gate exit + multi-storey free roam")
+	print("SAFEZONE TRANSITION OK  gate exit + multi-storey free roam + backpack controls")
 	get_tree().quit(0)
 
 

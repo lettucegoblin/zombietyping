@@ -8,6 +8,7 @@ const DOOR_W := 1.2
 const DOOR_H := 2.2
 const WIN_LO := 1.2
 const WIN_HI := 2.2
+const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
 
 const FLOOR_COL := {
 	District.Kind.DOWNTOWN: Color("#94a3b8"), District.Kind.STRIP: Color("#fdba74"),
@@ -227,12 +228,18 @@ static func _build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
 			continue
 		if PropSalvage.is_salvaged(fp.building_id, prop.id):
 			continue
+		var searched := prop.loot_table != "" and PropLootRules.is_looted(fp.building_id, prop.id)
 		if PROP_SPRITES.has(prop.kind):
-			root.add_child(_sprite_prop(prop))
+			var visual := _sprite_prop(prop)
+			if searched:
+				_dim_sprites(visual)
+			root.add_child(visual)
 			sprite_count += 1
 		else:
 			_emit_prop(st, prop)
 			mesh_count += 1
+		if searched:
+			root.add_child(_searched_label(prop))
 	if mesh_count == 0 and sprite_count == 0:
 		return null
 	if mesh_count > 0:
@@ -242,6 +249,27 @@ static func _build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
 		mi.material_override = SectorMesher.flat_material()
 		root.add_child(mi)
 	return root
+
+
+static func _dim_sprites(node: Node) -> void:
+	if node is Sprite3D:
+		(node as Sprite3D).modulate = Color(0.52, 0.52, 0.58, 1.0)
+	for child in node.get_children():
+		_dim_sprites(child)
+
+
+static func _searched_label(prop: FloorPlan.Prop) -> Label3D:
+	var label := Label3D.new()
+	label.name = "Searched_" + prop.id.replace(":", "_")
+	label.text = "EMPTY"
+	label.position = prop.pos + Vector3(0, prop.size.y + 0.28, 0)
+	label.font_size = 18
+	label.pixel_size = 0.008
+	label.modulate = Color("#9f95ad")
+	label.outline_modulate = Color("#17131f")
+	label.outline_size = 7
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	return label
 
 
 const PROP_SPRITES := {

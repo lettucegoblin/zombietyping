@@ -104,7 +104,11 @@ func loot_here(world_pos: Vector3) -> String:
 		if blocked != null:
 			return "backpack full — return to a safe zone to sort it"
 		return "nothing left to loot in this room"
-	return PropLootRules.loot(building.id(), prop)
+	var result: String = PropLootRules.loot(building.id(), prop)
+	if result.begins_with("searched"):
+		_rebuild(prop.room)
+		_set_room_visible(prop.room, true)
+	return result
 
 
 ## Every room is built up front so walls (and closed doors) block sightlines everywhere;

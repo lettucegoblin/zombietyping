@@ -202,6 +202,15 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_V:
 				if not settlement.build_mode:
 					msg = World.break_down_backpack()
+			KEY_G:
+				if not settlement.build_mode:
+					msg = World.deposit_backpack(settlement.active_building_id)
+			KEY_H:
+				if not settlement.build_mode:
+					msg = _use_carried_supply("bandages", 30, "bandaged wounds")
+			KEY_J:
+				if not settlement.build_mode:
+					msg = _use_carried_supply("packaged_food", 8, "ate packaged food")
 			KEY_PAGEUP: msg = _safezone_floor(1)
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
@@ -452,6 +461,16 @@ func _safezone_floor(delta: int) -> String:
 	else:
 		player.global_position.y = next_floor * World.FLOOR_M + 0.05
 	return "safe-zone floor %d/%d" % [next_floor + 1, door_building.floors]
+
+
+func _use_carried_supply(item: String, healing: int, success_text: String) -> String:
+	if hp >= 100:
+		return "health is already full"
+	if not World.consume_backpack_item(item):
+		return "no " + item.replace("_", " ") + " in the backpack"
+	hp = mini(100, hp + healing)
+	sfx.play("hit", -14.0, 0.04, 1.35)
+	return "%s — health %d" % [success_text, hp]
 
 
 func _show_door_label(word: String, pos: Vector3, visited := false) -> void:
@@ -842,7 +861,7 @@ func _refresh_hud() -> void:
 				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
-			var build := "B: build mode  ·  V: sort backpack  ·  U: dismantle last (50%, rounded up)"
+			var build := "B build · G stash · V sort · H bandage · J eat · U dismantle"
 			if settlement.build_mode:
 				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
@@ -859,6 +878,9 @@ func _refresh_hud() -> void:
 					lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
+			var stored_items: Dictionary = World.building_state(settlement.active_building_id).get("stored_items", {})
+			if not stored_items.is_empty():
+				lines.append("[color=#68d5ff]base stores · %s[/color]" % World.item_summary(stored_items))
 	var parts: Array[String] = []
 	for p in typist.prompts():
 		var w: String = p["word"]

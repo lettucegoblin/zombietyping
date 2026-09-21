@@ -281,6 +281,10 @@ func backpack_summary() -> String:
 		"" if backpack.is_empty() else " · " + PropLootRules.item_text(backpack)]
 
 
+func item_summary(bundle: Dictionary) -> String:
+	return "nothing" if bundle.is_empty() else PropLootRules.item_text(bundle)
+
+
 func can_carry(bundle: Dictionary) -> bool:
 	return backpack_units() + PropLootRules.bundle_units(bundle) <= BACKPACK_CAPACITY
 
@@ -292,6 +296,35 @@ func add_to_backpack(bundle: Dictionary) -> bool:
 		backpack[item] = int(backpack.get(item, 0)) + int(bundle[item])
 	backpack_changed.emit()
 	return true
+
+
+func consume_backpack_item(item: String, count := 1) -> bool:
+	if count <= 0 or int(backpack.get(item, 0)) < count:
+		return false
+	var left := int(backpack[item]) - count
+	if left > 0:
+		backpack[item] = left
+	else:
+		backpack.erase(item)
+	backpack_changed.emit()
+	return true
+
+
+func deposit_backpack(id: String) -> String:
+	var st := building_state(id)
+	if not st.get("claimed", false):
+		return "carried supplies can only be stashed at a claimed base"
+	if backpack.is_empty():
+		return "backpack is empty"
+	var deposited := backpack.duplicate()
+	var stored: Dictionary = (st.get("stored_items", {}) as Dictionary).duplicate()
+	_add_bundle(stored, deposited)
+	st["stored_items"] = stored
+	backpack.clear()
+	backpack_changed.emit()
+	state_changed.emit(id)
+	settlement_changed.emit()
+	return "stashed at this base: " + PropLootRules.item_text(deposited)
 
 
 func break_down_backpack() -> String:
@@ -442,6 +475,32 @@ func fortify_building(id: String) -> String:
 
 # ------------------------------------------------------------- survivor rescue
 
+func _with_survivor_needs(record: Dictionary) -> Dictionary:
+	var person := record.duplicate(true)
+	var sid := str(person.get("id", "survivor"))
+	var roll := Det.h3(seed, sid.hash(), str(person.get("trait", "")).hash(), 0, 1401)
+	if not person.has("health"):
+		person["health"] = 48 + posmod(roll, 43)
+	if not person.has("hunger"):
+		person["hunger"] = 25 + posmod(floori(float(roll) / 43.0), 36)
+	if not person.has("morale"):
+		person["morale"] = 52 + posmod(floori(float(roll) / 1548.0), 29)
+	if not person.has("injured"):
+		person["injured"] = int(person["health"]) < 64
+	return person
+
+
+func survivor_condition(person: Dictionary) -> String:
+	if person.get("injured", false):
+		return "injured"
+	if int(person.get("hunger", 0)) >= 80:
+		return "starving"
+	if int(person.get("hunger", 0)) >= 55:
+		return "hungry"
+	if int(person.get("morale", 70)) < 35:
+		return "demoralized"
+	return "steady"
+
 func rescue_eligible(b: BuildingData) -> bool:
 	# Eligibility is seed-derived rather than rolled on entry, so reloading or approaching
 	# the same building from another route never changes who is trapped there.
@@ -528,7 +587,7 @@ func _nearest_claimed_base(from_building: BuildingData) -> String:
 func _assign_survivor_to_base(survivor_id: String, base_id: String) -> void:
 	if not survivors.has(survivor_id) or not building_state(base_id).get("claimed", false):
 		return
-	var survivor: Dictionary = survivors[survivor_id]
+	var survivor: Dictionary = _with_survivor_needs(survivors[survivor_id])
 	if survivor.get("base_id", "") != "":
 		return
 	survivor["status"] = "assigned"
@@ -563,7 +622,7 @@ func complete_rescue(id: String) -> String:
 	var survivor_id: String = mission["id"]
 	mission["status"] = "rescued"
 	building_state(id)["rescue"] = mission.duplicate(true)
-	var survivor := mission.duplicate(true)
+	var survivor := _with_survivor_needs(mission)
 	survivor["status"] = "pending"
 	survivor["base_id"] = ""
 	survivors[survivor_id] = survivor
@@ -593,6 +652,8 @@ func resident_records(id: String) -> Array[Dictionary]:
 	for survivor_id in building_state(id).get("resident_ids", []):
 		var person: Dictionary = survivors.get(str(survivor_id), {})
 		if not person.is_empty():
+			person = _with_survivor_needs(person)
+			survivors[str(survivor_id)] = person
 			out.append(person.duplicate(true))
 	return out
 
@@ -742,6 +803,119 @@ func _add_bundle(target: Dictionary, bundle: Dictionary) -> void:
 		target[key] = int(target.get(key, 0)) + int(bundle[key])
 
 
+func _take_units(bundle: Dictionary, key: String, wanted: int) -> int:
+	var taken := mini(maxi(wanted, 0), int(bundle.get(key, 0)))
+	if taken <= 0:
+		return 0
+	var left := int(bundle[key]) - taken
+	if left > 0:
+		bundle[key] = left
+	else:
+		bundle.erase(key)
+	return taken
+
+
+func _process_base_needs(id: String, st: Dictionary, connected: bool) -> Dictionary:
+	var resident_ids: Array = (st.get("resident_ids", []) as Array).duplicate()
+	resident_ids.sort()
+	var citizens := maxi(int(st.get("citizens", 0)), resident_ids.size() + int(st.get("founders", 0)))
+	if citizens <= 0:
+		var empty := { "status": "empty", "food_needed": 0, "food_used": 0, "medicine_used": 0,
+			"hungry": 0, "starving": 0, "injured": 0, "morale": 0, "incidents": [] }
+		st["needs"] = empty
+		return empty
+
+	var stored: Dictionary = (st.get("stored_items", {}) as Dictionary).duplicate()
+	var local: Dictionary = (st.get("local_stockpile", {}) as Dictionary).duplicate()
+	var food_needed := ceili(float(citizens) / 2.0)
+	var food_used := _take_units(stored, "packaged_food", food_needed)
+	var food_remaining := food_needed - food_used
+	var material_food := 0
+	if connected:
+		material_food = _take_units(materials, "food", food_remaining)
+	else:
+		material_food = _take_units(local, "food", food_remaining)
+	food_used += material_food
+
+	var injured_before := 0
+	for survivor_id in resident_ids:
+		var sid := str(survivor_id)
+		var person: Dictionary = _with_survivor_needs(survivors.get(sid, { "id": sid }))
+		survivors[sid] = person
+		if person.get("injured", false):
+			injured_before += 1
+	var medicine_used := _take_units(stored, "bandages", injured_before)
+	var medicine_remaining := injured_before - medicine_used
+	var material_medicine := 0
+	if connected:
+		material_medicine = _take_units(materials, "medicine", medicine_remaining)
+	else:
+		material_medicine = _take_units(local, "medicine", medicine_remaining)
+	medicine_used += material_medicine
+	if (connected and (material_food > 0 or material_medicine > 0)):
+		materials_changed.emit()
+
+	var fed_slots := mini(citizens, food_used * 2)
+	var treatments_left := medicine_used
+	var incidents: Array[String] = []
+	var hungry := 0
+	var starving := 0
+	var injured := 0
+	var morale_total := 0
+	for i in resident_ids.size():
+		var sid := str(resident_ids[i])
+		var person: Dictionary = _with_survivor_needs(survivors.get(sid, { "id": sid }))
+		var fed := i < fed_slots
+		person["hunger"] = clampi(int(person["hunger"]) + (-24 if fed else 22), 0, 100)
+		person["morale"] = clampi(int(person["morale"]) + (3 if fed else -8), 0, 100)
+		if person.get("injured", false):
+			if treatments_left > 0:
+				treatments_left -= 1
+				person["health"] = clampi(int(person["health"]) + 22, 0, 100)
+				person["morale"] = clampi(int(person["morale"]) + 6, 0, 100)
+				person["injured"] = int(person["health"]) < 72
+			else:
+				person["health"] = maxi(10, int(person["health"]) - 3)
+				person["morale"] = maxi(0, int(person["morale"]) - 4)
+		if int(person["hunger"]) >= 80:
+			person["health"] = maxi(10, int(person["health"]) - 4)
+		var risky_job := str(person.get("job", "")) in ["scavenger", "builder", "mechanic"]
+		if risky_job and posmod(Det.h3(seed, sid.hash(), settlement_cycle, 0, 1402), 13) == 0:
+			person["health"] = maxi(10, int(person["health"]) - 18)
+			person["injured"] = true
+			incidents.append("%s injured while %s" % [person.get("name", "survivor"), person.get("job", "working")])
+		if int(person["hunger"]) >= 55:
+			hungry += 1
+		if int(person["hunger"]) >= 80:
+			starving += 1
+		if person.get("injured", false):
+			injured += 1
+		morale_total += int(person["morale"])
+		survivors[sid] = person
+
+	st["stored_items"] = stored
+	st["local_stockpile"] = local
+	var avg_morale := 70 if resident_ids.is_empty() else roundi(float(morale_total) / resident_ids.size())
+	var status := "stable"
+	if starving > 0 or (injured > 0 and medicine_used == 0):
+		status = "critical"
+	elif food_used < food_needed or injured > 0 or hungry > 0 or avg_morale < 45:
+		status = "strained"
+	var report := {
+		"status": status,
+		"food_needed": food_needed,
+		"food_used": food_used,
+		"medicine_used": medicine_used,
+		"hungry": hungry,
+		"starving": starving,
+		"injured": injured,
+		"morale": avg_morale,
+		"incidents": incidents,
+	}
+	st["needs"] = report
+	return report
+
+
 func run_work_cycle() -> Dictionary:
 	settlement_cycle += 1
 	var connected: Dictionary = networked_base_ids()
@@ -754,11 +928,12 @@ func run_work_cycle() -> Dictionary:
 		if b == null:
 			continue
 		var st: Dictionary = building_state(id)
+		var is_connected := connected.has(id)
+		var needs: Dictionary = _process_base_needs(id, st, is_connected)
 		var result: Dictionary = WorkforceRules.produce(seed, b, st, survivors, placement_count(id, "farm"), settlement_cycle)
 		var output: Dictionary = result["output"]
 		var stockpile: Dictionary = (st.get("local_stockpile", {}) as Dictionary).duplicate()
 		_add_bundle(stockpile, output)
-		var is_connected := connected.has(id)
 		if is_connected:
 			_add_bundle(delivered, stockpile)
 			stockpile.clear()
@@ -770,6 +945,8 @@ func run_work_cycle() -> Dictionary:
 			"jobs": (result["jobs"] as Dictionary).duplicate(),
 			"tended_farms": result["tended_farms"],
 			"farm_count": result["farm_count"],
+			"unavailable": result.get("unavailable", 0),
+			"needs": needs.duplicate(true),
 		}
 		reports[id] = st["last_production"].duplicate(true)
 		state_changed.emit(id)
