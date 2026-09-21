@@ -24,7 +24,7 @@ func _ready() -> void:
 func alive() -> Array[Zombie]:
 	var out: Array[Zombie] = []
 	for z in zombies:
-		if is_instance_valid(z) and z.is_alive():
+		if is_instance_valid(z) and not z.is_queued_for_deletion() and z.is_alive():
 			out.append(z)
 	return out
 
@@ -155,6 +155,8 @@ func spawn_street() -> Zombie:
 		var t: Vector2i = pt + Vector2i(roundi(off.x), roundi(off.y))
 		if World.road_at(t) == 0:
 			continue
+		if World.is_tile_safe(t):
+			continue
 		var kind := ZombieType.runner() if rng.randf() < 0.35 else ZombieType.shambler()
 		# standing there until you look at it (or fire near it): nothing sees you first
 		return _spawn(kind, World.tile_to_world(t) + Vector3(rng.randf_range(-1.5, 1.5), 0, rng.randf_range(-1.5, 1.5)), -1, true)
@@ -256,7 +258,13 @@ func alive_in_room(ri: int) -> int:
 # ------------------------------------------------------------------ update
 
 func _process(dt: float) -> void:
-	zombies = zombies.filter(func(z): return is_instance_valid(z))
+	# Warded ground is a lasting achievement, not a defence chore. Zombie matter
+	# disperses any street zombie that crosses a completed perimeter and prevents new
+	# spawns there; indoor encounters still obey their room-clearing rules.
+	for z in zombies:
+		if is_instance_valid(z) and z.room < 0 and World.is_world_safe(z.global_position):
+			z.queue_free()
+	zombies = zombies.filter(func(z): return is_instance_valid(z) and not z.is_queued_for_deletion())
 	if street_spawning and player != null:
 		_spawn_timer -= dt
 		if _spawn_timer <= 0.0:

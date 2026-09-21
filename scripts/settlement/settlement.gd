@@ -18,7 +18,7 @@ const PROP_TEXTURES := {
 const BUILD_KINDS := ["wall", "crate", "bed", "chair", "farm"]
 const CitizenNav = preload("res://scripts/settlement/citizen_navigation.gd")
 const WALL_COLOR := Color("#623b55")
-const WALL_CAP := Color("#f6c177")
+const WALL_CAP := Color("#b86cff")
 const GHOST_VALID := Color("#7ee787", 0.58)
 const GHOST_INVALID := Color("#ff4f87", 0.62)
 const UNDO_WINDOW_MSEC := 10000
@@ -67,7 +67,7 @@ func enter(id: String) -> void:
 	_ghost_root.visible = false
 	var b := World.building_by_id(id)
 	if b != null:
-		player.set_manual_zone(World.safe_rect_world(b), b.road_tile)
+		player.set_manual_zone(World.ward_bounds_world(id), b.road_tile, World.ward_gate_world(id))
 	_dirty = true
 
 
@@ -125,11 +125,20 @@ func cancel_build() -> String:
 func _preview_position() -> Vector3:
 	var p: Vector3 = player.global_position + player.facing * 2.6
 	p.y = player.global_position.y + 0.05
+	if selected_kind() == "wall":
+		p = World.snap_wall_position(p, _preview_yaw())
 	return p
 
 
 func _preview_yaw() -> float:
-	return atan2(player.facing.x, player.facing.z) + preview_rotation * PI * 0.5
+	var yaw := atan2(player.facing.x, player.facing.z) + preview_rotation * PI * 0.5
+	return snappedf(yaw, PI * 0.5) if selected_kind() == "wall" else yaw
+
+
+func _refresh_manual_zone() -> void:
+	var b := World.building_by_id(active_building_id)
+	if b != null and player != null and player.has_method("set_manual_zone"):
+		player.set_manual_zone(World.ward_bounds_world(active_building_id), b.road_tile, World.ward_gate_world(active_building_id))
 
 
 func ghost_is_valid() -> bool:
@@ -156,6 +165,8 @@ func place_selected() -> String:
 	if msg.ends_with(" placed"):
 		_last_built = World.last_placement_for(active_building_id)
 		_undo_until_msec = Time.get_ticks_msec() + UNDO_WINDOW_MSEC
+		if selected_kind() == "wall":
+			_refresh_manual_zone()
 	_dirty = true
 	_update_ghost()
 	return msg
@@ -173,6 +184,7 @@ func undo_or_dismantle_last() -> String:
 		_last_built.clear()
 		_undo_until_msec = 0
 		_dirty = true
+		_refresh_manual_zone()
 		_update_ghost()
 	return msg
 
@@ -243,23 +255,27 @@ func _add_car(b: BuildingData) -> void:
 func _add_perimeter(b: BuildingData) -> void:
 	var r := World.safe_rect_world(b)
 	var gate_dir := b.road_tile - b.door_tile
-	var step := 2.5
-	var xs := int(r.size.x / step)
-	var zs := int(r.size.y / step)
-	for i in range(xs + 1):
-		var x := r.position.x + minf(i * step, r.size.x)
+	var lo := Vector2i(roundi(r.position.x / World.WARD_GRID), roundi(r.position.y / World.WARD_GRID))
+	var hi := Vector2i(roundi(r.end.x / World.WARD_GRID), roundi(r.end.y / World.WARD_GRID))
+	var ward: Dictionary = World.ward_cells(b.id())
+	for gx in range(lo.x, hi.x):
+		var x := (gx + 0.5) * World.WARD_GRID
 		var at_gate := absf(x - (b.door_tile.x + 0.5) * World.TILE_M) < 2.1
-		if not (gate_dir.y < 0 and at_gate):
-			_add_wall(Vector3(x, 0.8, r.position.y), Vector3(2.55, 1.6, 0.35))
-		if not (gate_dir.y > 0 and at_gate):
-			_add_wall(Vector3(x, 0.8, r.end.y), Vector3(2.55, 1.6, 0.35))
-	for i in range(zs + 1):
-		var z := r.position.y + minf(i * step, r.size.y)
+		var top_internal := ward.has(Vector2i(gx, lo.y - 1)) and ward.has(Vector2i(gx, lo.y))
+		var bottom_internal := ward.has(Vector2i(gx, hi.y - 1)) and ward.has(Vector2i(gx, hi.y))
+		if not top_internal and not (gate_dir.y < 0 and at_gate):
+			_add_wall(Vector3(x, 0.8, lo.y * World.WARD_GRID), Vector3(2.55, 1.6, 0.35))
+		if not bottom_internal and not (gate_dir.y > 0 and at_gate):
+			_add_wall(Vector3(x, 0.8, hi.y * World.WARD_GRID), Vector3(2.55, 1.6, 0.35))
+	for gy in range(lo.y, hi.y):
+		var z := (gy + 0.5) * World.WARD_GRID
 		var at_gate := absf(z - (b.door_tile.y + 0.5) * World.TILE_M) < 2.1
-		if not (gate_dir.x < 0 and at_gate):
-			_add_wall(Vector3(r.position.x, 0.8, z), Vector3(0.35, 1.6, 2.55))
-		if not (gate_dir.x > 0 and at_gate):
-			_add_wall(Vector3(r.end.x, 0.8, z), Vector3(0.35, 1.6, 2.55))
+		var left_internal := ward.has(Vector2i(lo.x - 1, gy)) and ward.has(Vector2i(lo.x, gy))
+		var right_internal := ward.has(Vector2i(hi.x - 1, gy)) and ward.has(Vector2i(hi.x, gy))
+		if not left_internal and not (gate_dir.x < 0 and at_gate):
+			_add_wall(Vector3(lo.x * World.WARD_GRID, 0.8, z), Vector3(0.35, 1.6, 2.55))
+		if not right_internal and not (gate_dir.x > 0 and at_gate):
+			_add_wall(Vector3(hi.x * World.WARD_GRID, 0.8, z), Vector3(0.35, 1.6, 2.55))
 
 
 func _add_wall(pos: Vector3, size: Vector3, yaw: float = 0.0) -> void:
@@ -282,10 +298,20 @@ func _add_wall(pos: Vector3, size: Vector3, yaw: float = 0.0) -> void:
 	cap_mesh.size = Vector3(size.x + 0.04, 0.12, size.z + 0.04)
 	var cap_mat := StandardMaterial3D.new()
 	cap_mat.albedo_color = WALL_CAP
+	cap_mat.emission_enabled = true
+	cap_mat.emission = WALL_CAP
+	cap_mat.emission_energy_multiplier = 0.7
 	cap_mesh.material = cap_mat
 	cap.mesh = cap_mesh
 	cap.position = Vector3(0, size.y * 0.5, 0)
 	wall.add_child(cap)
+	var body := StaticBody3D.new()
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	box.size = size
+	shape.shape = box
+	body.add_child(shape)
+	wall.add_child(body)
 
 
 func _add_facility_upgrade(b: BuildingData, st: Dictionary) -> void:

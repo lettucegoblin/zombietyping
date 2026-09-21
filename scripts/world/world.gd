@@ -12,6 +12,7 @@ signal survivor_rescued(survivor: Dictionary)
 const S := SectorData.SIZE
 const TILE_M := 5.0                 ## metres per tile in 3D
 const FLOOR_M := 3.6                ## metres per storey
+const WARD_GRID := 2.5              ## one player-built wall edge / enclosed ward cell
 const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
 const WORK_CYCLE_SECONDS := 45.0
 const BACKPACK_CAPACITY := 12
@@ -45,6 +46,7 @@ var materials: Dictionary = {
 	"fuel": 0,
 	"vehicle_parts": 0,
 	"tools": 0,
+	"zombie_matter": 0,
 }
 var backpack: Dictionary = {}        ## carried scavenged items, broken down at safe zones
 var supply_links: Array[PackedStringArray] = []
@@ -55,6 +57,7 @@ var settlement_cycle := 0
 var settlement_work_seconds := 0.0
 var persistence_enabled := true
 var _save_queued := false
+var _ward_cache: Dictionary = {}    ## building id -> enclosed Vector2i cells
 
 
 func _ready() -> void:
@@ -64,6 +67,7 @@ func _ready() -> void:
 	materials_changed.connect(_queue_save)
 	backpack_changed.connect(_queue_save)
 	settlement_changed.connect(_queue_save)
+	settlement_changed.connect(func(): _ward_cache.clear())
 	if persistence_enabled:
 		load_now()
 
@@ -262,7 +266,7 @@ func material_name(key: String) -> String:
 
 
 func material_summary() -> String:
-	var order := ["building_materials", "wood", "metal", "electronics", "textiles", "food", "medicine", "fuel", "vehicle_parts", "tools"]
+	var order := ["building_materials", "wood", "metal", "electronics", "textiles", "food", "medicine", "fuel", "vehicle_parts", "tools", "zombie_matter"]
 	var out: Array[String] = []
 	for key in order:
 		var n: int = materials.get(key, 0)
@@ -373,6 +377,7 @@ func fortify_cost(b: BuildingData) -> Dictionary:
 		"building_materials": 8 + ceili(float(b.rect.size.x + b.rect.size.y) * 0.5),
 		"wood": 4 + b.floors,
 		"metal": 3,
+		"zombie_matter": 3 + b.floors,
 	}
 
 
@@ -468,6 +473,7 @@ func fortify_building(id: String) -> String:
 	if not spend(cost):
 		return "need " + cost_text(cost)
 	st["fortified"] = true
+	st["warded"] = true
 	state_changed.emit(id)
 	settlement_changed.emit()
 	return "perimeter fortified — this still does not claim the site"
@@ -485,6 +491,8 @@ func _with_survivor_needs(record: Dictionary) -> Dictionary:
 		person["hunger"] = 25 + posmod(floori(float(roll) / 43.0), 36)
 	if not person.has("morale"):
 		person["morale"] = 52 + posmod(floori(float(roll) / 1548.0), 29)
+	if not person.has("wellbeing"):
+		person["wellbeing"] = 45 + posmod(floori(float(roll) / 44892.0), 26)
 	if not person.has("injured"):
 		person["injured"] = int(person["health"]) < 64
 	return person
@@ -492,13 +500,11 @@ func _with_survivor_needs(record: Dictionary) -> Dictionary:
 
 func survivor_condition(person: Dictionary) -> String:
 	if person.get("injured", false):
-		return "injured"
-	if int(person.get("hunger", 0)) >= 80:
-		return "starving"
-	if int(person.get("hunger", 0)) >= 55:
-		return "hungry"
-	if int(person.get("morale", 70)) < 35:
-		return "demoralized"
+		return "recovering"
+	if int(person.get("wellbeing", 50)) >= 80:
+		return "thriving"
+	if int(person.get("morale", 60)) >= 75:
+		return "happy"
 	return "steady"
 
 func rescue_eligible(b: BuildingData) -> bool:
@@ -763,9 +769,8 @@ func advance_settlement(dt: float) -> void:
 		run_work_cycle()
 
 
-## A base is on the shared inventory network only when it connects through the persisted
-## road links to the founding base. Disconnected production remains visible in that site's
-## local stockpile and is delivered automatically after the route is restored.
+## A base joins shared inventory through a road link or through physically joined warded
+## ground. The latter lets a mature settlement retire its temporary caravan connection.
 func networked_base_ids() -> Dictionary:
 	var claims: Array[String] = claimed_ids()
 	claims.sort()
@@ -795,7 +800,25 @@ func networked_base_ids() -> Dictionary:
 			if other != "" and not connected.has(other) and claims.has(other):
 				connected[other] = true
 				queue.append(other)
+		for candidate in claims:
+			if not connected.has(candidate) and _wards_touch(here, candidate):
+				connected[candidate] = true
+				queue.append(candidate)
 	return connected
+
+
+func _wards_touch(a_id: String, b_id: String) -> bool:
+	var a := ward_cells(a_id)
+	var b := ward_cells(b_id)
+	if a.is_empty() or b.is_empty():
+		return false
+	var small: Dictionary = a if a.size() <= b.size() else b
+	var large: Dictionary = b if a.size() <= b.size() else a
+	for cell in small:
+		for offset in [Vector2i.ZERO, Vector2i.RIGHT, Vector2i.LEFT, Vector2i.DOWN, Vector2i.UP]:
+			if large.has(cell + offset):
+				return true
+	return false
 
 
 func _add_bundle(target: Dictionary, bundle: Dictionary) -> void:
@@ -821,7 +844,8 @@ func _process_base_needs(id: String, st: Dictionary, connected: bool) -> Diction
 	var citizens := maxi(int(st.get("citizens", 0)), resident_ids.size() + int(st.get("founders", 0)))
 	if citizens <= 0:
 		var empty := { "status": "empty", "food_needed": 0, "food_used": 0, "medicine_used": 0,
-			"hungry": 0, "starving": 0, "injured": 0, "morale": 0, "incidents": [] }
+			"hungry": 0, "starving": 0, "injured": 0, "morale": 0, "wellbeing": 0,
+			"productivity_bonus": false, "incidents": [] }
 		st["needs"] = empty
 		return empty
 
@@ -857,60 +881,49 @@ func _process_base_needs(id: String, st: Dictionary, connected: bool) -> Diction
 
 	var fed_slots := mini(citizens, food_used * 2)
 	var treatments_left := medicine_used
-	var incidents: Array[String] = []
-	var hungry := 0
-	var starving := 0
 	var injured := 0
 	var morale_total := 0
+	var wellbeing_total := 0
 	for i in resident_ids.size():
 		var sid := str(resident_ids[i])
 		var person: Dictionary = _with_survivor_needs(survivors.get(sid, { "id": sid }))
 		var fed := i < fed_slots
-		person["hunger"] = clampi(int(person["hunger"]) + (-24 if fed else 22), 0, 100)
-		person["morale"] = clampi(int(person["morale"]) + (3 if fed else -8), 0, 100)
+		if fed:
+			person["hunger"] = maxi(0, int(person.get("hunger", 0)) - 12)
+		person["wellbeing"] = clampi(int(person["wellbeing"]) + (8 if fed else 1), 0, 100)
+		person["morale"] = clampi(int(person["morale"]) + (3 if fed else 1), 0, 100)
 		if person.get("injured", false):
+			person["health"] = clampi(int(person["health"]) + 4, 0, 100)
 			if treatments_left > 0:
 				treatments_left -= 1
-				person["health"] = clampi(int(person["health"]) + 22, 0, 100)
-				person["morale"] = clampi(int(person["morale"]) + 6, 0, 100)
-				person["injured"] = int(person["health"]) < 72
-			else:
-				person["health"] = maxi(10, int(person["health"]) - 3)
-				person["morale"] = maxi(0, int(person["morale"]) - 4)
-		if int(person["hunger"]) >= 80:
-			person["health"] = maxi(10, int(person["health"]) - 4)
-		var risky_job := str(person.get("job", "")) in ["scavenger", "builder", "mechanic"]
-		if risky_job and posmod(Det.h3(seed, sid.hash(), settlement_cycle, 0, 1402), 13) == 0:
-			person["health"] = maxi(10, int(person["health"]) - 18)
-			person["injured"] = true
-			incidents.append("%s injured while %s" % [person.get("name", "survivor"), person.get("job", "working")])
-		if int(person["hunger"]) >= 55:
-			hungry += 1
-		if int(person["hunger"]) >= 80:
-			starving += 1
+				person["health"] = clampi(int(person["health"]) + 18, 0, 100)
+				person["morale"] = clampi(int(person["morale"]) + 4, 0, 100)
+			person["injured"] = int(person["health"]) < 72
 		if person.get("injured", false):
 			injured += 1
 		morale_total += int(person["morale"])
+		wellbeing_total += int(person["wellbeing"])
 		survivors[sid] = person
 
 	st["stored_items"] = stored
 	st["local_stockpile"] = local
 	var avg_morale := 70 if resident_ids.is_empty() else roundi(float(morale_total) / resident_ids.size())
-	var status := "stable"
-	if starving > 0 or (injured > 0 and medicine_used == 0):
-		status = "critical"
-	elif food_used < food_needed or injured > 0 or hungry > 0 or avg_morale < 45:
-		status = "strained"
+	var avg_wellbeing := 60 if resident_ids.is_empty() else roundi(float(wellbeing_total) / resident_ids.size())
+	var full_meals := food_used >= food_needed
+	var productivity_bonus := full_meals and injured == 0 and avg_morale >= 60
+	var status := "recovering" if injured > 0 else ("thriving" if productivity_bonus and avg_wellbeing >= 65 else ("comfortable" if full_meals else "steady"))
 	var report := {
 		"status": status,
 		"food_needed": food_needed,
 		"food_used": food_used,
 		"medicine_used": medicine_used,
-		"hungry": hungry,
-		"starving": starving,
+		"hungry": 0,
+		"starving": 0,
 		"injured": injured,
 		"morale": avg_morale,
-		"incidents": incidents,
+		"wellbeing": avg_wellbeing,
+		"productivity_bonus": productivity_bonus,
+		"incidents": [],
 	}
 	st["needs"] = report
 	return report
@@ -1003,8 +1016,15 @@ func claim_building(id: String) -> String:
 		return "building already belongs to the settlement"
 	if not st.get("fortified", false):
 		return "cleared is not claimable — build the perimeter first"
-	if not claimed_ids().is_empty() and not st.get("supplied", false):
-		return "connect a supply line before claiming this outpost"
+	var existing_claims := claimed_ids()
+	if not existing_claims.is_empty() and not st.get("supplied", false):
+		var joined_to_safe_ground := false
+		for home_id in networked_base_ids():
+			if _wards_touch(home_id, id):
+				joined_to_safe_ground = true
+				break
+		if not joined_to_safe_ground:
+			return "connect a supply line or extend warded ground to this outpost before claiming it"
 	var cost := claim_cost(b)
 	if not spend(cost):
 		return "need " + cost_text(cost)
@@ -1040,7 +1060,7 @@ func build_farm(id: String) -> String:
 
 func build_cost(kind: String) -> Dictionary:
 	match kind:
-		"wall": return { "building_materials": 2 }
+		"wall": return { "building_materials": 2, "zombie_matter": 1 }
 		"crate": return { "wood": 2 }
 		"bed": return { "wood": 2, "textiles": 2 }
 		"chair": return { "wood": 1 }
@@ -1125,6 +1145,194 @@ func _entry_clearance(b: BuildingData) -> Dictionary:
 	return _rect_footprint(Rect2(lo, hi - lo), "entrance lane")
 
 
+func snap_wall_position(pos: Vector3, yaw: float) -> Vector3:
+	var cardinal := snappedf(yaw, PI * 0.5)
+	if absf(cos(cardinal)) >= absf(sin(cardinal)):
+		pos.x = (roundf(pos.x / WARD_GRID - 0.5) + 0.5) * WARD_GRID
+		pos.z = roundf(pos.z / WARD_GRID) * WARD_GRID
+	else:
+		pos.x = roundf(pos.x / WARD_GRID) * WARD_GRID
+		pos.z = (roundf(pos.z / WARD_GRID - 0.5) + 0.5) * WARD_GRID
+	return pos
+
+
+func _ward_edge_key(a: Vector2i, b: Vector2i) -> String:
+	if a.x > b.x or (a.x == b.x and a.y > b.y):
+		var swap := a
+		a = b
+		b = swap
+	return "%d,%d:%d,%d" % [a.x, a.y, b.x, b.y]
+
+
+func _add_ward_edge(edges: Dictionary, a: Vector2i, b: Vector2i) -> void:
+	edges[_ward_edge_key(a, b)] = true
+
+
+func _ward_barriers(id: String, b: BuildingData) -> Dictionary:
+	var edges := {}
+	var safe := safe_rect_world(b)
+	var lo := Vector2i(roundi(safe.position.x / WARD_GRID), roundi(safe.position.y / WARD_GRID))
+	var hi := Vector2i(roundi(safe.end.x / WARD_GRID), roundi(safe.end.y / WARD_GRID))
+	# Zombie matter closes the entrance energetically even though the physical gate stays
+	# open for the player. Once built, this original perimeter is permanent safe ground.
+	for x in range(lo.x, hi.x):
+		_add_ward_edge(edges, Vector2i(x, lo.y), Vector2i(x + 1, lo.y))
+		_add_ward_edge(edges, Vector2i(x, hi.y), Vector2i(x + 1, hi.y))
+	for y in range(lo.y, hi.y):
+		_add_ward_edge(edges, Vector2i(lo.x, y), Vector2i(lo.x, y + 1))
+		_add_ward_edge(edges, Vector2i(hi.x, y), Vector2i(hi.x, y + 1))
+	for item in placements:
+		if item.get("building", "") != id or item.get("kind", "") != "wall":
+			continue
+		var pos: Vector3 = item.get("pos", Vector3.ZERO)
+		var yaw := snappedf(float(item.get("yaw", 0.0)), PI * 0.5)
+		var axis := Vector2(cos(yaw), -sin(yaw))
+		var center := Vector2(pos.x, pos.z)
+		var a := Vector2i(roundi((center.x - axis.x * WARD_GRID * 0.5) / WARD_GRID),
+			roundi((center.y - axis.y * WARD_GRID * 0.5) / WARD_GRID))
+		var c := Vector2i(roundi((center.x + axis.x * WARD_GRID * 0.5) / WARD_GRID),
+			roundi((center.y + axis.y * WARD_GRID * 0.5) / WARD_GRID))
+		if a != c and absi(a.x - c.x) + absi(a.y - c.y) == 1:
+			_add_ward_edge(edges, a, c)
+	return edges
+
+
+func ward_cells(id: String) -> Dictionary:
+	if _ward_cache.has(id):
+		return _ward_cache[id]
+	var b := building_by_id(id)
+	var st: Dictionary = state.get(id, {})
+	if b == null or not (st.get("warded", false) or st.get("fortified", false)):
+		return {}
+	var barriers := _ward_barriers(id, b)
+	var safe := safe_rect_world(b)
+	var node_lo := Vector2i(roundi(safe.position.x / WARD_GRID), roundi(safe.position.y / WARD_GRID))
+	var node_hi := Vector2i(roundi(safe.end.x / WARD_GRID), roundi(safe.end.y / WARD_GRID))
+	for item in placements:
+		if item.get("building", "") != id or item.get("kind", "") != "wall":
+			continue
+		var p: Vector3 = item.get("pos", Vector3.ZERO)
+		var n := Vector2i(roundi(p.x / WARD_GRID), roundi(p.z / WARD_GRID))
+		node_lo.x = mini(node_lo.x, n.x - 1)
+		node_lo.y = mini(node_lo.y, n.y - 1)
+		node_hi.x = maxi(node_hi.x, n.x + 1)
+		node_hi.y = maxi(node_hi.y, n.y + 1)
+	var cell_lo := node_lo - Vector2i(2, 2)
+	var cell_hi := node_hi + Vector2i(1, 1)
+	var outside := {}
+	var queue: Array[Vector2i] = [cell_lo]
+	outside[cell_lo] = true
+	var cursor := 0
+	var directions: Array[Vector2i] = [Vector2i.RIGHT, Vector2i.LEFT, Vector2i.DOWN, Vector2i.UP]
+	while cursor < queue.size():
+		var cell := queue[cursor]
+		cursor += 1
+		for direction in directions:
+			var next := cell + direction
+			if next.x < cell_lo.x or next.y < cell_lo.y or next.x > cell_hi.x or next.y > cell_hi.y or outside.has(next):
+				continue
+			var edge_a := Vector2i.ZERO
+			var edge_b := Vector2i.ZERO
+			if direction == Vector2i.RIGHT:
+				edge_a = Vector2i(cell.x + 1, cell.y)
+				edge_b = Vector2i(cell.x + 1, cell.y + 1)
+			elif direction == Vector2i.LEFT:
+				edge_a = Vector2i(cell.x, cell.y)
+				edge_b = Vector2i(cell.x, cell.y + 1)
+			elif direction == Vector2i.DOWN:
+				edge_a = Vector2i(cell.x, cell.y + 1)
+				edge_b = Vector2i(cell.x + 1, cell.y + 1)
+			else:
+				edge_a = Vector2i(cell.x, cell.y)
+				edge_b = Vector2i(cell.x + 1, cell.y)
+			if barriers.has(_ward_edge_key(edge_a, edge_b)):
+				continue
+			outside[next] = true
+			queue.append(next)
+	var enclosed := {}
+	for y in range(cell_lo.y, cell_hi.y + 1):
+		for x in range(cell_lo.x, cell_hi.x + 1):
+			var cell := Vector2i(x, y)
+			if not outside.has(cell):
+				enclosed[cell] = true
+	_ward_cache[id] = enclosed
+	return enclosed
+
+
+func ward_bounds_world(id: String) -> Rect2:
+	var cells := ward_cells(id)
+	if cells.is_empty():
+		var b := building_by_id(id)
+		return safe_rect_world(b) if b != null else Rect2()
+	var lo := Vector2i(2147483647, 2147483647)
+	var hi := Vector2i(-2147483648, -2147483648)
+	for cell in cells:
+		lo.x = mini(lo.x, cell.x)
+		lo.y = mini(lo.y, cell.y)
+		hi.x = maxi(hi.x, cell.x + 1)
+		hi.y = maxi(hi.y, cell.y + 1)
+	return Rect2(Vector2(lo) * WARD_GRID, Vector2(hi - lo) * WARD_GRID)
+
+
+func ward_contains_point(id: String, point: Vector2) -> bool:
+	var cell := Vector2i(floori(point.x / WARD_GRID), floori(point.y / WARD_GRID))
+	return ward_cells(id).has(cell)
+
+
+func ward_contains_rect(id: String, rect: Rect2) -> bool:
+	var inset := Vector2(0.03, 0.03)
+	for point in [rect.position + inset, Vector2(rect.end.x, rect.position.y) + Vector2(-inset.x, inset.y),
+			rect.end - inset, Vector2(rect.position.x, rect.end.y) + Vector2(inset.x, -inset.y), rect.get_center()]:
+		if not ward_contains_point(id, point):
+			return false
+	return true
+
+
+func ward_cell_count(id: String) -> int:
+	return ward_cells(id).size()
+
+
+func ward_gate_world(id: String) -> Vector2:
+	var b := building_by_id(id)
+	if b == null:
+		return Vector2.INF
+	var direction_i := b.road_tile - b.door_tile
+	var direction := Vector2(signi(direction_i.x), signi(direction_i.y))
+	var point := Vector2((b.road_tile.x + 0.5) * TILE_M, (b.road_tile.y + 0.5) * TILE_M)
+	if direction == Vector2.ZERO:
+		return point
+	# Follow the entrance ray through any newly enclosed cells. The returned point is
+	# the actual ward boundary, even when a lopsided expansion enlarged its AABB elsewhere.
+	for step in 512:
+		var probe := point + direction * (WARD_GRID * 0.75)
+		if not ward_contains_point(id, probe):
+			break
+		point += direction * WARD_GRID
+	var cell := Vector2i(floori(point.x / WARD_GRID), floori(point.y / WARD_GRID))
+	if direction.x < 0:
+		point.x = cell.x * WARD_GRID
+	elif direction.x > 0:
+		point.x = (cell.x + 1) * WARD_GRID
+	elif direction.y < 0:
+		point.y = cell.y * WARD_GRID
+	else:
+		point.y = (cell.y + 1) * WARD_GRID
+	return point
+
+
+func is_world_safe(pos: Vector3) -> bool:
+	var point := Vector2(pos.x, pos.z)
+	for id in state:
+		var st: Dictionary = state[id]
+		if (st.get("warded", false) or st.get("fortified", false)) and ward_contains_point(id, point):
+			return true
+	return false
+
+
+func is_tile_safe(tile: Vector2i) -> bool:
+	return is_world_safe(tile_to_world(tile))
+
+
 ## Empty means valid; otherwise the text is suitable for immediate HUD feedback.
 func placement_error(id: String, kind: String, pos: Vector3, yaw: float) -> String:
 	if not PLACEMENT_SIZE.has(kind):
@@ -1140,10 +1348,13 @@ func placement_error(id: String, kind: String, pos: Vector3, yaw: float) -> Stri
 		return "farm plots need open ground on the ground floor"
 	var fp := _placement_footprint(kind, pos, yaw)
 	var bounds := _footprint_bounds(fp)
-	var safe := safe_rect_world(b)
-	if bounds.position.x < safe.position.x or bounds.position.y < safe.position.y \
-			or bounds.end.x > safe.end.x or bounds.end.y > safe.end.y:
-		return "%s must fit fully inside the perimeter" % kind
+	if kind == "wall":
+		var construction_band := ward_bounds_world(id).grow(WARD_GRID + 0.35)
+		if bounds.position.x < construction_band.position.x or bounds.position.y < construction_band.position.y \
+				or bounds.end.x > construction_band.end.x or bounds.end.y > construction_band.end.y:
+			return "walls must connect near the current warded perimeter"
+	elif not ward_contains_rect(id, bounds):
+		return "%s must fit fully inside warded ground" % kind
 	if kind == "farm" and _footprints_overlap(fp, _rect_footprint(building_rect_world(b))):
 		return "farm plots need open ground outside the building"
 	if kind in ["farm", "wall"] and _footprints_overlap(fp, _entry_clearance(b)):
@@ -1170,7 +1381,7 @@ func find_farm_site(id: String) -> Dictionary:
 		return {}
 	if placement_count(id, "farm") >= farm_capacity(b):
 		return {}
-	var safe := safe_rect_world(b)
+	var safe := ward_bounds_world(id)
 	for yaw in [0.0, PI * 0.5]:
 		var probe := _placement_footprint("farm", Vector3.ZERO, yaw)
 		var ext := _footprint_bounds(probe).size * 0.5

@@ -764,6 +764,7 @@ func _on_missed() -> void:
 
 func _on_zombie_killed(z: Zombie) -> void:
 	kills += 1
+	World.add_materials({ "zombie_matter": 1 })
 	if z.room >= 0 and interior.is_inside() and director.alive_in_room(z.room) == 0:
 		interior.mark_room_cleared(z.room)
 		_refresh_prompts()

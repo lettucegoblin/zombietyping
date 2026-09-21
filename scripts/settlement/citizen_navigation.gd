@@ -8,6 +8,8 @@ const BODY_RADIUS := 0.48
 
 var bounds := Rect2()
 var _building := Rect2()
+var _building_id := ""
+var _use_ward_shape := false
 var _obstacles: Array[Dictionary] = []
 var _grid := AStarGrid2D.new()
 var _size := Vector2i.ZERO
@@ -15,7 +17,9 @@ var _walkable: Array[Vector2i] = []
 
 
 func _init(b: BuildingData, placements: Array) -> void:
-	bounds = World.safe_rect_world(b).grow(-BODY_RADIUS - 0.2)
+	_building_id = b.id()
+	_use_ward_shape = not World.ward_cells(_building_id).is_empty()
+	bounds = World.ward_bounds_world(b.id()).grow(-BODY_RADIUS - 0.2)
 	_building = World.building_rect_world(b).grow(BODY_RADIUS)
 	for item in placements:
 		if item.get("building", "") != b.id():
@@ -61,7 +65,7 @@ func _cell_point(cell: Vector2i) -> Vector2:
 
 
 func _point_blocked(p: Vector2) -> bool:
-	if not bounds.has_point(p) or _building.has_point(p):
+	if not bounds.has_point(p) or (_use_ward_shape and not World.ward_contains_point(_building_id, p)) or _building.has_point(p):
 		return true
 	for obstacle in _obstacles:
 		var delta: Vector2 = p - obstacle["center"]

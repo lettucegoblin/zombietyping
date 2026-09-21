@@ -53,7 +53,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
 | `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
-| `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, first base, required supply link for the second base, claim, and persistent furniture placement |
+| `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |
 | `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
 | `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
@@ -216,12 +216,20 @@ required beds, storage, water, or power takes it offline until those utilities a
 Installed levels add a role-coloured rooftop beacon; an offline facility's beacon turns dim
 red, so utility damage is visible in the safe zone as well as the management panel.
 
-Every work cycle also advances resident health, hunger, and morale. One food unit feeds two
-people; deposited packaged food and bandages are consumed before connected material stores,
-while a cut-off outpost can use only its own stockpile. Injured residents recover with
-medicine, risky jobs can cause deterministic accidents, and starving, critically hurt, or
-intermittently demoralized residents stop contributing labor. The Tab building panel reports
-base need status and each named resident's condition; all values and incidents persist.
+Every work cycle can improve resident wellbeing, recovery, and morale. One optional food unit
+feeds two people; deposited packaged food and bandages are consumed before connected material
+stores, while a cut-off outpost can use only its own stockpile. People always recover and keep
+contributing: meals, medicine, comfort, and high morale grant positive productivity bonuses
+instead of turning the settlement into an upkeep timer. The Tab building panel reports each
+base's wellbeing and each named resident's condition; all progress persists.
+
+Fortified perimeters combine building materials with zombie matter. They are permanent safe
+ground: outdoor zombies cannot spawn or remain inside them, and they never decay or trigger
+raids. Player-built wall segments snap to a 2.5 m procedural grid. An open run is only a
+barrier; closing a loop automatically adds every enclosed cell to the safe zone, expands WASD
+building/citizen space, and allows furnishing and farms there. When expanded safe ground joins
+another base, shared logistics work without the old road supply line—the caravan is a bridge
+to expansion, not recurring maintenance.
 
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only

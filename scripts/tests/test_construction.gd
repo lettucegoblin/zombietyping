@@ -13,7 +13,9 @@ func _ready() -> void:
 		World.materials[key] = 0
 	var b: BuildingData = World.get_sector(0, 0).buildings[0]
 	World.set_building_state(b.id(), "claimed", true)
-	World.add_materials({ "wood": 10, "building_materials": 20, "tools": 4 })
+	World.set_building_state(b.id(), "fortified", true)
+	World.set_building_state(b.id(), "warded", true)
+	World.add_materials({ "wood": 10, "building_materials": 20, "tools": 4, "zombie_matter": 20 })
 	var safe := World.safe_rect_world(b)
 	var target := Vector3(safe.get_center().x, 0.05, safe.get_center().y)
 	var builder := FakeBuilder.new()
@@ -68,7 +70,28 @@ func _ready() -> void:
 	if not upstairs_farm.contains("ground floor"):
 		_fail("an upstairs farm preview was accepted: " + upstairs_farm)
 		return
-	print("CONSTRUCTION OK  ghost/rotate/confirm/cancel/full-undo/partial-dismantle")
+	var initial_cells := World.ward_cell_count(b.id())
+	var r := World.safe_rect_world(b)
+	var x := r.position.x + World.WARD_GRID * 0.5
+	var y := r.position.y
+	var extension := [
+		{ "building": b.id(), "kind": "wall", "pos": Vector3(r.position.x, 0.05, y - World.WARD_GRID * 0.5), "yaw": PI * 0.5 },
+		{ "building": b.id(), "kind": "wall", "pos": Vector3(r.position.x + World.WARD_GRID, 0.05, y - World.WARD_GRID * 0.5), "yaw": PI * 0.5 },
+		{ "building": b.id(), "kind": "wall", "pos": Vector3(x, 0.05, y - World.WARD_GRID), "yaw": 0.0 },
+	]
+	World.placements.append(extension[0])
+	World.placements.append(extension[1])
+	World.settlement_changed.emit()
+	if World.ward_cell_count(b.id()) != initial_cells:
+		_fail("an open wall run incorrectly created safe territory")
+		return
+	World.placements.append(extension[2])
+	World.settlement_changed.emit()
+	var extension_center := Vector2(x, y - World.WARD_GRID * 0.5)
+	if World.ward_cell_count(b.id()) != initial_cells + 1 or not World.ward_contains_point(b.id(), extension_center):
+		_fail("closing wall segment did not procedurally expand the ward")
+		return
+	print("CONSTRUCTION OK  ghost/rotate/confirm/cancel/refunds/permanent-ward-expansion")
 	get_tree().quit(0)
 
 

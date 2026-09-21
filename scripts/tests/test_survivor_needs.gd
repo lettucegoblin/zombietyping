@@ -1,5 +1,5 @@
 extends Node
-## Base provisions, injury treatment, morale/hunger work gating, backpack deposit, and save.
+## Base provisions are positive bonuses: recovery, morale, productivity, deposit, and save.
 
 var _failed := false
 
@@ -47,9 +47,10 @@ func _ready() -> void:
 	World.survivors[sid] = person
 	var hungry_cycle := World.run_work_cycle()
 	var hungry_report: Dictionary = hungry_cycle["bases"][b.id()]["needs"]
-	_check(int(hungry_report["starving"]) == 1 and hungry_report["status"] == "critical", "food shortage did not create a critical need")
-	_check(int(hungry_cycle["bases"][b.id()].get("unavailable", 0)) == 1, "starving resident still contributed labour")
-	_check(World.survivor_condition(World.survivors[sid]) == "starving", "roster condition did not expose starvation")
+	_check(int(hungry_report["food_used"]) == 0 and hungry_report["status"] == "steady", "an optional meal shortage became punitive")
+	_check(int(hungry_cycle["bases"][b.id()].get("unavailable", 0)) == 0, "a resident was blocked from contributing labour")
+	_check(World.survivor_condition(World.survivors[sid]) == "steady", "roster condition framed a missing bonus as punishment")
+	_check(int(World.survivors[sid]["hunger"]) == 75 and int(World.survivors[sid]["morale"]) > 38, "a cycle without provisions reduced resident welfare")
 
 	var outpost: BuildingData = World.get_sector(0, 0).buildings[1]
 	var isolated_id := "needs:isolated"
@@ -69,7 +70,7 @@ func _ready() -> void:
 	World.state.clear()
 	World.survivors.clear()
 	_check(World.restore_snapshot(snapshot), "needs snapshot could not be restored")
-	_check(int(World.survivors[sid].get("hunger", 0)) >= 90 and World.building_state(b.id()).has("needs"), "save lost resident or base needs")
+	_check(int(World.survivors[sid].get("hunger", 0)) == 75 and World.building_state(b.id()).has("needs"), "save lost resident or base wellbeing")
 	if not _failed:
 		print("SURVIVOR NEEDS OK  ", World.building_state(b.id())["needs"])
 	get_tree().quit(1 if _failed else 0)

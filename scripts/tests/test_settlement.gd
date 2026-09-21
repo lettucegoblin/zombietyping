@@ -8,6 +8,7 @@ func _ready() -> void:
 	World.placements.clear()
 	for key in World.materials:
 		World.materials[key] = 0
+	World.add_materials({ "zombie_matter": 100 })
 	var first: BuildingData
 	var second: BuildingData
 	for b in World.get_sector(0, 0).buildings:
@@ -57,11 +58,12 @@ func _ready() -> void:
 	_assert_ok(World.salvage_building(second.id()), "salvage second")
 	_assert_ok(World.fortify_building(second.id()), "fortify second")
 	var premature := World.claim_building(second.id())
-	if not premature.contains("supply"):
-		_fail("second claim bypassed supply rule: " + premature)
+	if premature.contains("supply"):
+		_assert_ok(World.link_supply(second.id()), "link supply")
+		_assert_ok(World.claim_building(second.id()), "claim second")
+	elif not World._wards_touch(first.id(), second.id()) or not World.building_state(second.id()).get("claimed", false):
+		_fail("second claim bypassed both supply and joined warded ground: " + premature)
 		return
-	_assert_ok(World.link_supply(second.id()), "link supply")
-	_assert_ok(World.claim_building(second.id()), "claim second")
 	var r := World.safe_rect_world(first)
 	World.add_materials({ "building_materials": 200, "wood": 200, "textiles": 200, "tools": 40 })
 	var chair_pos := Vector3(r.get_center().x, 0.05, r.get_center().y)
@@ -150,7 +152,7 @@ func _ready() -> void:
 	if not World.restore_snapshot(loaded):
 		_fail("could not restore settlement snapshot")
 		return
-	if not World.building_state(first.id()).get("claimed", false) or World.supply_links.size() != 1 \
+	if not World.building_state(first.id()).get("claimed", false) or World.supply_links.size() != snapshot["supply_links"].size() \
 			or World.placements.size() != snapshot["placements"].size() \
 			or World.placements[0]["pos"] != snapshot["placements"][0]["pos"] \
 			or not PropSalvage.is_salvaged(first.id(), salvage_prop.id):

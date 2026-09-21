@@ -111,10 +111,10 @@ func resume() -> void:
 	hold = false
 
 
-func set_manual_zone(bounds: Rect2, gate_tile: Vector2i = Vector2i(0x7FFFFFFF, 0)) -> void:
+func set_manual_zone(bounds: Rect2, gate_tile: Vector2i = Vector2i(0x7FFFFFFF, 0), gate_world: Vector2 = Vector2.INF) -> void:
 	manual_control = true
 	_manual_bounds = bounds.grow(-0.45)
-	_manual_gate = Vector2.INF if gate_tile.x == 0x7FFFFFFF else Vector2(World.tile_to_world(gate_tile).x, World.tile_to_world(gate_tile).z)
+	_manual_gate = gate_world if gate_world != Vector2.INF else (Vector2.INF if gate_tile.x == 0x7FFFFFFF else Vector2(World.tile_to_world(gate_tile).x, World.tile_to_world(gate_tile).z))
 	_manual_shape = SphereShape3D.new()
 	_manual_shape.radius = 0.3
 	hold = false
@@ -163,6 +163,11 @@ func _manual_move_vector(v: Vector2, dt: float) -> void:
 	var d := (right * v.x + forward * -v.y).normalized()
 	var current := Vector2(global_position.x, global_position.z)
 	var p := current + d * manual_speed * dt
+	if global_position.y < 1.0 and _manual_gate != Vector2.INF \
+			and current.distance_to(_manual_gate) < 0.9 and p.distance_to(_manual_gate) < current.distance_to(_manual_gate):
+		clear_manual_zone()
+		manual_zone_exited.emit()
+		return
 	if not _manual_bounds.has_point(p) and global_position.y < 1.0 and _manual_gate != Vector2.INF and current.distance_to(_manual_gate) < 3.2:
 		clear_manual_zone()
 		manual_zone_exited.emit()

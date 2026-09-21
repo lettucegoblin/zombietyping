@@ -43,18 +43,10 @@ static func produce(world_seed: int, b: BuildingData, st: Dictionary, roster: Di
 		counts[job] = 0
 	var skilled_growers: int = 0
 	var scavengers: Array[String] = []
-	var unavailable := 0
-	var resident_index := 0
 	for survivor_id in st.get("resident_ids", []):
 		var person: Dictionary = roster.get(str(survivor_id), {})
 		var job: String = str(person.get("job", "unassigned"))
 		if not JOBS.has(job):
-			continue
-		var unfit := int(person.get("health", 100)) <= 30 or int(person.get("hunger", 0)) >= 90
-		var demoralized := int(person.get("morale", 70)) < 35 and (cycle + resident_index) % 2 == 0
-		resident_index += 1
-		if unfit or demoralized:
-			unavailable += 1
 			continue
 		counts[job] = int(counts[job]) + 1
 		if job == "farmer" and str(person.get("trait", "")) in ["grower", "cook"]:
@@ -97,6 +89,9 @@ static func produce(world_seed: int, b: BuildingData, st: Dictionary, roster: Di
 	var medics: int = int(counts["medic"])
 	if medics > 0 and int(stats.get("water", 0)) > 0 and int(stats.get("storage", 0)) > 0 and cycle % 2 == 0:
 		output["medicine"] = medics * (1 + (upgrade_level if role_id == "shelter" else 0))
+	if st.get("needs", {}).get("productivity_bonus", false):
+		for material in output.keys():
+			output[material] = int(output[material]) + 1
 	return {
 		"output": output,
 		"jobs": counts,
@@ -104,5 +99,5 @@ static func produce(world_seed: int, b: BuildingData, st: Dictionary, roster: Di
 		"tended_farms": tended_farms,
 		"facility_role": profile["role_label"],
 		"upgrade_level": upgrade_level,
-		"unavailable": unavailable,
+		"unavailable": 0,
 	}

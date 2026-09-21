@@ -766,12 +766,13 @@ func _draw_building_panel(font: Font) -> void:
 			for i in mini(2, residents.size()):
 				var person: Dictionary = residents[i]
 				var condition := World.survivor_condition(person)
-				draw_string(font, Vector2(x, y), "%s · %s → %s · %s" % [person.get("name", "survivor"), person.get("trait", ""), person.get("job", "unassigned"), condition], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#ff6f91") if condition != "steady" else Color("#ded8e8"))
+				var condition_color := Color("#a6e3a1") if condition in ["happy", "thriving"] else (Color("#f6c177") if condition == "recovering" else Color("#ded8e8"))
+				draw_string(font, Vector2(x, y), "%s · %s → %s · %s" % [person.get("name", "survivor"), person.get("trait", ""), person.get("job", "unassigned"), condition], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, condition_color)
 				y += 15.0
 		var needs: Dictionary = st.get("needs", {})
 		if not needs.is_empty():
-			var needs_color := Color("#a6e3a1") if needs.get("status", "") == "stable" else Color("#ff6f91")
-			draw_string(font, Vector2(x, y), "NEEDS %s · food %d/%d · injured %d · morale %d" % [needs.get("status", ""), int(needs.get("food_used", 0)), int(needs.get("food_needed", 0)), int(needs.get("injured", 0)), int(needs.get("morale", 0))], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, needs_color)
+			var needs_color := Color("#a6e3a1") if needs.get("status", "") in ["thriving", "comfortable"] else (Color("#f6c177") if needs.get("status", "") == "recovering" else Color("#ded8e8"))
+			draw_string(font, Vector2(x, y), "WELLBEING %s · meals %d/%d · recovery %d · morale %d" % [needs.get("status", ""), int(needs.get("food_used", 0)), int(needs.get("food_needed", 0)), int(needs.get("injured", 0)), int(needs.get("morale", 0))], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, needs_color)
 			y += 15.0
 		var stored_items: Dictionary = st.get("stored_items", {})
 		if not stored_items.is_empty():
