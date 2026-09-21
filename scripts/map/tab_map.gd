@@ -14,6 +14,22 @@ const BAND_TILES := 6
 const MIN_PPT := 4.0
 const MAX_PPT := 28.0
 const LABEL_MIN_PPT := 6.0
+const FOCUS_EXPLORATION_SITES := 8
+
+const NAME_ROOTS := [
+	"Aster", "Bellweather", "Cinder", "Dovetail", "Elm", "Foxglove",
+	"Garnet", "Harbor", "Juniper", "Kingfisher", "Lantern", "Marigold",
+	"Northstar", "Orchid", "Palisade", "Quarry", "Rosewood", "Solace",
+	"Thistle", "Union", "Vesper", "Willow", "Yarrow", "Zephyr",
+]
+const NAME_SUFFIXES := {
+	"apartments": ["Court", "Heights", "Residences", "Arms"],
+	"house": ["House", "Cottage", "Place", "Homestead"],
+	"shop": ["Market", "Trading Post", "Supply", "Arcade"],
+	"office": ["Center", "Exchange", "Offices", "Tower"],
+	"warehouse": ["Works", "Depot", "Foundry", "Yard"],
+	"plain": ["Building", "Hall", "Block", "Annex"],
+}
 
 var player: Node3D
 var _center := Vector2.ZERO          # view centre, tile coords
@@ -32,6 +48,7 @@ var _action_hitboxes: Array[Dictionary] = []
 var _supply_route_cache: Array[Dictionary] = []
 var _supply_topology_key := ""
 var _supply_route_build_count := 0  # exposed to focused tests; never used by gameplay
+var _show_all_buildings := false
 
 var buffer := ""                      # what the player has typed (we own key handling: typing game)
 var _view_key := ""                   # cache key of the last label recompute
@@ -104,6 +121,8 @@ func _input(event: InputEvent) -> void:
 		elif k == KEY_DOWN:  _center.y += step; _invalidate()
 		elif k == KEY_HOME and player != null:
 			_center = Vector2(player.tile) + Vector2(0.5, 0.5); _invalidate()
+		elif k == KEY_F3:
+			_toggle_label_detail()
 		elif k == KEY_BACKSPACE:
 			buffer = buffer.left(maxi(buffer.length() - 1, 0)); queue_redraw()
 		elif k == KEY_ENTER or k == KEY_KP_ENTER:
@@ -132,8 +151,11 @@ func _gui_input(event: InputEvent) -> void:
 			if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 				for hit in _action_hitboxes:
 					if (hit["rect"] as Rect2).has_point(event.position):
-						flash(World.settlement_action(hit["action"], _selected_id))
-						_invalidate()
+						var action: String = hit["action"]
+						if action == "toggle_labels":
+							_toggle_label_detail()
+						else:
+							_run_settlement_action(action)
 						accept_event()
 						return
 			accept_event()
@@ -180,7 +202,7 @@ func _on_submit(text: String) -> void:
 			return
 		_selected_id = _labels[tokens[1]]
 		if tokens[0] != "info":
-			flash(World.settlement_action(commands[tokens[0]], _selected_id))
+			_run_settlement_action(commands[tokens[0]])
 		_invalidate()
 		return
 	var ids: Array[String] = []
@@ -197,6 +219,20 @@ func _on_submit(text: String) -> void:
 	_invalidate()
 
 
+func _toggle_label_detail() -> void:
+	_show_all_buildings = not _show_all_buildings
+	flash("all known buildings" if _show_all_buildings else "priority sites only")
+	queue_redraw()
+
+
+func _run_settlement_action(action: String) -> void:
+	var message := World.settlement_action(action, _selected_id)
+	if action == "supply" and message.begins_with("supply line established"):
+		message = _new_supply_message(_selected_id)
+	flash(message)
+	_invalidate()
+
+
 # ------------------------------------------------------------------ mapping
 
 func _tile_to_screen(t: Vector2) -> Vector2:
@@ -210,6 +246,85 @@ func _screen_to_tile(p: Vector2) -> Vector2:
 func _panel_rect() -> Rect2:
 	var panel_w := minf(350.0, size.x * 0.36)
 	return Rect2(Vector2(size.x - panel_w - 12.0, 42.0), Vector2(panel_w, size.y - 160.0))
+
+
+func building_name(b: BuildingData) -> String:
+	# Names are cosmetic and regenerable: no mutable state or save entry is required.
+	var name_seed := b.seed_hash ^ (b.rect.position.x * 73856093) ^ (b.rect.position.y * 19349663)
+	name_seed ^= b.district * 83492791 ^ b.floors * 265443576
+	var roots_index := posmod(name_seed, NAME_ROOTS.size())
+	var suffixes: Array = NAME_SUFFIXES.get(b.kind, NAME_SUFFIXES["plain"])
+	var suffix_index := posmod((name_seed >> 7) ^ b.index ^ b.block, suffixes.size())
+	return "%s %s" % [NAME_ROOTS[roots_index], suffixes[suffix_index]]
+
+
+func _label_for_id(id: String) -> String:
+	for label in _labels:
+		if _labels[label] == id:
+			return label
+	return ""
+
+
+func _endpoint_text(id: String) -> String:
+	var b := World.building_by_id(id)
+	if b == null:
+		return "unknown site"
+	var label := _label_for_id(id)
+	return ((label + "  ") if label != "" else "") + building_name(b)
+
+
+func _new_supply_message(target_id: String) -> String:
+	for route in _supply_route_cache:
+		if route["target_id"] == target_id:
+			return "supply: %s → %s" % [_endpoint_text(route["source_id"]), _endpoint_text(target_id)]
+	return "supply line established"
+
+
+func _supply_lines_for(id: String) -> Array[String]:
+	var lines: Array[String] = []
+	for route in _supply_route_cache:
+		if route["target_id"] == id:
+			lines.append("IN  ← " + _endpoint_text(route["source_id"]))
+		elif route["source_id"] == id:
+			lines.append("OUT → " + _endpoint_text(route["target_id"]))
+	return lines
+
+
+func _displayed_placed() -> Array:
+	if _show_all_buildings:
+		return _placed
+	var required := {}
+	if _selected_id != "":
+		required[_selected_id] = true
+	if player != null:
+		for id in player.queued_ids():
+			required[id] = true
+	for link in World.supply_links:
+		for id in link:
+			required[id] = true
+	var candidates: Array = []
+	for entry in _placed:
+		var b: BuildingData = entry["b"]
+		if not (World.state.get(b.id(), {}) as Dictionary).is_empty():
+			required[b.id()] = true
+		else:
+			candidates.append(entry)
+	var focus := _center
+	candidates.sort_custom(func(a, b):
+		var ab: BuildingData = a["b"]
+		var bb: BuildingData = b["b"]
+		var ad := ab.center_tile().distance_squared_to(focus)
+		var bd := bb.center_tile().distance_squared_to(focus)
+		return ab.id() < bb.id() if is_equal_approx(ad, bd) else ad < bd
+	)
+	for i in mini(FOCUS_EXPLORATION_SITES, candidates.size()):
+		required[(candidates[i]["b"] as BuildingData).id()] = true
+	# Preserve MapLabels' spatial order so focus mode never visually reshuffles addresses.
+	var displayed: Array = []
+	for entry in _placed:
+		if required.has((entry["b"] as BuildingData).id()):
+			displayed.append(entry)
+	return displayed
 
 
 # ------------------------------------------------------------------ supply route cache
@@ -287,6 +402,9 @@ func _draw_supply_routes() -> void:
 			"route":
 				draw_polyline(points, color, width)
 				_draw_supply_endpoints(points, color, width)
+				if _selected_id in [route["source_id"], route["target_id"]]:
+					_draw_supply_caption(points[0], route["source_id"], color, -1.0)
+					_draw_supply_caption(points[points.size() - 1], route["target_id"], color, 1.0)
 			"point":
 				# A zero-length valid link still needs a readable map mark.
 				var p := points[0]
@@ -295,6 +413,18 @@ func _draw_supply_routes() -> void:
 			"broken":
 				# Corrupt/stale links should be conspicuous rather than silently disappearing.
 				_draw_broken_supply(_tile_to_screen(route["source"]), _tile_to_screen(route["target"]), width)
+
+
+func _draw_supply_caption(anchor: Vector2, id: String, color: Color, side: float) -> void:
+	var font := get_theme_default_font()
+	var text := _endpoint_text(id)
+	var fs := 11
+	var text_w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+	var x := anchor.x + 7.0 if side > 0.0 else anchor.x - text_w - 11.0
+	var rect := Rect2(Vector2(x, anchor.y - 10.0), Vector2(text_w + 6.0, 17.0))
+	draw_rect(rect, Color("#17131f", 0.9))
+	draw_rect(rect, color, false, 1.0)
+	draw_string(font, rect.position + Vector2(3.0, 12.0), text, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color.WHITE)
 
 
 func _draw_supply_endpoints(points: PackedVector2Array, color: Color, width: float) -> void:
@@ -418,6 +548,7 @@ func recompute_labels() -> void:
 
 func _draw() -> void:
 	recompute_labels()
+	var displayed := _displayed_placed()
 	_building_hitboxes.clear()
 	_action_hitboxes.clear()
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#0b0b10"))
@@ -465,7 +596,7 @@ func _draw() -> void:
 	# labels
 	if _ppt >= LABEL_MIN_PPT:
 		var queued: Array = player.queued_ids() if player != null else []
-		for e in _placed:
+		for e in displayed:
 			var b: BuildingData = e["b"]
 			var p := _tile_to_screen(b.center_tile())
 			var label: String = e["label"]
@@ -489,15 +620,36 @@ func _draw() -> void:
 		draw_circle(pp, r + 2, Color.BLACK)
 		draw_circle(pp, r, COL_PLAYER)
 		draw_line(pp, pp + dir * r * 2.2, COL_PLAYER, 3.0)
+	_draw_legend(font)
 	_draw_building_panel(font)
 	# messages / status
 	var now := Time.get_ticks_msec() / 1000.0
 	status.text = _msg if now < _msg_until else ""
 	prompt.text = "> " + buffer + ("_" if int(now * 2.0) % 2 == 0 else " ")
-	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "click a building to manage it  ·  type labels + Enter to travel  ·  info/salvage/fortify/supply/claim/farm <label>  ·  Tab close"
+	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "F3 focus/all  ·  click to manage  ·  type labels + Enter to travel  ·  info/action <label>  ·  Tab close"
 	var sec := World.sector_of_tile(Vector2i(_center))
 	var sd_here := World.get_sector(sec.x, sec.y)
-	draw_string(font, Vector2(12, 24), "%s   sector %d,%d   %d labelled" % [District.NAME[sd_here.district], sec.x, sec.y, _placed.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#dddddd"))
+	var count_text := "%d/%d priority labels" % [displayed.size(), _placed.size()] if not _show_all_buildings else "%d known buildings" % _placed.size()
+	draw_string(font, Vector2(12, 24), "%s   sector %d,%d   %s" % [District.NAME[sd_here.district], sec.x, sec.y, count_text], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#dddddd"))
+
+
+func _draw_legend(font: Font) -> void:
+	var pos := Vector2(12.0, 39.0)
+	var bg := Rect2(pos, Vector2(384.0, 23.0))
+	draw_rect(bg, Color("#17131f", 0.84))
+	var x := pos.x + 7.0
+	var y := pos.y + 15.0
+	for item in [
+		[Color("#3fd0ff"), "safe"],
+		[Color("#5dff7a"), "cleared"],
+		[Color("#68d5ff"), "supply"],
+		[COL_ROUTE, "queued"],
+	]:
+		draw_rect(Rect2(Vector2(x, pos.y + 7.0), Vector2(8.0, 8.0)), item[0])
+		x += 12.0
+		draw_string(font, Vector2(x, y), item[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ded8e8"))
+		x += font.get_string_size(item[1], HORIZONTAL_ALIGNMENT_LEFT, -1, 11).x + 13.0
+	draw_string(font, Vector2(x, y), "F3: %s" % ("all" if not _show_all_buildings else "focus"), HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#f6c177"))
 
 
 func _draw_building_panel(font: Font) -> void:
@@ -506,7 +658,13 @@ func _draw_building_panel(font: Font) -> void:
 	draw_rect(pr, Color("#8067a8"), false, 2.0)
 	var x := pr.position.x + 16.0
 	var y := pr.position.y + 25.0
-	draw_string(font, Vector2(x, y), "SETTLEMENT / BUILDINGS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#f6c177"))
+	draw_string(font, Vector2(x, y), "SETTLEMENT", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#f6c177"))
+	var toggle_text := "F3  FOCUS" if _show_all_buildings else "F3  ALL SITES"
+	var toggle_rect := Rect2(Vector2(pr.end.x - 119.0, pr.position.y + 8.0), Vector2(106.0, 24.0))
+	draw_rect(toggle_rect, Color("#30263f"))
+	draw_rect(toggle_rect, Color("#8067a8"), false, 1.0)
+	draw_string(font, toggle_rect.position + Vector2(8.0, 17.0), toggle_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#f6c177"))
+	_action_hitboxes.append({ "rect": toggle_rect, "action": "toggle_labels" })
 	y += 25.0
 	var material_lines := _wrap_text(World.material_summary(), 42)
 	for line in material_lines:
@@ -514,8 +672,8 @@ func _draw_building_panel(font: Font) -> void:
 		y += 17.0
 	if _selected_id == "":
 		y += 18.0
-		draw_string(font, Vector2(x, y), "Click any visible map label", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
-		draw_string(font, Vector2(x, y + 20), "to inspect and develop that site.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
+		draw_string(font, Vector2(x, y), "Click a priority label to inspect it.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
+		draw_string(font, Vector2(x, y + 20), "F3 reveals every known building.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
 		return
 	var b := World.building_by_id(_selected_id)
 	if b == null:
@@ -523,8 +681,12 @@ func _draw_building_panel(font: Font) -> void:
 		return
 	var st: Dictionary = World.state.get(_selected_id, {})
 	y += 12.0
-	draw_string(font, Vector2(x, y), "%s  ·  %s  ·  %d floor%s" % [_selected_id, b.kind, b.floors, "" if b.floors == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+	var current_label := _label_for_id(_selected_id)
+	var address := current_label if current_label != "" else "off-map"
+	draw_string(font, Vector2(x, y), "%s  %s" % [address, building_name(b)], HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color.WHITE)
 	y += 22.0
+	draw_string(font, Vector2(x, y), "%s  ·  %d floor%s  ·  %s" % [b.kind.capitalize(), b.floors, "" if b.floors == 1 else "s", District.NAME[b.district]], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#b8adca"))
+	y += 20.0
 	var status_parts: Array[String] = []
 	for pair in [["visited", "visited"], ["cleared", "cleared"], ["salvaged", "salvaged"], ["fortified", "fortified"], ["supplied", "supplied"], ["claimed", "claimed"]]:
 		if st.get(pair[0], false):
@@ -533,6 +695,10 @@ func _draw_building_panel(font: Font) -> void:
 		status_parts.append("unsecured")
 	draw_string(font, Vector2(x, y), " → ".join(status_parts), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#68d5ff") if st.get("claimed", false) else Color("#ff9f68"))
 	y += 24.0
+	var supply_lines := _supply_lines_for(_selected_id)
+	for i in mini(2, supply_lines.size()):
+		draw_string(font, Vector2(x, y), supply_lines[i], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#68d5ff"))
+		y += 18.0
 	if st.get("cleared", false) and not st.get("fortified", false):
 		draw_string(font, Vector2(x, y), "Cleared ≠ claimable. Build the perimeter.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#ff6f91"))
 		y += 21.0

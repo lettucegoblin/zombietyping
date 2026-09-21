@@ -5,6 +5,9 @@ var _failed := false
 
 
 func _ready() -> void:
+	World.persistence_enabled = false
+	World.state.clear()
+	World.explored.clear()
 	World.supply_links.clear()
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
@@ -18,10 +21,66 @@ func _ready() -> void:
 		return
 	var a: BuildingData = pair[0]
 	var b: BuildingData = pair[1]
+	_check(map.building_name(a) == map.building_name(a), "building name is not deterministic")
+	_check(map.building_name(a).contains(" "), "building name is not human-readable")
+
+	# Focus mode draws a small actionable subset without changing the complete label map
+	# consumed by typed navigation.
+	World.mark_explored(Vector2i(a.center_tile()), 72)
+	map._center = a.center_tile()
+	map._ppt = 10.0
+	map._invalidate()
+	map.recompute_labels()
+	var all_count: int = map._placed.size()
+	var all_labels: Dictionary = map._labels.duplicate()
+	var focused: Array = map._displayed_placed()
+	_check(all_count > map.FOCUS_EXPLORATION_SITES, "test view did not expose enough buildings for focus mode")
+	_check(focused.size() <= map.FOCUS_EXPLORATION_SITES, "focus mode did not reduce label overload")
+	var focused_ids := {}
+	for entry in focused:
+		focused_ids[(entry["b"] as BuildingData).id()] = true
+	var hidden_label := ""
+	var hidden_id := ""
+	for label in map._labels:
+		if not focused_ids.has(map._labels[label]):
+			hidden_label = label
+			hidden_id = map._labels[label]
+			break
+	_check(hidden_label != "", "focus mode left no hidden label to test")
+	var capture := { "ids": [] }
+	map.destinations_typed.connect(func(ids): capture["ids"] = ids)
+	map._on_submit(hidden_label)
+	_check((capture["ids"] as Array).has(hidden_id), "focus-hidden label stopped typed navigation")
+	_check(map._labels == all_labels, "typing or focus mode mutated label addresses")
+	map._show_all_buildings = true
+	_check(map._displayed_placed().size() == all_count, "all-sites toggle omitted known buildings")
+	map._show_all_buildings = false
+	map.visible = true
+	var f3 := InputEventKey.new()
+	f3.keycode = KEY_F3
+	f3.pressed = true
+	map._input(f3)
+	_check(map._show_all_buildings, "F3 did not enable all-sites detail")
+	map._input(f3)
+	_check(not map._show_all_buildings, "F3 did not return to focus mode")
+	map.visible = false
+	World.state[hidden_id] = { "visited": true }
+	var priority_ids := {}
+	for entry in map._displayed_placed():
+		priority_ids[(entry["b"] as BuildingData).id()] = true
+	_check(priority_ids.has(hidden_id), "stateful priority site was hidden by focus mode")
+
 	World.supply_links.append(PackedStringArray([a.id(), b.id()]))
 	map._sync_supply_route_cache()
 	_check(map._supply_route_cache.size() == 1, "connected route was not cached")
 	_check(map._supply_route_cache[0]["status"] == "route", "connected route was marked degenerate")
+	_check(map._endpoint_text(a.id()).contains(map.building_name(a)), "supply endpoint omitted building name")
+	_check(map._new_supply_message(b.id()).contains("→"), "supply message omitted route direction")
+	map._selected_id = b.id()
+	map.visible = true
+	map.queue_redraw()
+	await get_tree().process_frame
+	map.visible = false
 	var builds: int = map._supply_route_build_count
 	for i in 12:
 		map._sync_supply_route_cache()
@@ -56,8 +115,10 @@ func _ready() -> void:
 	_check(is_equal_approx(map._ppt, old_zoom), "wheel zoom leaked through opaque panel")
 
 	World.supply_links.clear()
+	World.state.clear()
+	World.explored.clear()
 	if not _failed:
-		print("TAB MAP OK  cached route builds=", builds, "  panel input captured")
+		print("TAB MAP OK  cached route builds=", builds, "  focus=", focused.size(), "/", all_count, "  names + input captured")
 	get_tree().quit(1 if _failed else 0)
 
 
