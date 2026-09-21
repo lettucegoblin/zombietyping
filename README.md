@@ -57,6 +57,9 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_citizen_navigation.tscn` | deterministic yard routing around buildings, farms, walls and furniture, plus rebuild-position preservation |
+| `scenes/tests/test_rescue_loop.tscn` | deterministic semantic-room survivor target, rescue-priority guidance, typed `help`, directional cue lifecycle, pending roster, save/load, base assignment, and named citizens |
+| `scenes/tests/test_survivor_cue.tscn` | stable positional rescue cadence, range gating, 3D attenuation/panning, movement, and permanent shutdown on resolution |
+| `scenes/tests/test_facility_profile.tscn` | generated room/prop utility totals, dismantled-prop subtraction, deterministic facility role, and claim-aware readiness |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
@@ -169,6 +172,18 @@ and press `X` to dismantle that specific bed, television, fridge, rug, fixture, 
 the object disappears, its material-class yield is shown, and the removed ID persists in the
 save. Build mode provides a green/red placement ghost: `R` rotates, `F` confirms, `Esc`
 cancels, and `U` gives a ten-second full-refund undo before becoming a 50% dismantle action.
+
+Eligible uncleared buildings also receive a deterministic named survivor in a semantic room.
+The room/floor route takes priority over irrelevant cleared branches, the survivor emits a
+distance-filtered directional knock from their exact generated location, and `help` becomes
+typeable only after their room is safe. Rescues persist in a pending roster until a base is
+claimed, then become named citizens at the nearest claimed base. Only the first base gets a
+single founder automatically; later settlement population comes from rescues.
+
+The Tab building panel derives each site's role and beds/storage/water/power/comfort capacity
+from its complete procedural room program and still-intact generated props. Dismantled prop
+IDs stop contributing immediately, so the panel's upgrade readiness describes the physical
+building instead of a parallel abstract economy.
 
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only

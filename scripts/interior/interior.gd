@@ -622,16 +622,23 @@ func rescue_waiting_here() -> bool:
 
 func rescue_world_pos() -> Vector3:
 	var mission := active_rescue()
-	if mission.is_empty() or plan == null or int(mission["floor"]) != plan.floor:
+	if mission.is_empty() or plan == null:
 		return Vector3.INF
+	var target_plan: FloorPlan = plan
+	if int(mission["floor"]) != plan.floor:
+		target_plan = InteriorGen.generate(World.seed, building, int(mission["floor"]))
 	var ri := int(mission["room"])
-	if ri < 0 or ri >= plan.rooms.size():
+	if ri < 0 or ri >= target_plan.rooms.size():
 		return Vector3.INF
-	var centre := plan.room_stand_world(ri)
+	var centre := target_plan.room_stand_world(ri)
 	var offset_seed := Det.h(World.seed, building.seed_hash, ri, 1204)
 	var offset_bit := floori(float(offset_seed) / 2.0) % 2
 	var offset := Vector3(0.45 if offset_seed % 2 == 0 else -0.45, 0.85, 0.25 if offset_bit == 0 else -0.25)
-	return clamp_to_room(ri, centre + offset, 0.7)
+	var room_rect := target_plan.rooms[ri].rect
+	var lo := target_plan.cell_to_world(Vector2(room_rect.position))
+	var hi := target_plan.cell_to_world(Vector2(room_rect.end))
+	var p := centre + offset
+	return Vector3(clampf(p.x, lo.x + 0.7, hi.x - 0.7), p.y, clampf(p.z, lo.z + 0.7, hi.z - 0.7))
 
 
 ## Route through the generated room graph regardless of door state. Used only for rescue

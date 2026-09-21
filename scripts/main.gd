@@ -33,6 +33,7 @@ const APPROACH_RANGE := 10.0          # closer than this and a zombie's word is 
 var _approach_beat := 0.0
 const HALT_RANGE := 14.0              # a zombie you can fire at (in sight, in range) stops the rail
 const AIM_RANGE := 14.0               # ...and turns you to face it whenever you are not walking
+var _rescue_cue: SurvivorCue
 
 @onready var player: Node3D = $View/Viewport/World/Player
 @onready var streamer: Node3D = $View/Viewport/World/Streamer
@@ -60,6 +61,11 @@ func _ready() -> void:
 	sky.player = player
 	sky.sfx = sfx
 	settlement.configure(player)
+	_rescue_cue = SurvivorCue.new()
+	_rescue_cue.name = "SurvivorCue"
+	world3d.add_child(_rescue_cue)
+	_rescue_cue.set_listener(player)
+	_rescue_cue.resolve()
 	minimap.player = player
 	minimap.tab_map = map
 	typist.dest_labels = func(): return minimap.labels
@@ -324,6 +330,7 @@ func _on_arrived(id: String) -> void:
 		_queue_search(0.35)
 		return
 	if id == "exit":
+		_rescue_cue.resolve()
 		director.clear_room_zombies()
 		_spawned_rooms.clear()
 		interior.unload()
@@ -371,6 +378,7 @@ func _enter_safezone(b: BuildingData) -> void:
 	_climbing = false
 	typist.clear_prompts()
 	typist.enabled = false
+	_rescue_cue.resolve()
 	_hide_door_label()
 	interior.enter(b, 0)
 	interior.reveal_all()
@@ -402,6 +410,7 @@ func _on_world_state_changed(id: String) -> void:
 
 
 func _leave_safezone_for_travel() -> void:
+	_rescue_cue.resolve()
 	var b := World.building_by_id(settlement.active_building_id)
 	interior.unload()
 	settlement.leave()
@@ -414,6 +423,7 @@ func _leave_safezone_for_travel() -> void:
 func _on_safezone_gate_exit() -> void:
 	if mode != Mode.SAFEZONE:
 		return
+	_rescue_cue.resolve()
 	var b := World.building_by_id(settlement.active_building_id)
 	interior.unload()
 	settlement.leave()
@@ -464,6 +474,7 @@ func _enter_building() -> void:
 	door_timer = -1.0
 	typist.clear_prompts()
 	interior.enter(b, 0)
+	_sync_rescue_cue()
 	var fp: FloorPlan = interior.plan
 	var d: FloorPlan.Door = fp.doors[fp.entrance_door]
 	var ri: int = d.a
@@ -613,6 +624,7 @@ func _on_option(opt: Dictionary) -> void:
 				player.shake(0.18)
 			var pts: PackedVector3Array = interior.climb_path(up)
 			interior.begin_floor_change(1 if up else -1)
+			_sync_rescue_cue()
 			_seed_floor()
 			pts.append(interior.landing(up))
 			sfx.play_at("creak", player.global_position, -8.0, 0.15, 1.0, 16.0)
@@ -621,6 +633,7 @@ func _on_option(opt: Dictionary) -> void:
 		"rescue":
 			_moving_on = false
 			var result := World.complete_rescue(interior.building.id())
+			_rescue_cue.resolve()
 			minimap.flash(result)
 			interior._update_labels()
 			_refresh_prompts()
@@ -628,6 +641,25 @@ func _on_option(opt: Dictionary) -> void:
 			if interior.is_room_cleared(interior.current_room):
 				_queue_search(0.7)
 	_refresh_hud()
+
+
+## Keep the audible survivor at the same seed-derived room position on every storey.
+## The cue itself owns cadence, range filtering and stereo panning; mission state stays
+## authoritative in World so save/load and typed completion cannot diverge from sound.
+func _sync_rescue_cue() -> void:
+	if mode != Mode.INSIDE or not interior.is_inside():
+		_rescue_cue.resolve()
+		return
+	var mission: Dictionary = interior.active_rescue()
+	var target: Vector3 = interior.rescue_world_pos()
+	if mission.is_empty() or target == Vector3.INF:
+		_rescue_cue.resolve()
+		return
+	if _rescue_cue.target_id != str(mission["id"]):
+		_rescue_cue.configure(str(mission["id"]), target, player, true)
+	else:
+		_rescue_cue.set_target_position(target)
+		_rescue_cue.set_unresolved(true)
 
 
 ## Zombies standing right behind a door we just kicked jump back in surprise.

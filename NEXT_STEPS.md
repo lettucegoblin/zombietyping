@@ -16,19 +16,21 @@ unless noted.
    attack, death-on-floor, breathing idle). Shambler: slower, maybe a bloater/crawler.
 2. **Tab map art** via PixelLab's tileset tools (`create_topdown_tileset` /
    `create_map`) instead of the coloured squares. Keep labels and fog as they are.
-3. **Looting, survivors, bases, and supply lines.** Prop ids and loot/utility metadata now
-   provide the deterministic source objects; inventories and prop-depletion persistence are
-   not built. Survivors should live in cleared buildings; a cleared block becomes safe
-   (`World.state[...]["safe"]` is already drawn cyan on the map), bases consume utility-tagged
-   furnishings, and supply lines follow the connected road hierarchy between safe buildings.
-   The simulation, UI, and persistence rules still need design.
-4. **Save / load** of `World.state`, `World.explored`, seed, player tile, hp/kills.
-5. **Street props / more ambience**: abandoned cars, litter, streetlights, more sky life.
+3. **Deeper survivor/base simulation.** Deterministic rescues, named rosters, claimed-base
+   assignment, facility roles, intact utility capacity, construction, farms, and road supply
+   links now exist and persist. Next: survivor job assignment, utility-consuming upgrades,
+   farm production, needs, and deliberate transfers between bases. Player-carried inventory
+   and container-by-container looting also remain beyond the current material-class salvage.
+4. **Broader campaign persistence.** Settlement state, rescues, rosters, explored fog, seed,
+   placements, and supply links save now. Player position, hp/kills, live combat, and active
+   travel/rescue session state still need a deliberate checkpoint/resume policy.
+5. **Street props / more ambience**: salvage cars exist; add litter, streetlights, wreck
+   variety, road obstructions, and more sky life.
    Clouds and crows exist; the owner keeps asking for "more atmosphere".
 6. **Recorded sound pass.** The mix architecture now has semantic indoor layers, room-aware
-   events, positional world one-shots, and object-local TV static, but every wav is still
-   synthesized. Replace the source assets with recordings or higher-quality synthesis while
-   retaining the beds/events/3D routing in `sfx.gd`.
+   events, positional world one-shots, object-local TV static, and deterministic directional
+   rescue knocks, but every wav is still synthesized. Replace the source assets with
+   recordings or higher-quality synthesis while retaining the beds/events/3D routing.
 
 ## Rough edges seen while playtesting (owner has NOT reported these yet)
 

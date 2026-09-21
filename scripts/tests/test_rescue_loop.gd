@@ -45,6 +45,11 @@ func _run() -> void:
 	main.mode = main.Mode.INSIDE
 	main.door_building = rescue_building
 	main.interior.enter(rescue_building, int(mission["floor"]))
+	main._sync_rescue_cue()
+	if not main._rescue_cue.is_unresolved() or main._rescue_cue.target_id != mission["id"] \
+			or main._rescue_cue.target_position() != main.interior.rescue_world_pos():
+		_fail("directional rescue cue did not bind to the procedural room target")
+		return
 	var fp: FloorPlan = main.interior.plan
 	var target_room := int(mission["room"])
 	# Mark this storey quiet so route retirement is determined only by the pending rescue.
@@ -92,6 +97,9 @@ func _run() -> void:
 		return
 	if World.active_rescue(rescue_building.id()).size() != 0:
 		_fail("completed rescue remained active")
+		return
+	if main._rescue_cue.is_unresolved():
+		_fail("completed rescue left its directional cue active")
 		return
 
 	var snapshot := World.save_snapshot()

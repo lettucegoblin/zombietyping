@@ -123,7 +123,7 @@ func _process(_dt: float) -> void:
 			var labels: Node3D = _interior._room_nodes[ri].get_node("Labels")
 			var recommended: Dictionary = _interior.recommended_option()
 			# Rescue/help is an in-room action shown in the HUD rather than a doorway chevron.
-			var recommended_seen := recommended.is_empty() or recommended.get("kind", "") == "rescue"
+			var recommended_seen: bool = recommended.is_empty() or recommended.get("kind", "") == "rescue"
 			for node in labels.get_children():
 				if not node is WordLabel: continue
 				var label := node as WordLabel
@@ -144,15 +144,15 @@ func _process(_dt: float) -> void:
 						return _fail("zombies must not spawn in the stairwell")
 			# the search rule: a closed door worth opening is offered here, or we were walked
 			# to a room that has one (or the stairwell / exit)
-				var unexplored: Array = _interior.unexplored_doors(ri)
-				var door_word := ""
+			var unexplored: Array = _interior.unexplored_doors(ri)
+			var door_word := ""
 			if not unexplored.is_empty():
 				door_word = _interior.plan.doors[unexplored[0]].word
-					if not w.has(door_word): return _fail("unexplored door word missing from prompts")
-				if w.has("help"):
-					_type("help")
-					return
-				if w.has("up") and not _climbed:
+				if not w.has(door_word): return _fail("unexplored door word missing from prompts")
+			if w.has("help"):
+				_type("help")
+				return
+			if w.has("up") and not _climbed:
 				_climbed = true
 				var seen_before: int = _main.get_node("View/Viewport/World/Director").alive().size()
 				_floor_before = _interior.plan.floor
