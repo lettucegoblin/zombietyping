@@ -11,6 +11,7 @@ const GOLD := Color("#facc15")
 const CREAM := Color("#fdf6e3")
 const INK := Color("#120a1f")
 const LOCK := Color("#be123c")
+const RETIRED := Color("#6c6c72")
 const EDGE_MARGIN := Vector2(56.0, 46.0)
 
 var _font: Font
@@ -68,6 +69,8 @@ func _draw() -> void:
 			fs = int(clampf(w.font_px * 1.45 - dist * 1.1, w.font_px * 0.7, w.font_px * 1.45))
 		if w.locked:
 			fs = int(fs * 1.15)
+		elif w.recommended:
+			fs = int(fs * 1.12)
 		var t := w.word.substr(0, w.typed)
 		var r := w.word.substr(w.typed)
 		var wt := _font.get_string_size(t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x if t != "" else 0.0
@@ -91,12 +94,23 @@ func _draw() -> void:
 				x = tip.x - (wt + wr) * 0.5
 				y = (tip.y - s * 1.25 - 6.0) if d.y > 0.0 else (tip.y + s * 1.25 + fs * 0.9)
 			_draw_arrow(tip, d, s, w.typed > 0)
+		var typed_col := RETIRED if w.retired else GOLD
+		var rest_col := RETIRED if w.retired else (GOLD if w.recommended else CREAM)
+		if w.recommended and not w.retired:
+			var marker := "▶"
+			var mw := _font.get_string_size(marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			draw_string_outline(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, INK)
+			draw_string(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, GOLD)
 		if t != "":
 			draw_string_outline(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, oc)
-			draw_string(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, GOLD)
+			draw_string(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, typed_col)
 		if r != "":
 			draw_string_outline(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, oc)
-			draw_string(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, CREAM)
+			draw_string(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, rest_col)
+		if w.retired:
+			var strike_y := y - fs * 0.28
+			draw_line(Vector2(x - 2.0, strike_y), Vector2(x + wt + wr + 2.0, strike_y), INK, 6.0)
+			draw_line(Vector2(x - 2.0, strike_y), Vector2(x + wt + wr + 2.0, strike_y), RETIRED, 2.0)
 
 
 ## Screen anchor of a world point for a label with `keep`: {pos, on_screen}. Shared with

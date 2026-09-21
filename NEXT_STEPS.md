@@ -1,10 +1,12 @@
 # Next steps
 
 State as of 2026-09-21. Everything in `README.md` is implemented and the headless suite
-passes. City streets now follow a seed-derived tensor field with shared seam ports;
-districts, lots, building uses, apartment units, semantic rooms, and furnishings are all
-procedural. This is the remaining backlog, roughly in the order the owner has brought things
-up, plus the rough edges found while building. Nothing here has been started unless noted.
+passes. City streets now use a continuous global hierarchy of warped avenues, collectors,
+and local streets; districts, lots, building uses, apartment units, semantic rooms, and
+furnishings are all procedural. Furnishings already expose stable prop ids, loot-table tags,
+and base-utility tags. This is the remaining backlog, roughly in the order the owner has
+brought things up, plus the rough edges found while building. Nothing here has been started
+unless noted.
 
 ## Asked for by the owner, not built yet
 
@@ -14,9 +16,12 @@ up, plus the rough edges found while building. Nothing here has been started unl
    attack, death-on-floor, breathing idle). Shambler: slower, maybe a bloater/crawler.
 2. **Tab map art** via PixelLab's tileset tools (`create_topdown_tileset` /
    `create_map`) instead of the coloured squares. Keep labels and fog as they are.
-3. **Survivors and the ever-growing safezone.** Survivors live in cleared buildings; a
-   cleared block becomes safe (`World.state[...]["safe"]` is already drawn cyan on the map);
-   the safezone grows as adjacent blocks are cleared. Nothing designed yet.
+3. **Looting, survivors, bases, and supply lines.** Prop ids and loot/utility metadata now
+   provide the deterministic source objects; inventories and prop-depletion persistence are
+   not built. Survivors should live in cleared buildings; a cleared block becomes safe
+   (`World.state[...]["safe"]` is already drawn cyan on the map), bases consume utility-tagged
+   furnishings, and supply lines follow the connected road hierarchy between safe buildings.
+   The simulation, UI, and persistence rules still need design.
 4. **Save / load** of `World.state`, `World.explored`, seed, player tile, hp/kills.
 5. **Street props / more ambience**: abandoned cars, litter, streetlights, more sky life.
    Clouds and crows exist; the owner keeps asking for "more atmosphere".

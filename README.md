@@ -106,12 +106,15 @@ Words must come after HUD/Minimap (draws above them) and before TabMap.
 
 ## 5. The city
 
-Deterministic and infinite from `World.seed`. Sector = 32×32 tiles, tile = 5 m. A continuous
-directionless tensor field blends slow noise with radial/tangential influences from seeded
-regional centres. Each sector derives sparse boundary ports from hashes shared with its
-neighbours, traces orthogonal discrete hyperstreamlines through the field to a perturbed hub,
-then grows density-controlled secondary branches. This produces connected, curving street
-networks without the old sector-framing lattice, while matching roads exactly at seams.
+Deterministic and infinite from `World.seed`. Sector = 32×32 tiles, tile = 5 m. Sectors are
+streaming chunks only: the road plan is classified directly in global tile space from a
+continuous, seed-oriented coordinate field with low-frequency domain warp. Nested contours
+produce a hierarchy of avenues (48-tile cadence), collectors (24), and density-controlled
+local streets. Locals terminate on collectors and are retained per superblock, creating
+loops, T-junctions, and occasional cul-de-sacs without the old sector-framing lattice.
+Curving lane markings follow the same field. The approach is informed by the tensor-field
+urban-layout method in the Purdue SIGGRAPH 2011 course notes, but keeps one coherent regional
+bearing so rasterized streets remain four-connected.
 Polycentric density and flavour fields select districts; their parameters control branch
 density, lots, setbacks, and height. Building uses are procedural (`apartments`, `house`,
 `shop`, `office`, `warehouse`) rather than a generic shell, and are chosen from district,
@@ -149,8 +152,14 @@ does not perturb the room graph or its door words. Two planners:
 
 Every semantic room is dressed procedurally from its own bounds and seed: beds, nightstands,
 dressers, toilets, sinks, tubs, counters, stoves, fridges, dining tables, sofas, shelving,
-desks, sales fixtures, storage, and hall benches. Furniture is batched per room and remains
-non-colliding so visual variety does not change rail navigation or combat line-of-sight.
+desks, chairs, rugs, paintings, televisions, sales fixtures, storage, and hall benches.
+PixelLab sprites cover the recognizable household props; any unmapped utility shape retains
+the procedural mesh treatment. Furnishings remain non-colliding and are clamped inside their
+room, so visual variety cannot change rail navigation or combat line-of-sight. Each prop has
+a stable id plus loot-table and utility metadata (`storage`, `water`, `power`, `comfort`,
+etc.), ready for persisted looting and base upgrades without making art placement stateful.
+Visible televisions animate palette static and play a looped, distance-faded 3D static bed
+through an 85-degree directional cone; hidden rooms neither render nor emit it.
 
 **Stairwells** (`scripts/interior/stairwell.gd`): same footprint on every storey. `CORE` =
 1×2 switchback (two half-width flights, half-height landing, open shaft with the storey
@@ -194,7 +203,11 @@ a zombie before any door. Idle in an uncleared room with the nearest zombie beyo
 doors and come at you across the room. When a room is done and has no closed door worth
 opening, the **manual search** walks you back to the nearest room that has one (or to the
 stairwell if other storeys are uncleared, else the entrance) — never retype your way back.
-Uncleared rooms reachable through open doors count as targets.
+Uncleared rooms reachable through open doors count as targets. In a quiet room, one option is
+marked with a gold route chevron and the camera faces that same door/direction: unexplored
+door first, then the first leg of the shortest route to remaining work, another storey, or
+the exit. An opened branch that has no remaining frontier is retired unless it is on that
+route; its label is struck through and it is removed from the typist's active prompts.
 
 **Zombies** (`zombie.gd`): DORMANT → (notice beat 0.9 s, stunned) → CHASE → WINDUP → STRIKE
 → RECOVER; STUN on every typed letter (knockback, alternating flinches); DEAD lies on the
@@ -259,8 +272,9 @@ Rules of the road:
   (`assets/sprites/sky`: clouds, crow flying ×2, crow perched ×3) all via `create_image_pixflux`
   with the palette. ~265 of 2000 monthly generations used (resets 2026-10-20).
 - Sounds are all procedural placeholders: `python3 tools/make_sounds.py` regenerates
-  `assets/audio/*.wav` (pure Python, no numpy on this Mac). Godot imports WAVs QOA-compressed,
-  so loop points must come from `get_length()`, never `data.size()`.
+  `assets/audio/*.wav`, including the loopable CRT static bed (pure Python, no numpy on this
+  Mac). Godot imports WAVs QOA-compressed, so loop points must come from `get_length()`, never
+  `data.size()`.
 
 ## 10. Design decisions worth knowing before changing things
 

@@ -19,6 +19,7 @@ var _auto_returns := 0
 var _floor_before := 0
 var _expect_landing := false
 var _idle := 0
+var _retired_seen := 0
 
 
 func _ready() -> void:
@@ -117,6 +118,22 @@ func _process(_dt: float) -> void:
 			print("room ", ri, " (", _interior.plan.rooms[ri].kind, ") floor ", _interior.plan.floor, " options: ", w, "  progress ", _interior.progress(), "  old floor alive: ", _interior._old_floor != null)
 			if _interior._old_floor != null: return _fail("old floor should be dropped after arriving")
 			if _typist.buffer != "": return _fail("buffer should be empty between prompts")
+			# Cleared branches remain as crossed-out spatial memory, never as keyboard input;
+			# exactly the state-aware next action carries the recommendation marker.
+			var labels: Node3D = _interior._room_nodes[ri].get_node("Labels")
+			var recommended: Dictionary = _interior.recommended_option()
+			var recommended_seen := recommended.is_empty()
+			for node in labels.get_children():
+				if not node is WordLabel: continue
+				var label := node as WordLabel
+				if label.retired:
+					_retired_seen += 1
+					if w.has(label.word): return _fail("retired word remained typeable: " + label.word)
+				if label.recommended:
+					if label.option_kind != recommended.get("kind", "") or label.option_door != recommended.get("door", -2):
+						return _fail("wrong navigation recommendation")
+					recommended_seen = true
+			if not recommended_seen: return _fail("recommended option lacks route marker")
 			if (w.has("up") or w.has("down")) and _interior.plan.stair_opening(ri) < 0 and not _interior.plan.rooms[ri].is_stair:
 				return _fail("up/down offered without a door into the stairwell")
 			if _interior.plan.rooms[ri].is_stair:
@@ -169,6 +186,7 @@ func _process(_dt: float) -> void:
 				if not _climbed: return _fail("never climbed")
 				print("auto-return legs seen: ", _auto_returns, "  doors opened: ", _opened_doors)
 				if _auto_returns == 0: return _fail("the search never walked us back from a dead end")
+				if _retired_seen == 0: return _fail("no cleared dead-end label was retired")
 				var st: Dictionary = World.state[_queued[0]]
 				print("exited; state: ", st.keys(), " progress ", st.get("progress"))
 				if not st.has("floors"): return _fail("building state should record floors")

@@ -409,34 +409,15 @@ func _face_arrival(ri: int) -> void:
 	_face_room()
 
 
-## Look at the most useful thing in the room: a door still worth opening, else the stairs
-## (when the rest of the building is upstairs/downstairs), else the exit, else any door we
-## did not come through. The other options stay readable at the screen edges.
+## Look at the generator/state-aware next action. The same option receives the gold route
+## chevron; cleared dead ends remain visibly crossed out but cannot take keyboard input.
 func _face_room() -> void:
-	var fp: FloorPlan = interior.plan
-	var ri: int = interior.current_room
-	var room: FloorPlan.Room = fp.rooms[ri]
-	var unexplored: Array[int] = interior.unexplored_doors(ri)
-	if not unexplored.is_empty():
-		player.face_toward(fp.doors[unexplored[0]].pos)
+	var opt: Dictionary = interior.recommended_option()
+	if opt.is_empty():
 		return
-	var so: int = fp.stair_opening(ri)
-	if so >= 0 and interior.other_floors_uncleared():
-		player.face_toward(fp.doors[so].pos)
-		return
-	var best := Vector3.INF
-	var best_score := -1
-	for di in room.doors:
-		var d: FloorPlan.Door = fp.doors[di]
-		var score := 0
-		if d.b < 0: score += 3
-		if di != _last_door: score += 2
-		if d.open_always: score -= 1
-		if score > best_score:
-			best_score = score
-			best = d.pos
-	if best != Vector3.INF:
-		player.face_toward(best)
+	var p: Vector3 = interior.option_pos(opt)
+	if p != Vector3.INF:
+		player.face_toward(p)
 
 
 ## The room is done. If it still has a closed door worth opening we wait here for you to

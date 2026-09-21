@@ -1,11 +1,10 @@
 class_name CityGen
-## Deterministic per-sector city generation. Neighbouring sectors agree on sparse edge
-## ports, then connect those ports through a continuous global tensor field. This keeps
-## the world infinite/cacheable while avoiding the old square road around every sector.
+## Deterministic per-sector city generation from a continuous GLOBAL street-coordinate
+## field. Curved avenues, collectors and short local segments are classified in world-tile
+## space, so sector edges are merely streaming boundaries rather than city-design rules.
 ##
 ## Pipeline per sector:
-##   density field -> district -> shared boundary ports -> tensor-guided street traces
-##   -> local branches and cul-de-sacs
+##   density field -> district -> warped street coordinates -> hierarchical road graph
 ##   -> blocks (flood fill) -> lots (must front a road) -> buildings.
 ## Tensor-field approach adapted to a discrete tile graph from the Purdue SIGGRAPH 2011
 ## urban-modelling course notes: https://www.cs.purdue.edu/cgvlab/urban/sg_2011_course/umc_SG11_02_urban_layouts.pdf
@@ -15,6 +14,8 @@ const S := SectorData.SIZE
 static var _noise: FastNoiseLite
 static var _vnoise: FastNoiseLite
 static var _tnoise: FastNoiseLite
+static var _warp_x: FastNoiseLite
+static var _warp_y: FastNoiseLite
 static var _noise_seed := -0x7FFFFFFF
 
 
@@ -40,6 +41,18 @@ static func _noise_for(seed: int) -> FastNoiseLite:
 		_tnoise.fractal_type = FastNoiseLite.FRACTAL_FBM
 		_tnoise.fractal_octaves = 3
 		_tnoise.frequency = 0.006
+		_warp_x = FastNoiseLite.new()
+		_warp_x.seed = seed ^ 0x6c8e9cf5
+		_warp_x.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		_warp_x.fractal_type = FastNoiseLite.FRACTAL_FBM
+		_warp_x.fractal_octaves = 2
+		_warp_x.frequency = 0.018
+		_warp_y = FastNoiseLite.new()
+		_warp_y.seed = seed ^ 0x51ed270b
+		_warp_y.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		_warp_y.fractal_type = FastNoiseLite.FRACTAL_FBM
+		_warp_y.fractal_octaves = 2
+		_warp_y.frequency = 0.018
 		_noise_seed = seed
 	return _noise
 
@@ -125,6 +138,87 @@ static func tensor_direction_at(seed: int, tile: Vector2) -> Vector2:
 	return Vector2(cos(angle), sin(angle)).normalized()
 
 
+## A smooth, invertible-enough pair of coordinates over the city. Periodic contours in
+## this space become long, gently turning roads in world space. The tensor supplies the
+## regional orientation; low-frequency domain warp keeps parallel streets from looking
+## drafted with a ruler.
+static func street_coordinates(seed: int, tile: Vector2) -> Vector2:
+	_noise_for(seed)
+	# A coherent regional bearing keeps the rasterized network four-connected. Curvature
+	# comes from domain warp; rotating every sample independently can tear contour lines.
+	# Sample the seed's blended tensor near the opening region for the city-wide bearing.
+	# Raster streets become fragile near 45 degrees, so fold to the nearest orthogonal
+	# family and cap the obliqueness; the continuous warp provides the visible curvature.
+	var field := tensor_direction_at(seed, Vector2(2.5 * S, 1.5 * S))
+	var folded := wrapf(field.angle() + PI * 0.25, 0.0, PI * 0.5) - PI * 0.25
+	var a := clampf(folded, -0.17, 0.17)
+	var ca := cos(a)
+	var sa := sin(a)
+	var u := tile.x * ca + tile.y * sa
+	var v := -tile.x * sa + tile.y * ca
+	u += _warp_x.get_noise_2d(tile.x, tile.y) * 5.5
+	v += _warp_y.get_noise_2d(tile.x, tile.y) * 5.5
+	return Vector2(u, v)
+
+
+static func _line_distance(value: float, spacing: float, phase: float) -> float:
+	return absf(posmod(value - phase + spacing * 0.5, spacing) - spacing * 0.5)
+
+
+static func _street_phase(seed: int) -> Vector2:
+	# Put the fixed survivor spawn on a seed-specific avenue without fixing the avenue's
+	# shape. The perpendicular phase is derived entirely from the world seed.
+	var spawn_uv := street_coordinates(seed, Vector2(16.5, 0.5))
+	return Vector2(spawn_uv.x, (Det.unit(seed, 0, 0, 301) - 0.5) * 48.0)
+
+
+## Base road class at a global tile: 2 avenue/collector, 1 local, 0 buildable land.
+## Two collector-bounded local segments per superblock are independently retained. That
+## creates loops, T-junctions and cul-de-sacs while every retained segment still terminates
+## on a higher-order road.
+static func road_class_at(seed: int, tile: Vector2i) -> int:
+	var p := Vector2(tile) + Vector2(0.5, 0.5)
+	var uv := street_coordinates(seed, p)
+	var phase := _street_phase(seed)
+	const AVENUE := 48.0
+	const COLLECTOR := 24.0
+	var du_a := _line_distance(uv.x, AVENUE, phase.x)
+	var dv_a := _line_distance(uv.y, AVENUE, phase.y)
+	if minf(du_a, dv_a) <= 1.45:
+		return 2
+	var du_c := _line_distance(uv.x, COLLECTOR, phase.x)
+	var dv_c := _line_distance(uv.y, COLLECTOR, phase.y)
+	if minf(du_c, dv_c) <= 1.15:
+		return 2
+	var rel := uv - phase
+	var cell := Vector2i(floori(rel.x / COLLECTOR), floori(rel.y / COLLECTOR))
+	var lu := posmod(rel.x, COLLECTOR)
+	var lv := posmod(rel.y, COLLECTOR)
+	var density := density_at(seed, floori(float(tile.x) / S), floori(float(tile.y) / S))
+	var keep := lerpf(0.42, 0.88, density)
+	for lane in 2:
+		var off := 8.0 + lane * 8.0
+		if absf(lu - off) <= 1.45 and Det.unit(seed, cell.x, cell.y, 320 + lane) < keep:
+			return 1
+		if absf(lv - off) <= 1.45 and Det.unit(seed, cell.x, cell.y, 330 + lane) < keep:
+			return 1
+	return 0
+
+
+## Tangent used for lane paint. It follows the nearest contour family rather than merely
+## choosing a world axis, so markings turn with the generated street.
+static func road_direction_at(seed: int, tile: Vector2) -> Vector2:
+	var phase := _street_phase(seed)
+	var uv := street_coordinates(seed, tile)
+	var du := _line_distance(uv.x, 8.0, phase.x)
+	var dv := _line_distance(uv.y, 8.0, phase.y)
+	var ex := street_coordinates(seed, tile + Vector2(0.25, 0.0)) - street_coordinates(seed, tile - Vector2(0.25, 0.0))
+	var ey := street_coordinates(seed, tile + Vector2(0.0, 0.25)) - street_coordinates(seed, tile - Vector2(0.0, 0.25))
+	var grad := Vector2(ex.x, ey.x) if du <= dv else Vector2(ex.y, ey.y)
+	var tangent := Vector2(-grad.y, grad.x)
+	return tangent.normalized() if tangent.length_squared() > 0.0001 else Vector2.RIGHT
+
+
 # ---------------------------------------------------------------- sector
 
 static func generate(seed: int, sx: int, sy: int) -> SectorData:
@@ -134,137 +228,19 @@ static func generate(seed: int, sx: int, sy: int) -> SectorData:
 	sd.district = district_at(seed, sx, sy)
 	var p := District.params(sd.district)
 	var rng := Det.rng_for(seed, sx, sy, 100)
+	var org := sd.origin_tile()
+	# 1. Classify the global hierarchy. Nothing here depends on the sector boundary.
+	for y in S:
+		for x in S:
+			sd.road[SectorData.idx(x, y)] = road_class_at(seed, org + Vector2i(x, y))
 
-	# 1. Four sparse, shared edge ports. Each boundary's offset/class depends only on that
-	# boundary, so the independently generated neighbour creates the matching road tile.
-	var ports := [
-		[Vector2i(0, _vertical_port(seed, sx, sy)), _edge_class(seed, sx, sy, 0)],
-		[Vector2i(S - 1, _vertical_port(seed, sx + 1, sy)), _edge_class(seed, sx + 1, sy, 0)],
-		[Vector2i(_horizontal_port(seed, sx, sy), 0), _edge_class(seed, sx, sy, 1)],
-		[Vector2i(_horizontal_port(seed, sx, sy + 1), S - 1), _edge_class(seed, sx, sy + 1, 1)],
-	]
-	var hub := Vector2i(rng.randi_range(S / 2 - 4, S / 2 + 4), rng.randi_range(S / 2 - 4, S / 2 + 4))
-	for entry in ports:
-		var port: Vector2i = entry[0]
-		var cls: int = entry[1]
-		_trace_road(sd, seed, port, hub, cls)
-
-	# 2. Secondary tensor streamlines branch from the connected spine. District density
-	# controls their count/length; unlike the old grid, they bend with the global field.
-	var sp: int = p["spacing"]
-	if sp > 0:
-		var branch_count := clampi(roundi(float(S) / sp * 1.6), 2, 8)
-		for branch in branch_count:
-			_grow_branch(sd, seed, rng, 5 + rng.randi_range(0, maxi(3, 15 - sp)), branch % 2)
-
-	# 3. blocks
+	# 2. blocks
 	_flood_blocks(sd)
 
-	# 4. lots + buildings
+	# 3. lots + buildings
 	if not (p["lots"] as Array).is_empty():
 		_place_lots(sd, rng, p, seed)
 	return sd
-
-
-static func _vertical_port(seed: int, boundary_x: int, sy: int) -> int:
-	return 4 + floori(Det.unit(seed, boundary_x, sy, 71) * float(S - 8))
-
-
-static func _horizontal_port(seed: int, sx: int, boundary_y: int) -> int:
-	# The player starts on this shared boundary; keep the opening deterministic and on-road.
-	if sx == 0 and boundary_y == 0:
-		return S / 2
-	return 4 + floori(Det.unit(seed, sx, boundary_y, 72) * float(S - 8))
-
-
-static func _edge_class(seed: int, a: int, b: int, axis: int) -> int:
-	return 2 if Det.unit(seed, a, b, 73 + axis) < 0.58 else 1
-
-
-## Monotone Manhattan trace between two points. Both candidate steps get closer, while
-## the tensor alignment and a turn penalty decide which one wins. This is the discrete
-## hyperstreamline equivalent appropriate for the game's tile navigation graph.
-static func _trace_road(sd: SectorData, seed: int, start: Vector2i, target: Vector2i, cls: int) -> void:
-	var cur := start
-	var last := Vector2i.ZERO
-	var org := sd.origin_tile()
-	var family := 0
-	var first_delta := target - start
-	var at_start := tensor_direction_at(seed, Vector2(org + start))
-	if absf(at_start.dot(Vector2(first_delta).normalized())) < absf(Vector2(-at_start.y, at_start.x).dot(Vector2(first_delta).normalized())):
-		family = 1
-	while cur != target:
-		sd.road[SectorData.idx(cur.x, cur.y)] = maxi(sd.road[SectorData.idx(cur.x, cur.y)], cls)
-		# Leave a shared edge immediately. Otherwise a trace may run along the seam and
-		# create tiles its independently generated neighbour cannot mirror.
-		if cur == start and (cur.x == 0 or cur.x == S - 1 or cur.y == 0 or cur.y == S - 1):
-			var inward := Vector2i(signi(target.x - cur.x), 0) if cur.x in [0, S - 1] else Vector2i(0, signi(target.y - cur.y))
-			cur += inward
-			last = inward
-			continue
-		var options: Array[Vector2i] = []
-		if cur.x != target.x:
-			options.append(Vector2i(signi(target.x - cur.x), 0))
-		if cur.y != target.y:
-			options.append(Vector2i(0, signi(target.y - cur.y)))
-		var field := tensor_direction_at(seed, Vector2(org + cur))
-		if family == 1:
-			field = Vector2(-field.y, field.x)
-		var best := options[0]
-		var best_score := -INF
-		for dir in options:
-			var align := absf(field.dot(Vector2(dir)))
-			var keep := 0.22 if dir == last else 0.0
-			var jitter := Det.unit(seed, org.x + cur.x, org.y + cur.y, 80 + dir.x * 3 + dir.y) * 0.08
-			var score := align + keep + jitter
-			if score > best_score:
-				best_score = score
-				best = dir
-		cur += best
-		last = best
-	sd.road[SectorData.idx(target.x, target.y)] = maxi(sd.road[SectorData.idx(target.x, target.y)], cls)
-
-
-static func _road_tiles(sd: SectorData) -> Array[Vector2i]:
-	var out: Array[Vector2i] = []
-	for y in range(1, S - 1):
-		for x in range(1, S - 1):
-			if sd.road[SectorData.idx(x, y)] != 0:
-				out.append(Vector2i(x, y))
-	return out
-
-
-static func _grow_branch(sd: SectorData, seed: int, rng: RandomNumberGenerator, length: int, family: int) -> void:
-	var roads := _road_tiles(sd)
-	if roads.is_empty():
-		return
-	var cur: Vector2i = roads[rng.randi_range(0, roads.size() - 1)]
-	var org := sd.origin_tile()
-	var heading := tensor_direction_at(seed, Vector2(org + cur))
-	if family == 1:
-		heading = Vector2(-heading.y, heading.x)
-	if rng.randf() < 0.5:
-		heading = -heading
-	for step in length:
-		var field := tensor_direction_at(seed, Vector2(org + cur))
-		if family == 1:
-			field = Vector2(-field.y, field.x)
-		if heading.dot(field) < 0.0:
-			field = -field
-		heading = heading.lerp(field, 0.35).normalized()
-		var primary := Vector2i(signi(roundi(heading.x)), 0) if absf(heading.x) >= absf(heading.y) else Vector2i(0, signi(roundi(heading.y)))
-		var secondary := Vector2i(0, signi(roundi(heading.y))) if primary.x != 0 else Vector2i(signi(roundi(heading.x)), 0)
-		var dir := primary if step % 3 != 2 or secondary == Vector2i.ZERO else secondary
-		if dir == Vector2i.ZERO:
-			break
-		var nxt := cur + dir
-		if nxt.x < 2 or nxt.y < 2 or nxt.x >= S - 2 or nxt.y >= S - 2:
-			break
-		if sd.road[SectorData.idx(nxt.x, nxt.y)] != 0 and step > 2:
-			break
-		cur = nxt
-		sd.road[SectorData.idx(cur.x, cur.y)] = 1
-
 
 # ---------------------------------------------------------------- helpers
 
@@ -275,36 +251,6 @@ static func _is_road(sd: SectorData, x: int, y: int) -> bool:
 
 
 const DIRS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
-
-
-## Verify that every generated road tile reaches one of the sector's shared edge ports.
-## Kept public-to-the-script so the generator invariant test can exercise it directly.
-static func _connected(sd: SectorData) -> bool:
-	var seen := PackedByteArray()
-	seen.resize(S * S)
-	var q: Array[Vector2i] = []
-	var total := 0
-	for y in S:
-		for x in S:
-			if sd.road[SectorData.idx(x, y)] == 0:
-				continue
-			total += 1
-			if x == 0 or y == 0 or x == S - 1 or y == S - 1:
-				seen[SectorData.idx(x, y)] = 1
-				q.append(Vector2i(x, y))
-	var reached := q.size()
-	while not q.is_empty():
-		var c: Vector2i = q.pop_back()
-		for d in DIRS:
-			var n: Vector2i = c + d
-			if n.x < 0 or n.y < 0 or n.x >= S or n.y >= S:
-				continue
-			var i := SectorData.idx(n.x, n.y)
-			if sd.road[i] != 0 and seen[i] == 0:
-				seen[i] = 1
-				reached += 1
-				q.append(n)
-	return reached == total
 
 
 static func _flood_blocks(sd: SectorData) -> void:

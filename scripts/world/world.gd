@@ -79,7 +79,9 @@ func world_to_tile(p: Vector3) -> Vector2i:
 ## box (+margin) so it stays cheap and only touches sectors it needs.
 func find_path(from: Vector2i, to: Vector2i) -> Array[Vector2i]:
 	var out: Array[Vector2i] = []
-	var margin := S
+	# Hierarchical streets can require a collector/avenue detour rather than the old direct
+	# sector-grid route. Two sectors is still cheap and leaves room for realistic blocks.
+	var margin := S * 2
 	var lo := Vector2i(mini(from.x, to.x) - margin, mini(from.y, to.y) - margin)
 	var hi := Vector2i(maxi(from.x, to.x) + margin, maxi(from.y, to.y) + margin)
 	var grid := AStarGrid2D.new()

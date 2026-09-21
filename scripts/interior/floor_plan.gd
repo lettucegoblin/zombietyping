@@ -15,12 +15,15 @@ class Room:
 		return Vector2(rect.position) + Vector2(rect.size) * 0.5
 
 class Prop:
+	var id: String                 ## stable seed-derived identity for loot/base persistence
 	var kind: String
 	var room: int
 	var pos: Vector3            ## world-space floor position at the prop centre
 	var size: Vector3           ## approximate footprint and height
 	var yaw := 0.0
 	var color := Color.WHITE
+	var loot_table := ""          ## future inventory table; empty means decorative
+	var utility := ""             ## future base role: storage, comfort, power, water, etc.
 
 class Door:
 	var index: int

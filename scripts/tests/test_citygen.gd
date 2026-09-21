@@ -44,26 +44,65 @@ func _init() -> void:
 		if a.buildings[i].rect != b.buildings[i].rect or a.buildings[i].floors != b.buildings[i].floors:
 			same = false
 	print("deterministic: ", same)
-	# connectivity: every road tile reachable from the frame
-	var bad := 0
+	# Connectivity is a global invariant now: sectors are streaming chunks, not blocks
+	# framed by roads. Assemble a 7x7 window and count graph components across its seams.
+	var roads := {}
+	var higher_roads := {}
+	var class_bad := 0
 	for sy in range(-3, 4):
 		for sx in range(-3, 4):
 			var sd := CityGen.generate(seed, sx, sy)
-			if not CityGen._connected(sd):
-				bad += 1
-	print("disconnected sectors in 7x7: ", bad)
-	# Shared boundary ports must match exactly across independently generated sectors.
-	var seam_bad := 0
-	for sy in range(-3, 4):
-		for sx in range(-3, 4):
-			var here := CityGen.generate(seed, sx, sy)
-			var east := CityGen.generate(seed, sx + 1, sy)
-			var south := CityGen.generate(seed, sx, sy + 1)
-			for i in S:
-				if (here.road[SectorData.idx(S - 1, i)] != 0) != (east.road[SectorData.idx(0, i)] != 0): seam_bad += 1
-				if (here.road[SectorData.idx(i, S - 1)] != 0) != (south.road[SectorData.idx(i, 0)] != 0): seam_bad += 1
-	print("mismatched road seam tiles: ", seam_bad)
-	if bad > 0 or seam_bad > 0:
+			var org := sd.origin_tile()
+			for ly in S:
+				for lx in S:
+					var t := org + Vector2i(lx, ly)
+					var cls := sd.road[SectorData.idx(lx, ly)]
+					if cls != CityGen.road_class_at(seed, t): class_bad += 1
+					if cls != 0: roads[t] = true
+					if cls == 2: higher_roads[t] = true
+	var seen := {}
+	var components := 0
+	var component_sizes: Array[int] = []
+	var spawn_component_size := 0
+	for start in roads:
+		if seen.has(start): continue
+		components += 1
+		var q: Array[Vector2i] = [start]
+		seen[start] = true
+		var component_size := 0
+		var has_spawn := false
+		while not q.is_empty():
+			var cur: Vector2i = q.pop_back()
+			component_size += 1
+			if cur == Vector2i(16, 0): has_spawn = true
+			for dir: Vector2i in CityGen.DIRS:
+				var n := cur + dir
+				if roads.has(n) and not seen.has(n):
+					seen[n] = true
+					q.append(n)
+		component_sizes.append(component_size)
+		if has_spawn: spawn_component_size = component_size
+	component_sizes.sort()
+	print("road components in 7x7: ", components, " ", component_sizes, "  class mismatches: ", class_bad)
+	var higher_seen := {}
+	var higher_components := 0
+	for start in higher_roads:
+		if higher_seen.has(start): continue
+		higher_components += 1
+		var q: Array[Vector2i] = [start]
+		higher_seen[start] = true
+		while not q.is_empty():
+			var cur: Vector2i = q.pop_back()
+			for dir: Vector2i in CityGen.DIRS:
+				var n := cur + dir
+				if higher_roads.has(n) and not higher_seen.has(n):
+					higher_seen[n] = true
+					q.append(n)
+	print("higher-road components in 7x7: ", higher_components)
+	# A contour clipped by the OUTER test-window edge may appear as a tiny component even
+	# though it reconnects outside the sample. The spawn/main network must contain all but
+	# at most that short edge fragment.
+	if class_bad > 0 or not roads.has(Vector2i(16, 0)) or roads.size() - spawn_component_size > 16:
 		push_error("CITYGEN FAIL")
 		quit(1)
 	# macro district map (letters), 40x20 sectors around the start

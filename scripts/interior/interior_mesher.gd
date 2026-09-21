@@ -192,20 +192,20 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 		var to_stair := not room.is_stair and fp.stair_room >= 0 and (d.a == fp.stair_room or d.b == fp.stair_room)
 		if to_stair:
 			# the stairwell door: its word, and the storeys behind it
-			labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.55, 0)))
+			labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.55, 0), "door", di))
 			if fp.floor < fp.floors_total - 1:
-				labels.add_child(_label("up", lp + Vector3(0, DOOR_H * 0.95, 0)))
+				labels.add_child(_label("up", lp + Vector3(0, DOOR_H * 0.95, 0), "up", di))
 			if fp.floor > 0:
-				labels.add_child(_label("down", lp + Vector3(0, DOOR_H * 0.2, 0)))
+				labels.add_child(_label("down", lp + Vector3(0, DOOR_H * 0.2, 0), "down", di))
 			continue
 		# on the upper half of the leaf, so it is in view even when you stand right at it
-		labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.7, 0)))
+		labels.add_child(_label(d.word, lp + Vector3(0, DOOR_H * 0.7, 0), "exit" if d.b < 0 else "door", di))
 	if room.is_stair:
 		var lps := Stairwell.label_points(fp, fp.stair_layout)
 		if fp.floor < fp.floors_total - 1 and lps.has("up"):
-			labels.add_child(_label("up", lps["up"]))
+			labels.add_child(_label("up", lps["up"], "up", -1))
 		if fp.floor > 0 and lps.has("down"):
-			labels.add_child(_label("down", lps["down"]))
+			labels.add_child(_label("down", lps["down"], "down", -1))
 	root.add_child(labels)
 	var furnishings := _build_furnishings(fp, ri)
 	if furnishings != null:
@@ -215,22 +215,104 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 
 ## Furniture is batched per room and deliberately has no collision. It gives each
 ## generated room a readable use without changing the rail, zombie paths, or LOS fairness.
-static func _build_furnishings(fp: FloorPlan, ri: int) -> MeshInstance3D:
+static func _build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
+	var root := Node3D.new()
+	root.name = "Furnishings"
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var count := 0
+	var mesh_count := 0
+	var sprite_count := 0
 	for prop in fp.props:
 		if prop.room != ri:
 			continue
-		_emit_prop(st, prop)
-		count += 1
-	if count == 0:
+		if PROP_SPRITES.has(prop.kind):
+			root.add_child(_sprite_prop(prop))
+			sprite_count += 1
+		else:
+			_emit_prop(st, prop)
+			mesh_count += 1
+	if mesh_count == 0 and sprite_count == 0:
 		return null
-	var mi := MeshInstance3D.new()
-	mi.name = "Furnishings"
-	mi.mesh = st.commit()
-	mi.material_override = SectorMesher.flat_material()
-	return mi
+	if mesh_count > 0:
+		var mi := MeshInstance3D.new()
+		mi.name = "ProceduralShapes"
+		mi.mesh = st.commit()
+		mi.material_override = SectorMesher.flat_material()
+		root.add_child(mi)
+	return root
+
+
+const PROP_SPRITES := {
+	"rug": "res://assets/sprites/props/rug.png",
+	"painting": "res://assets/sprites/props/painting.png",
+	"fridge": "res://assets/sprites/props/fridge.png",
+	"tv": "res://assets/sprites/props/tv.png",
+	"bed": "res://assets/sprites/props/bed.png",
+	"sofa": "res://assets/sprites/props/sofa.png",
+	"dresser": "res://assets/sprites/props/dresser.png",
+	"toilet": "res://assets/sprites/props/toilet.png",
+	"sink": "res://assets/sprites/props/sink.png",
+	"tub": "res://assets/sprites/props/tub.png",
+	"counter": "res://assets/sprites/props/counter.png",
+	"stove": "res://assets/sprites/props/stove.png",
+	"shelf": "res://assets/sprites/props/shelf.png",
+	"desk": "res://assets/sprites/props/desk.png",
+	"chair": "res://assets/sprites/props/chair.png",
+	"crate": "res://assets/sprites/props/crate.png",
+}
+
+
+static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
+	if p.kind == "rug":
+		var rug := MeshInstance3D.new()
+		rug.name = "Prop_" + p.id.replace(":", "_")
+		var quad := QuadMesh.new()
+		quad.size = Vector2(p.size.x / 0.74, p.size.z / 0.74)
+		rug.mesh = quad
+		rug.position = p.pos + Vector3(0, 0.015, 0)
+		rug.rotation = Vector3(-PI * 0.5, p.yaw, 0)
+		var mat := StandardMaterial3D.new()
+		mat.albedo_texture = load(PROP_SPRITES[p.kind])
+		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		mat.alpha_scissor_threshold = 0.35
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		rug.material_override = mat
+		return rug
+	var sprite := Sprite3D.new()
+	sprite.name = "Prop_" + p.id.replace(":", "_")
+	sprite.texture = load(PROP_SPRITES[p.kind])
+	sprite.pixel_size = maxf(p.size.x / 52.0, p.size.y / 42.0)
+	sprite.position = p.pos + Vector3(0, 1.45 if p.kind == "painting" else p.size.y * 0.5, 0)
+	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	if p.kind == "tv":
+		sprite.set_script(load("res://scripts/interior/tv_static.gd"))
+		var audio := AudioStreamPlayer3D.new()
+		audio.name = "DirectionalStatic"
+		var static_stream: AudioStream = load("res://assets/audio/tv_static.wav")
+		if static_stream is AudioStreamWAV:
+			static_stream = static_stream.duplicate()
+			(static_stream as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD
+			(static_stream as AudioStreamWAV).loop_end = int(round(static_stream.get_length() * (static_stream as AudioStreamWAV).mix_rate))
+		audio.stream = static_stream
+		audio.volume_db = -22.0
+		audio.max_distance = 16.0
+		audio.unit_size = 2.2
+		audio.panning_strength = 1.8
+		audio.emission_angle_enabled = true
+		audio.emission_angle_degrees = 85.0
+		audio.emission_angle_filter_attenuation_db = -10.0
+		audio.position = p.pos + Vector3(0, p.size.y * 0.55, 0)
+		audio.set_meta("room_audio", true)
+		var holder := Node3D.new()
+		holder.name = "Television"
+		holder.add_child(sprite)
+		holder.add_child(audio)
+		return holder
+	return sprite
 
 
 static func _emit_prop(st: SurfaceTool, p: FloorPlan.Prop) -> void:
@@ -297,11 +379,13 @@ static func _box(st: SurfaceTool, base: Vector3, size: Vector3, basis: Basis, co
 	SectorMesher._quad(st, pts[4], pts[5], pts[6], pts[7], Vector3.UP, color)
 
 
-static func _label(text: String, pos: Vector3) -> WordLabel:
+static func _label(text: String, pos: Vector3, kind := "", door := -1) -> WordLabel:
 	var l := WordLabel.new(text, 30)
 	l.position = pos
 	l.name = "Word_" + text
 	l.edge_hint = true
+	l.option_kind = kind
+	l.option_door = door
 	return l
 
 

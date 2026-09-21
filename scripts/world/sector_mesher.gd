@@ -103,7 +103,7 @@ static func build(sd: SectorData) -> Node3D:
 				_quad_y(st, x0, z0, x0 + T, z0 + T, 0.0, ROAD_ARTERIAL if r == 2 else ROAD_LOCAL, CELL_ASPHALT)
 				if r == 2:
 					# Centre dashes follow the same continuous tensor as the road trace.
-					var flow := CityGen.tensor_direction_at(World.seed, Vector2(org + Vector2i(lx, ly)))
+					var flow := CityGen.road_direction_at(World.seed, Vector2(org + Vector2i(lx, ly)) + Vector2(0.5, 0.5))
 					var horiz := absf(flow.x) >= absf(flow.y)
 					if horiz:
 						_quad_y(st, x0 + 1.0, z0 + T * 0.5 - 0.12, x0 + 3.0, z0 + T * 0.5 + 0.12, 0.01, LANE)

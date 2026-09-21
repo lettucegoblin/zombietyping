@@ -420,6 +420,9 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "bed", 0.27, 0.34, 1.35, 1.95, 0.52, Color("#c39bd3"))
 				_add_prop(fp, room.index, "nightstand", 0.72, 0.22, 0.48, 0.48, 0.58, Color("#5a3d28"))
 				_add_prop(fp, room.index, "dresser", 0.78, 0.78, 1.05, 0.42, 0.95, Color("#fdba74"))
+				_add_prop(fp, room.index, "rug", 0.48, 0.58, 1.45, 1.05, 0.03, Color("#b9a4e0"))
+				if rng.randf() < 0.72:
+					_add_prop(fp, room.index, "painting", 0.20, 0.82, 0.85, 0.08, 0.72, Color("#fdba74"))
 			"bathroom":
 				_add_prop(fp, room.index, "toilet", 0.26, 0.30, 0.56, 0.72, 0.72, Color("#fdf6e3"))
 				_add_prop(fp, room.index, "sink", 0.72, 0.25, 0.66, 0.48, 0.86, Color("#99f6e4"))
@@ -435,6 +438,11 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "sofa", 0.50, 0.22, 1.75, 0.72, 0.82, Color("#ea580c"))
 				_add_prop(fp, room.index, "coffee_table", 0.50, 0.56, 1.05, 0.62, 0.42, Color("#5a3d28"))
 				_add_prop(fp, room.index, "shelf", 0.82, 0.78, 0.92, 0.34, 1.45, Color("#b9a4e0"))
+				_add_prop(fp, room.index, "rug", 0.50, 0.50, 1.85, 1.30, 0.03, Color("#c39bd3"))
+				if rng.randf() < 0.78:
+					_add_prop(fp, room.index, "tv", 0.20 if rng.randf() < 0.5 else 0.80, 0.78, 0.92, 0.46, 1.05, Color("#272338"))
+				if rng.randf() < 0.60:
+					_add_prop(fp, room.index, "painting", 0.18, 0.72, 0.92, 0.08, 0.76, Color("#fdba74"))
 			"studio":
 				_add_prop(fp, room.index, "bed", 0.25, 0.32, 1.20, 1.80, 0.50, Color("#c39bd3"))
 				_add_prop(fp, room.index, "counter", 0.72, 0.20, 1.25, 0.52, 0.90, Color("#fdba74"))
@@ -443,6 +451,8 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "desk", 0.48, 0.34, 1.35, 0.68, 0.76, Color("#5a3d28"))
 				_add_prop(fp, room.index, "chair", 0.50, 0.62, 0.52, 0.52, 0.92, Color("#6c6c72"))
 				_add_prop(fp, room.index, "cabinet", 0.82, 0.78, 0.82, 0.42, 1.35, Color("#b9a4e0"))
+				if rng.randf() < 0.55:
+					_add_prop(fp, room.index, "painting", 0.18, 0.80, 0.90, 0.08, 0.74, Color("#99f6e4"))
 			"sales":
 				_add_prop(fp, room.index, "counter", 0.52, 0.28, 1.85, 0.62, 0.92, Color("#fdba74"))
 				_add_prop(fp, room.index, "shelf", 0.18, 0.72, 0.75, 1.45, 1.55, Color("#c39bd3"))
@@ -462,13 +472,28 @@ static func _add_prop(fp: FloorPlan, ri: int, kind: String, u: float, v: float,
 	var p0 := fp.cell_to_world(Vector2(room.rect.position))
 	var p1 := fp.cell_to_world(Vector2(room.rect.end))
 	var prop := FloorPlan.Prop.new()
+	prop.id = "%d:%d:%s" % [fp.floor, ri, kind + ":" + str(fp.props.size())]
 	prop.kind = kind
 	prop.room = ri
-	prop.pos = Vector3(lerpf(p0.x, p1.x, u), fp.origin.y + 0.04, lerpf(p0.z, p1.z, v))
 	prop.size = Vector3(minf(sx, maxf(0.35, (p1.x - p0.x) * 0.42)), height,
 		minf(sz, maxf(0.35, (p1.z - p0.z) * 0.42)))
+	var mx := prop.size.x * 0.5 + 0.06
+	var mz := prop.size.z * 0.5 + 0.06
+	prop.pos = Vector3(clampf(lerpf(p0.x, p1.x, u), p0.x + mx, p1.x - mx), fp.origin.y + 0.04,
+		clampf(lerpf(p0.z, p1.z, v), p0.z + mz, p1.z - mz))
 	prop.yaw = yaw
 	prop.color = color
+	match kind:
+		"dresser", "nightstand", "cabinet", "shelf", "fridge", "crate":
+			prop.loot_table = "household"
+			prop.utility = "storage"
+		"bed", "sofa", "chair", "rug", "painting":
+			prop.utility = "comfort"
+		"sink", "toilet", "tub":
+			prop.utility = "water"
+		"tv", "stove":
+			prop.loot_table = "electronics" if kind == "tv" else "kitchen"
+			prop.utility = "power"
 	fp.props.append(prop)
 
 

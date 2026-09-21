@@ -196,3 +196,12 @@ for k in range(3):
     seg = secs(0.22)
     knock += [v * env(i / SR, 0.001, 0.09) for i, v in enumerate(mix(tone(lambda t: 480, seg, lambda t: 1.0), lowpass(noise(seg), 1500)))]
 save("knock", knock)
+
+# CRT television snow: a short seamless loop of band-limited hiss, horizontal-sync buzz,
+# and occasional signal flutter. It is played by AudioStreamPlayer3D on generated TV props.
+n = secs(5.0)
+snow = highpass(lowpass(noise(n), 8500), 700)
+sync = tone(lambda t: 59.94, n, lambda t: 0.13, square)
+flutter = [0.72 + 0.18 * math.sin(2 * math.pi * 0.77 * i / SR) + 0.10 * math.sin(2 * math.pi * 3.3 * i / SR) for i in range(n)]
+tv = [snow[i] * flutter[i] * 0.78 + sync[i] for i in range(n)]
+save("tv_static", loopify(tv, 0.45))

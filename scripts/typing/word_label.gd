@@ -14,6 +14,12 @@ var edge_hint := false
 ## Zombie words: when the anchor is in front of the camera but off the screen (a zombie
 ## right against you), the word is clamped onto the screen instead of dropped.
 var keep_on_screen := false
+## Interior navigation state. Retired words remain visible but crossed out and cannot be
+## typed; recommended words get the route chevron and are where the camera points.
+var retired := false
+var recommended := false
+var option_kind := ""
+var option_door := -1
 
 
 func _init(w := "", size := 28) -> void:
@@ -30,7 +36,7 @@ func set_progress(n: int) -> void:
 
 
 func match_buffer(buffer: String) -> void:
-	set_progress(buffer.length() if (buffer != "" and word.begins_with(buffer)) else 0)
+	set_progress(buffer.length() if (not retired and buffer != "" and word.begins_with(buffer)) else 0)
 
 
 func set_locked(v: bool) -> void:

@@ -39,9 +39,14 @@ func _set_room_visible(ri: int, v: bool) -> void:
 	var n: Node3D = _room_nodes.get(ri)
 	if n == null:
 		return
-	for c in n.get_children():
-		if c is MeshInstance3D:
-			c.visible = v and not c.get_meta("hidden", false)
+	for c in n.find_children("*", "VisualInstance3D", true, false):
+		(c as VisualInstance3D).visible = v and not c.get_meta("hidden", false)
+	for c in n.find_children("*", "AudioStreamPlayer3D", true, false):
+		var audio := c as AudioStreamPlayer3D
+		if v and not audio.playing:
+			audio.play()
+		elif not v and audio.playing:
+			audio.stop()
 
 
 ## Hide/show one part of a room's build (the stairwell's DownFlights / ShaftCap while the
@@ -265,6 +270,7 @@ func open_door(di: int) -> void:
 	# kick the leaf open (it stays open; the state above makes it open on later visits)
 	if _door_nodes.has(di):
 		InteriorMesher.kick_in(_door_nodes[di], plan.doors[di], current_room)
+	_update_labels()
 	door_kicked.emit(di)
 
 
@@ -303,6 +309,8 @@ func mark_room_cleared(ri: int) -> void:
 	World.set_building_state(building.id(), "progress", [p.x, p.y])
 	if p.x >= p.y:
 		World.set_building_state(building.id(), "cleared", true)
+	if ri == current_room:
+		_update_labels()
 
 
 ## Light up typed letters on the current room's door/stair words.
@@ -315,15 +323,25 @@ func show_typing(buffer: String) -> void:
 		return
 	for c in l.get_children():
 		if c is WordLabel:
-			c.match_buffer(buffer)
+			(c as WordLabel).match_buffer(buffer)
 
 
 func _update_labels() -> void:
+	var rec := recommended_option() if current_room >= 0 else {}
 	for k in _room_nodes.keys():
 		var n: Node3D = _room_nodes[k]
 		var l: Node3D = n.get_node_or_null("Labels")
 		if l != null:
 			l.visible = (k == current_room)
+			if k == current_room:
+				for c in l.get_children():
+					if not c is WordLabel:
+						continue
+					var w := c as WordLabel
+					w.retired = option_retired(w.option_kind, w.option_door)
+					w.recommended = not w.retired and not rec.is_empty() \
+						and w.option_kind == rec.get("kind", "") and w.option_door == rec.get("door", -2)
+					w.edge_hint = not w.retired
 
 
 func _reveal(ri: int, hop := true) -> void:
@@ -363,7 +381,8 @@ func _rebuild(ri: int) -> void:
 
 # ------------------------------------------------------------------ typed options
 
-## [{word, kind: "door"|"exit"|"up"|"down", door: di}]
+## Active typed choices only. Retired labels stay in the room crossed out, but are omitted
+## here so Typist cannot accept them.
 func options() -> Array:
 	var out := []
 	if current_room < 0:
@@ -373,7 +392,7 @@ func options() -> Array:
 		var d := plan.doors[di]
 		if d.b < 0:
 			out.append({ "word": "exit", "kind": "exit", "door": di })
-		else:
+		elif not door_retired(di, current_room):
 			out.append({ "word": d.word, "kind": "door", "door": di })
 	# on the ground floor "exit" works from any room the front door can be reached from:
 	# the rail walks you out through the doors you already opened
@@ -384,11 +403,95 @@ func options() -> Array:
 	# storeys they lead to
 	var so := plan.stair_opening(current_room)
 	if so >= 0 or room.is_stair:
-		if plan.floor < plan.floors_total - 1:
+		if plan.floor < plan.floors_total - 1 and floors_above_uncleared():
 			out.append({ "word": "up", "kind": "up", "door": so })
 		if plan.floor > 0:
 			out.append({ "word": "down", "kind": "down", "door": so })
 	return out
+
+
+## A door is a retired dead end once every room in the branch on its far side is clear.
+## We deliberately traverse closed doors too: a cleared room with an unopened door leading
+## to danger is not a dead end. The current room is treated as the branch boundary.
+func door_retired(di: int, from: int) -> bool:
+	if plan == null or di < 0 or from < 0:
+		return false
+	var d := plan.doors[di]
+	if d.b < 0:
+		return false
+	var start := plan.other_room(di, from)
+	# An already-open route into a cleared room is useful only when it is the first leg of
+	# the shortest route to the next frontier. Alternate loops and cleared side branches
+	# stay visible as spatial memory, but no longer compete for typing input.
+	if is_door_open(d) and is_room_cleared(start) and unexplored_doors(start).is_empty():
+		var target := search_target(from)
+		var path := route(from, target) if target != from else []
+		if path.is_empty() or path[0] != di:
+			return true
+	var seen := { from: true, start: true }
+	var q: Array[int] = [start]
+	while not q.is_empty():
+		var r: int = q.pop_front()
+		if not is_room_cleared(r):
+			return false
+		if r == plan.stair_room and other_floors_uncleared():
+			return false
+		for dj in plan.rooms[r].doors:
+			var edge := plan.doors[dj]
+			if edge.b < 0:
+				continue
+			var o := plan.other_room(dj, r)
+			if not seen.has(o):
+				seen[o] = true
+				q.append(o)
+	return true
+
+
+func floor_uncleared(floor: int) -> bool:
+	var bs := World.building_state(building.id())
+	var fp := plan if floor == plan.floor else InteriorGen.generate(World.seed, building, floor)
+	var fs: Dictionary = bs.get("floors", {}).get(str(floor), {})
+	return (fs.get("rooms", {}) as Dictionary).size() < fp.rooms.size()
+
+
+func floors_above_uncleared() -> bool:
+	for f in range(plan.floor + 1, building.floors):
+		if floor_uncleared(f):
+			return true
+	return false
+
+
+func option_retired(kind: String, door: int) -> bool:
+	match kind:
+		"door": return door_retired(door, current_room)
+		"up": return not floors_above_uncleared()
+	return false
+
+
+## Single best next action for camera facing and the gold route chevron. Combat still wins
+## over navigation in Main; this answers only the quiet-room case.
+func recommended_option() -> Dictionary:
+	if plan == null or current_room < 0:
+		return {}
+	var useful := unexplored_doors(current_room)
+	if not useful.is_empty():
+		var di: int = useful[0]
+		return { "word": plan.doors[di].word, "kind": "door", "door": di }
+	var target := search_target(current_room)
+	if target != current_room:
+		var path := route(current_room, target)
+		if not path.is_empty():
+			var di: int = path[0]
+			return { "word": plan.doors[di].word, "kind": "door", "door": di }
+	var so := plan.stair_opening(current_room)
+	if (so >= 0 or plan.rooms[current_room].is_stair) and floors_above_uncleared():
+		return { "word": "up", "kind": "up", "door": so }
+	if (so >= 0 or plan.rooms[current_room].is_stair) and plan.floor > 0:
+		return { "word": "down", "kind": "down", "door": so }
+	for opt in options():
+		if opt["kind"] == "exit":
+			return opt
+	return options()[0] if not options().is_empty() else {}
 
 
 ## Step through a door and stop just inside: the room is in front of you, its zombies
@@ -552,5 +655,3 @@ func search_target(from: int) -> int:
 	if stair_near >= 0:
 		return stair_near
 	return from
-
-
