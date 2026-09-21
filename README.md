@@ -78,7 +78,7 @@ scripts/
   zombies/               zombie.gd (state machine), director.gd (spawns, LOS, targeting),
                          zombie_type.gd (runner/shambler stats), zombie_frames.gd (SpriteFrames)
   map/                   map_labels.gd (shared "1a" labelling), tab_map.gd, minimap.gd
-  audio/sfx.gd           one-shots, distance-faded one-shots, ambience beds + random events
+  audio/sfx.gd           local + true-3D one-shots, semantic-room ambience layers/events
   tests/                 the scenes above + parse_check.gd
 shaders/                 cel.gdshader (city), flat.gdshader (interiors), palette_post.gdshader
 assets/                  palette/, textures/atlas.png (+ source tiles), sprites/zombie/<type>/,
@@ -158,8 +158,9 @@ the procedural mesh treatment. Furnishings remain non-colliding and are clamped 
 room, so visual variety cannot change rail navigation or combat line-of-sight. Each prop has
 a stable id plus loot-table and utility metadata (`storage`, `water`, `power`, `comfort`,
 etc.), ready for persisted looting and base upgrades without making art placement stateful.
-Visible televisions animate palette static and play a looped, distance-faded 3D static bed
-through an 85-degree directional cone; hidden rooms neither render nor emit it.
+Visible televisions animate palette static and play the original indoor static/rumble bed
+as a looped, distance-faded 3D source through an 85-degree directional cone; hidden rooms
+neither render nor emit it.
 
 **Stairwells** (`scripts/interior/stairwell.gd`): same footprint on every storey. `CORE` =
 1×2 switchback (two half-width flights, half-height landing, open shaft with the storey
@@ -272,8 +273,13 @@ Rules of the road:
   (`assets/sprites/sky`: clouds, crow flying ×2, crow perched ×3) all via `create_image_pixflux`
   with the palette. ~265 of 2000 monthly generations used (resets 2026-10-20).
 - Sounds are all procedural placeholders: `python3 tools/make_sounds.py` regenerates
-  `assets/audio/*.wav`, including the loopable CRT static bed (pure Python, no numpy on this
-  Mac). Godot imports WAVs QOA-compressed, so loop points must come from `get_length()`, never
+  `assets/audio/*.wav` (pure Python, no numpy on this Mac). Outdoors crossfades wind and
+  spatial city-life events. Indoors uses a quiet, hiss-free structural pressure bed plus
+  semantic layers—electrical resonance in powered rooms and pipes in kitchens/bathrooms—
+  with room-specific 3D drips, creaks, knocks, clanks, thumps, and distant groans. Zombie,
+  impact, door, bird, and ambience events use a pool inside the 3D SubViewport for actual
+  panning and distance filtering. The former global indoor static is now the TV-local loop.
+  Godot imports WAVs QOA-compressed, so loop points must come from `get_length()`, never
   `data.size()`.
 
 ## 10. Design decisions worth knowing before changing things

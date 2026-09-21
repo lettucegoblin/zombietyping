@@ -120,8 +120,14 @@ func _process(dt: float) -> void:
 	if _search_pending and mode == Mode.INSIDE:
 		_search_beat -= dt
 		if _search_beat <= 0.0 and not typist.in_combat() and not player.is_moving():
-			_search_pending = false
-			_search_step()
+			# A kill in the room ahead can queue this while the rail is still crossing its
+			# threshold. Do not consume that pulse until the room we actually occupy is
+			# marked clear, or the automatic return can be lost between arrival callbacks.
+			if interior.current_room >= 0 and interior.is_room_cleared(interior.current_room):
+				_search_pending = false
+				_search_step()
+			else:
+				_search_beat = 0.15
 	if mode == Mode.DOOR and door_timer > 0.0 and not typist.in_combat():
 		door_timer -= dt
 		if door_timer <= 0.0:
@@ -146,7 +152,10 @@ func _process(dt: float) -> void:
 			player.face_toward(z.global_position)
 	if not director.get_meta("no_street", false):
 		director.street_spawning = mode != Mode.INSIDE
-	sfx.set_inside(mode == Mode.INSIDE)
+	var room_kind := ""
+	if mode == Mode.INSIDE and interior.is_inside() and interior.current_room >= 0:
+		room_kind = interior.plan.rooms[interior.current_room].kind
+	sfx.set_inside(mode == Mode.INSIDE, room_kind)
 	sfx.footsteps(dt, player.current_speed())
 	sfx.atmosphere(dt)
 	ash.emitting = mode != Mode.INSIDE
@@ -351,7 +360,7 @@ func _enter_building() -> void:
 	_hide_door_label()
 	SectorMesher.kick_facade_door(b.id())
 	interior.add_child(InteriorMesher.kicked_leaf(d))
-	sfx.play("door", 0.0, 0.08)
+	sfx.play_at("door", d.pos, 0.0, 0.08, 1.0, 24.0)
 	player.shake(0.25)
 	player.face_toward(d.pos)
 	_seed_floor()
@@ -466,7 +475,7 @@ func _on_option(opt: Dictionary) -> void:
 			var di: int = opt["door"]
 			_last_door = di
 			interior.open_door(di)
-			sfx.play("door", -2.0, 0.1)
+			sfx.play_at("door", interior.plan.doors[di].pos, -2.0, 0.1, 1.0, 24.0)
 			player.shake(0.18)
 			var other: int = interior.plan.other_room(di, interior.current_room)
 			_startle_near(interior.plan.doors[di].pos, other)
@@ -484,13 +493,13 @@ func _on_option(opt: Dictionary) -> void:
 			var sd: int = opt["door"]
 			if sd >= 0 and not interior.is_door_open(interior.plan.doors[sd]):
 				interior.open_door(sd)
-				sfx.play("door", -2.0, 0.1)
+				sfx.play_at("door", interior.plan.doors[sd].pos, -2.0, 0.1, 1.0, 24.0)
 				player.shake(0.18)
 			var pts: PackedVector3Array = interior.climb_path(up)
 			interior.begin_floor_change(1 if up else -1)
 			_seed_floor()
 			pts.append(interior.landing(up))
-			sfx.play("creak", -8.0, 0.15)
+			sfx.play_at("creak", player.global_position, -8.0, 0.15, 1.0, 16.0)
 			_climbing = true
 			player.push_local(pts, "stairs", 2.2)
 	_refresh_hud()

@@ -107,8 +107,8 @@ for k, cut in enumerate([1100, 900]):
 n = secs(0.3)
 save("creak", tone(lambda t: 240 + 120 * math.sin(2 * math.pi * 7 * t), n, lambda t: env(t, 0.03, 0.2) * 0.5, tri))
 
-# --- loops: wind outside, room tone inside. Built as loops via an equal-power crossfade
-# at the seam; DC removed so the seam never clicks.
+# --- loops: wind outside, room tone inside, and object-local machinery. Built as loops via
+# an equal-power crossfade at the seam; DC removed so the seam never clicks.
 def loopify(xs, fade=0.6):
     f = secs(fade)
     for i in range(f):
@@ -130,12 +130,42 @@ whistle = tone(lambda t: 620 + 90 * math.sin(2 * math.pi * 0.17 * t), n, lambda 
 whistle = [w * 0.05 * max(0.0, gusts[i] - 0.55) * 4 for i, w in enumerate(tone(lambda t: 620 + 90 * math.sin(2 * math.pi * 0.17 * t), n, lambda t: 1.0))]
 save("wind", loopify(mix(wind, whistle)))
 
-# inside: a low room tone (ventilation rumble + faint hiss) with the wind far away
+# This was the original blanket indoor ambience. Its rumble, broadband hiss, and distant
+# wind read as an untuned television, so preserve that exact sound as TV static instead.
 n = secs(12.0)
 rumble = mix(tone(lambda t: 48, n, lambda t: 0.35 + 0.1 * math.sin(2 * math.pi * 0.31 * t)), tone(lambda t: 96.5, n, lambda t: 0.12))
 hiss = [v * 0.06 for v in highpass(lowpass(noise(n), 2600), 900)]
 far_wind = [b * 0.25 * g for b, g in zip(lowpass(brown_noise(n), 180), [0.6 + 0.4 * math.sin(2 * math.pi * 0.07 * i / SR) for i in range(n)])]
-save("room", loopify(mix(rumble, hiss, far_wind)))
+save("tv_static", loopify(mix(rumble, hiss, far_wind)))
+
+# Indoors should feel enclosed, not filled with white noise: slow structural pressure,
+# a barely audible building resonance, and no broadband component. Contextual electrical
+# and pipe layers are crossfaded separately by sfx.gd.
+n = secs(16.0)
+pressure = mix(
+    tone(lambda t: 31.0 + 0.8 * math.sin(2 * math.pi * 0.041 * t), n,
+         lambda t: 0.26 + 0.08 * math.sin(2 * math.pi * 0.071 * t)),
+    tone(lambda t: 47.5, n, lambda t: 0.11 + 0.04 * math.sin(2 * math.pi * 0.053 * t + 1.1)),
+    tone(lambda t: 93.0, n, lambda t: 0.035 * (0.5 + 0.5 * math.sin(2 * math.pi * 0.13 * t))),
+)
+save("room", loopify(lowpass(pressure, 240), 0.8))
+
+# Context beds: clean mains transformer harmonics for powered rooms and resonant water
+# pipes for kitchens/bathrooms. Kept separate so they can fade with room semantics.
+n = secs(10.0)
+electric = mix(
+    tone(lambda t: 60.0, n, lambda t: 0.24 + 0.04 * math.sin(2 * math.pi * 0.17 * t)),
+    tone(lambda t: 120.0, n, lambda t: 0.10),
+    tone(lambda t: 241.0 + 1.5 * math.sin(2 * math.pi * 0.11 * t), n, lambda t: 0.035),
+)
+save("electric", loopify(electric, 0.5))
+n = secs(11.0)
+pipes = mix(
+    tone(lambda t: 72.0 + 2.0 * math.sin(2 * math.pi * 0.09 * t), n,
+         lambda t: 0.18 + 0.07 * math.sin(2 * math.pi * 0.19 * t + 0.7)),
+    tone(lambda t: 146.0, n, lambda t: 0.045 * (0.5 + 0.5 * math.sin(2 * math.pi * 0.27 * t))),
+)
+save("pipes", loopify(lowpass(pipes, 420), 0.6))
 
 # --- atmosphere one-shots ------------------------------------------------------
 # crow: 1-3 harsh caws (pulse train through a bandpass), pitch jitter at play time
@@ -196,12 +226,3 @@ for k in range(3):
     seg = secs(0.22)
     knock += [v * env(i / SR, 0.001, 0.09) for i, v in enumerate(mix(tone(lambda t: 480, seg, lambda t: 1.0), lowpass(noise(seg), 1500)))]
 save("knock", knock)
-
-# CRT television snow: a short seamless loop of band-limited hiss, horizontal-sync buzz,
-# and occasional signal flutter. It is played by AudioStreamPlayer3D on generated TV props.
-n = secs(5.0)
-snow = highpass(lowpass(noise(n), 8500), 700)
-sync = tone(lambda t: 59.94, n, lambda t: 0.13, square)
-flutter = [0.72 + 0.18 * math.sin(2 * math.pi * 0.77 * i / SR) + 0.10 * math.sin(2 * math.pi * 3.3 * i / SR) for i in range(n)]
-tv = [snow[i] * flutter[i] * 0.78 + sync[i] for i in range(n)]
-save("tv_static", loopify(tv, 0.45))

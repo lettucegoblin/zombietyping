@@ -25,8 +25,10 @@ unless noted.
 4. **Save / load** of `World.state`, `World.explored`, seed, player tile, hp/kills.
 5. **Street props / more ambience**: abandoned cars, litter, streetlights, more sky life.
    Clouds and crows exist; the owner keeps asking for "more atmosphere".
-6. **Real sound.** Every wav is synthesized; replace with recordings or better synthesis
-   (the beds/events wiring in `sfx.gd` stays).
+6. **Recorded sound pass.** The mix architecture now has semantic indoor layers, room-aware
+   events, positional world one-shots, and object-local TV static, but every wav is still
+   synthesized. Replace the source assets with recordings or higher-quality synthesis while
+   retaining the beds/events/3D routing in `sfx.gd`.
 
 ## Rough edges seen while playtesting (owner has NOT reported these yet)
 

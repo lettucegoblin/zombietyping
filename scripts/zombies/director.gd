@@ -299,7 +299,15 @@ func _update_los() -> void:
 	for z in alive():
 		var to := z.global_position + Vector3(0, 1.0, 0)
 		var visible_now := false
-		if cam.is_position_in_frustum(to) and from.distance_to(to) < ENGAGE_RANGE:
+		# A zombie almost touching the survivor can put its head below the camera frustum,
+		# especially on an interior threshold. In the same semantic room it is necessarily
+		# visible enough to fight; its word overlay already clamps onto the screen.
+		var same_room: bool = z.room >= 0 and interior != null and interior.is_inside() \
+			and interior.room_at_world(player.global_position) == z.room
+		var point_blank: bool = same_room and Vector2(from.x - to.x, from.z - to.z).length() < 1.5
+		if point_blank:
+			visible_now = true
+		elif cam.is_position_in_frustum(to) and from.distance_to(to) < ENGAGE_RANGE:
 			var q := PhysicsRayQueryParameters3D.create(from, to, 1)
 			var hit := space.intersect_ray(q)
 			visible_now = hit.is_empty()
