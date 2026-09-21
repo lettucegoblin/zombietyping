@@ -634,6 +634,48 @@ func place_item(id: String, kind: String, pos: Vector3, yaw: float) -> String:
 	return "%s placed" % kind
 
 
+func last_placement_for(id: String) -> Dictionary:
+	for i in range(placements.size() - 1, -1, -1):
+		if placements[i].get("building", "") == id:
+			return (placements[i] as Dictionary).duplicate(true)
+	return {}
+
+
+func _same_placement(a: Dictionary, b: Dictionary) -> bool:
+	return a.get("building", "") == b.get("building", "") \
+			and a.get("kind", "") == b.get("kind", "") \
+			and a.get("pos", Vector3.INF) == b.get("pos", Vector3.INF) \
+			and is_equal_approx(float(a.get("yaw", 0.0)), float(b.get("yaw", 0.0)))
+
+
+## Removes a specific placed object. A just-built undo uses 1.0; later dismantling uses
+## 0.5, rounded up so even a one-unit chair returns something useful.
+func remove_placement(target: Dictionary, refund_fraction: float) -> String:
+	var index := -1
+	for i in range(placements.size() - 1, -1, -1):
+		if _same_placement(placements[i], target):
+			index = i
+			break
+	if index < 0:
+		return "that construction is no longer available to dismantle"
+	var item: Dictionary = placements[index]
+	var kind: String = item.get("kind", "")
+	placements.remove_at(index)
+	var refund: Dictionary = {}
+	var original_cost := build_cost(kind)
+	for material in original_cost:
+		var amount := ceili(float(original_cost[material]) * clampf(refund_fraction, 0.0, 1.0))
+		if amount > 0:
+			refund[material] = amount
+	if not refund.is_empty():
+		add_materials(refund)
+	else:
+		settlement_changed.emit()
+	var action := "undid" if refund_fraction >= 0.999 else "dismantled"
+	var rule := "full refund" if refund_fraction >= 0.999 else "50% rounded-up materials"
+	return "%s %s — %s: %s" % [action, kind, rule, cost_text(refund)]
+
+
 func safe_rect_world(b: BuildingData) -> Rect2:
 	var grown := b.rect.grow(1)
 	return Rect2(Vector2(grown.position) * TILE_M, Vector2(grown.size) * TILE_M)

@@ -19,6 +19,9 @@ const BUILD_KINDS := ["wall", "crate", "bed", "chair", "farm"]
 const CitizenNav = preload("res://scripts/settlement/citizen_navigation.gd")
 const WALL_COLOR := Color("#623b55")
 const WALL_CAP := Color("#f6c177")
+const GHOST_VALID := Color("#7ee787", 0.58)
+const GHOST_INVALID := Color("#ff4f87", 0.62)
+const UNDO_WINDOW_MSEC := 10000
 
 var player: Node3D
 var active_building_id := ""
@@ -31,12 +34,25 @@ var _citizens: Array[Node3D] = []
 var _citizen_memory: Dictionary = {}
 var _citizen_navigation: Dictionary = {}
 var _food_clock := 0.0
+var preview_rotation := 0
+var _ghost_root: Node3D
+var _ghost_kind := ""
+var _ghost_materials: Array[StandardMaterial3D] = []
+var _ghost_sprites: Array[Sprite3D] = []
+var _ghost_valid := false
+var _ghost_error := ""
+var _last_built: Dictionary = {}
+var _undo_until_msec := 0
 
 
 func _ready() -> void:
 	_root = Node3D.new()
 	_root.name = "GeneratedSettlement"
 	add_child(_root)
+	_ghost_root = Node3D.new()
+	_ghost_root.name = "PlacementGhost"
+	_ghost_root.visible = false
+	add_child(_ghost_root)
 	World.state_changed.connect(func(_id): _dirty = true)
 	World.settlement_changed.connect(func(): _dirty = true)
 
@@ -49,6 +65,7 @@ func configure(p: Node3D) -> void:
 func enter(id: String) -> void:
 	active_building_id = id
 	build_mode = false
+	_ghost_root.visible = false
 	var b := World.building_by_id(id)
 	if b != null:
 		player.set_manual_zone(World.safe_rect_world(b), b.road_tile)
@@ -58,6 +75,9 @@ func enter(id: String) -> void:
 func leave() -> void:
 	active_building_id = ""
 	build_mode = false
+	_ghost_root.visible = false
+	_last_built.clear()
+	_undo_until_msec = 0
 	if player != null:
 		player.clear_manual_zone()
 
@@ -66,25 +86,95 @@ func toggle_build() -> String:
 	if active_building_id == "":
 		return "enter a claimed safe zone first"
 	build_mode = not build_mode
-	return "build mode %s — Q/E select, F place" % ("on" if build_mode else "off")
+	if build_mode:
+		preview_rotation = 0
+		_update_ghost(true)
+		return "build mode on — Q/E item, R rotate, F confirm, Esc cancel"
+	_ghost_root.visible = false
+	return "build mode off"
 
 
 func cycle_build(delta: int) -> String:
+	if not build_mode:
+		return "turn on build mode first"
 	build_index = posmod(build_index + delta, BUILD_KINDS.size())
-	return selected_kind()
+	preview_rotation = 0
+	_update_ghost(true)
+	return "%s selected" % selected_kind()
 
 
 func selected_kind() -> String:
 	return BUILD_KINDS[build_index]
 
 
+func rotate_preview() -> String:
+	if not build_mode:
+		return "turn on build mode first"
+	preview_rotation = posmod(preview_rotation + 1, 4)
+	_update_ghost()
+	return "%s rotated to %d°" % [selected_kind(), preview_rotation * 90]
+
+
+func cancel_build() -> String:
+	if not build_mode:
+		return "build mode is already off"
+	build_mode = false
+	_ghost_root.visible = false
+	return "placement cancelled — no materials spent"
+
+
+func _preview_position() -> Vector3:
+	var p: Vector3 = player.global_position + player.facing * 2.6
+	p.y = player.global_position.y + 0.05
+	return p
+
+
+func _preview_yaw() -> float:
+	return atan2(player.facing.x, player.facing.z) + preview_rotation * PI * 0.5
+
+
+func ghost_is_valid() -> bool:
+	return build_mode and _ghost_valid
+
+
+func ghost_error() -> String:
+	return _ghost_error
+
+
+func undo_seconds_remaining() -> float:
+	if _last_built.is_empty():
+		return 0.0
+	return maxf(0.0, float(_undo_until_msec - Time.get_ticks_msec()) / 1000.0)
+
+
 func place_selected() -> String:
 	if not build_mode or active_building_id == "" or player == null:
 		return "turn on build mode inside a safe zone"
-	var p: Vector3 = player.global_position + player.facing * 2.6
-	p.y = player.global_position.y + 0.05
-	var msg := World.place_item(active_building_id, selected_kind(), p, atan2(player.facing.x, player.facing.z))
+	_update_ghost()
+	if not _ghost_valid:
+		return _ghost_error
+	var msg := World.place_item(active_building_id, selected_kind(), _preview_position(), _preview_yaw())
+	if msg.ends_with(" placed"):
+		_last_built = World.last_placement_for(active_building_id)
+		_undo_until_msec = Time.get_ticks_msec() + UNDO_WINDOW_MSEC
 	_dirty = true
+	_update_ghost()
+	return msg
+
+
+func undo_or_dismantle_last() -> String:
+	if active_building_id == "":
+		return "enter a claimed safe zone first"
+	var full_refund := not _last_built.is_empty() and Time.get_ticks_msec() <= _undo_until_msec
+	var target := _last_built if full_refund else World.last_placement_for(active_building_id)
+	if target.is_empty():
+		return "nothing built here to dismantle"
+	var msg := World.remove_placement(target, 1.0 if full_refund else 0.5)
+	if msg.begins_with("undid") or msg.begins_with("dismantled"):
+		_last_built.clear()
+		_undo_until_msec = 0
+		_dirty = true
+		_update_ghost()
 	return msg
 
 
@@ -97,6 +187,7 @@ func _process(dt: float) -> void:
 		_dirty = true
 	if _dirty:
 		_rebuild(sec)
+	_update_ghost()
 	_move_citizens(dt)
 	_food_clock += dt
 	if _food_clock >= 45.0:
@@ -351,3 +442,77 @@ func _add_placement(item: Dictionary) -> void:
 	sp.position = item["pos"] + Vector3(0, 0.75, 0)
 	sp.shaded = false
 	_root.add_child(sp)
+
+
+# ------------------------------------------------------------------ construction preview
+
+func _update_ghost(force_rebuild: bool = false) -> void:
+	if _ghost_root == null:
+		return
+	if not build_mode or active_building_id == "" or player == null:
+		_ghost_root.visible = false
+		_ghost_valid = false
+		_ghost_error = ""
+		return
+	var kind := selected_kind()
+	if force_rebuild or kind != _ghost_kind:
+		_build_ghost(kind)
+	_ghost_root.visible = true
+	_ghost_root.position = _preview_position()
+	_ghost_root.rotation.y = _preview_yaw()
+	_ghost_error = World.placement_error(active_building_id, kind, _ghost_root.position, _ghost_root.rotation.y)
+	if _ghost_error == "" and not World.can_afford(World.build_cost(kind)):
+		_ghost_error = "need " + World.cost_text(World.build_cost(kind))
+	_ghost_valid = _ghost_error == ""
+	_set_ghost_feedback(_ghost_valid)
+
+
+func _build_ghost(kind: String) -> void:
+	for child in _ghost_root.get_children():
+		child.free()
+	_ghost_materials.clear()
+	_ghost_sprites.clear()
+	_ghost_kind = kind
+	var footprint: Vector2 = World.PLACEMENT_SIZE[kind]
+	_add_ghost_box(Vector3(footprint.x, 0.035, footprint.y), Vector3(0, 0.035, 0))
+	match kind:
+		"wall":
+			_add_ghost_box(Vector3(2.4, 1.5, 0.3), Vector3(0, 0.75, 0))
+		"farm":
+			for row in 3:
+				_add_ghost_box(Vector3(3.1, 0.16, 0.18), Vector3(0, 0.18, -0.72 + row * 0.72))
+		_:
+			if PROP_TEXTURES.has(kind):
+				var sp := Sprite3D.new()
+				sp.texture = PROP_TEXTURES[kind]
+				sp.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+				sp.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+				sp.pixel_size = 0.028
+				sp.position = Vector3(0, 0.75, 0)
+				sp.shaded = false
+				sp.no_depth_test = true
+				_ghost_root.add_child(sp)
+				_ghost_sprites.append(sp)
+
+
+func _add_ghost_box(size: Vector3, pos: Vector3) -> void:
+	var mi := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	var mat := StandardMaterial3D.new()
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.albedo_color = GHOST_VALID
+	mesh.material = mat
+	mi.mesh = mesh
+	mi.position = pos
+	_ghost_root.add_child(mi)
+	_ghost_materials.append(mat)
+
+
+func _set_ghost_feedback(valid: bool) -> void:
+	var color := GHOST_VALID if valid else GHOST_INVALID
+	for mat in _ghost_materials:
+		mat.albedo_color = color
+	for sp in _ghost_sprites:
+		sp.modulate = color

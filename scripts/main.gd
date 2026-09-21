@@ -182,9 +182,12 @@ func _unhandled_input(event: InputEvent) -> void:
 		var msg := ""
 		match event.keycode:
 			KEY_B: msg = settlement.toggle_build()
-			KEY_Q: msg = "selected " + settlement.cycle_build(-1)
-			KEY_E: msg = "selected " + settlement.cycle_build(1)
-			KEY_F: msg = settlement.place_selected()
+			KEY_Q: msg = settlement.cycle_build(-1) if settlement.build_mode else ""
+			KEY_E: msg = settlement.cycle_build(1) if settlement.build_mode else ""
+			KEY_R: msg = settlement.rotate_preview() if settlement.build_mode else ""
+			KEY_F: msg = settlement.place_selected() if settlement.build_mode else ""
+			KEY_ESCAPE: msg = settlement.cancel_build() if settlement.build_mode else ""
+			KEY_U: msg = settlement.undo_or_dismantle_last()
 			KEY_PAGEUP: msg = _safezone_floor(1)
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
@@ -763,7 +766,15 @@ func _refresh_hud() -> void:
 			var fl: int = interior.plan.floor + 1 if interior.is_inside() else 0
 			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]nothing left here — moving on[/color]" if _searching else ""])
 		Mode.SAFEZONE:
-			var build := "[color=#ffd166]BUILD %s[/color]  Q/E select · F place" % settlement.selected_kind() if settlement.build_mode else "B: build mode"
+			var build := "B: build mode  ·  U: dismantle last (50%, rounded up)"
+			if settlement.build_mode:
+				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
+						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
+				build = "[color=#ffd166]BUILD %s %d°[/color]  %s  ·  Q/E item · R rotate · F confirm · Esc cancel" % [
+					settlement.selected_kind(), settlement.preview_rotation * 90, preview_state]
+			var undo_left := settlement.undo_seconds_remaining()
+			if undo_left > 0.0:
+				build += "  ·  U undo %.1fs (full refund)" % undo_left
 			var floor_text := "floor %d/%d  ·  PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
 			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  %s  ·  Tab manage/travel" % [build, floor_text])
 			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
