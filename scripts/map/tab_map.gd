@@ -196,7 +196,15 @@ func _on_submit(text: String) -> void:
 		clear_requested.emit()
 		flash("queue cleared")
 		return
-	var commands := { "info": "info", "salvage": "salvage", "car": "car", "fortify": "fortify", "supply": "supply", "claim": "claim", "farm": "farm" }
+	if tokens[0] == "job":
+		if tokens.size() < 3 or not _labels.has(tokens[1]):
+			flash("use job <label> farmer|scavenger|builder|mechanic|medic")
+			return
+		_selected_id = _labels[tokens[1]]
+		flash(World.assign_next_job(_selected_id, tokens[2]))
+		_invalidate()
+		return
+	var commands := { "info": "info", "salvage": "salvage", "car": "car", "fortify": "fortify", "supply": "supply", "claim": "claim", "farm": "farm", "crew": "crew" }
 	if commands.has(tokens[0]):
 		if tokens.size() < 2 or not _labels.has(tokens[1]):
 			flash("use %s <map label>" % tokens[0])
@@ -738,6 +746,25 @@ func _draw_building_panel(font: Font) -> void:
 		var readiness_color := Color("#a6e3a1") if profile["readiness_kind"] == "ready" else (Color("#ff6f91") if profile["readiness_kind"] == "needs" else Color("#f6c177"))
 		draw_string(font, Vector2(x, y), str(profile["readiness"]), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, readiness_color)
 		y += 20.0
+	if st.get("claimed", false):
+		var residents := World.resident_records(_selected_id)
+		draw_string(font, Vector2(x, y), "CREW %d  ·  next work cycle %ds" % [int(st.get("citizens", 0)), World.seconds_until_work_cycle()], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#f6c177"))
+		y += 16.0
+		if residents.is_empty():
+			draw_string(font, Vector2(x, y), "founder caretaker · rescue people to specialize", HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#9f95ad"))
+			y += 15.0
+		else:
+			for i in mini(2, residents.size()):
+				var person: Dictionary = residents[i]
+				draw_string(font, Vector2(x, y), "%s · %s → %s" % [person.get("name", "survivor"), person.get("trait", ""), person.get("job", "unassigned")], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#ded8e8"))
+				y += 15.0
+		var last: Dictionary = st.get("last_production", {})
+		if not last.is_empty():
+			var output: Dictionary = last.get("output", {})
+			var work_text := "idle" if output.is_empty() else World.cost_text(output)
+			var delivery := "delivered" if last.get("delivered", false) else "held locally — route cut"
+			draw_string(font, Vector2(x, y), "last: %s · %s" % [work_text, delivery], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#a6e3a1") if last.get("delivered", false) else Color("#ff6f91"))
+			y += 16.0
 	var supply_lines := _supply_lines_for(_selected_id)
 	for i in mini(2, supply_lines.size()):
 		draw_string(font, Vector2(x, y), supply_lines[i], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#68d5ff"))
@@ -757,6 +784,8 @@ func _draw_building_panel(font: Font) -> void:
 	if not st.get("claimed", false):
 		rows.append({ "action": "claim", "label": "Claim building", "cost": World.cost_text(World.claim_cost(b)) })
 	else:
+		if not (st.get("resident_ids", []) as Array).is_empty():
+			rows.append({ "action": "crew", "label": "Auto-assign crew", "cost": "or type job <label> <role>" })
 		rows.append({ "action": "farm", "label": "Build farm plot", "cost": World.cost_text(World.farm_cost()) })
 	for row in rows:
 		if y + 45.0 > pr.end.y - 16.0:

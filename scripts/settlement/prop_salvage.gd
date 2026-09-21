@@ -15,6 +15,7 @@ static func material_yield(kind: String) -> Dictionary:
 		"fridge": return { "metal": 3, "electronics": 1 }
 		"tv": return { "electronics": 3, "metal": 1 }
 		"stove": return { "metal": 3, "electronics": 1 }
+		"workbench": return { "wood": 2, "metal": 2, "tools": 1 }
 		"sink", "toilet", "tub": return { "metal": 2, "building_materials": 1 }
 		_: return { "building_materials": 1 }
 

@@ -123,6 +123,9 @@ func _run() -> void:
 	if not World.pending_survivors.is_empty() or World.survivors[survivor_id].get("base_id", "") != first_base.id():
 		_fail("assigned survivor retained pending/incorrect base state")
 		return
+	if not Workforce.JOBS.has(World.survivors[survivor_id].get("job", "")):
+		_fail("assigned survivor did not receive a valid trait-aware default job")
+		return
 
 	var later_base := other_buildings[1]
 	World.state[later_base.id()] = { "cleared": true, "salvaged": true, "fortified": true, "supplied": true }

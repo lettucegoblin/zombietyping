@@ -60,6 +60,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_rescue_loop.tscn` | deterministic semantic-room survivor target, rescue-priority guidance, typed `help`, directional cue lifecycle, pending roster, save/load, base assignment, and named citizens |
 | `scenes/tests/test_survivor_cue.tscn` | stable positional rescue cadence, range gating, 3D attenuation/panning, movement, and permanent shutdown on resolution |
 | `scenes/tests/test_facility_profile.tscn` | generated room/prop utility totals, dismantled-prop subtraction, deterministic facility role, and claim-aware readiness |
+| `scenes/tests/test_workforce.tscn` | trait-aware jobs, staffed farm output, disconnected local stock, supply-route delivery, work cycles, and persistence |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
@@ -185,6 +186,13 @@ from its complete procedural room program and still-intact generated props. Dism
 IDs stop contributing immediately, so the panel's upgrade readiness describes the physical
 building instead of a parallel abstract economy.
 
+Claimed bases run one persistent work cycle every 45 seconds. Rescued residents receive a
+trait-aware default job and can be reassigned from the Tab building panel (`Auto-assign crew`)
+or with `job <label> farmer|scavenger|builder|mechanic|medic`. Farms only produce when tended;
+mechanics and medics require the relevant intact workshop, power, water, and storage; builders
+and scavengers recover material classes. A disconnected outpost keeps output in a local
+stockpile, and a restored road supply link delivers the backlog into the shared inventory.
+
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only
 the player's sparse mutations are stored.
@@ -210,7 +218,8 @@ does not perturb the room graph or its door words. Two planners:
 
 Every semantic room is dressed procedurally from its own bounds and seed: beds, nightstands,
 dressers, toilets, sinks, tubs, counters, stoves, fridges, dining tables, sofas, shelving,
-desks, chairs, rugs, paintings, televisions, sales fixtures, storage, and hall benches.
+desks, powered workbenches, chairs, rugs, paintings, televisions, sales fixtures, storage,
+and hall benches.
 PixelLab sprites cover the recognizable household props; any unmapped utility shape retains
 the procedural mesh treatment. Furnishings remain non-colliding and are clamped inside their
 room, so visual variety cannot change rail navigation or combat line-of-sight. Each prop has

@@ -457,10 +457,14 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "counter", 0.52, 0.28, 1.85, 0.62, 0.92, Color("#fdba74"))
 				_add_prop(fp, room.index, "shelf", 0.18, 0.72, 0.75, 1.45, 1.55, Color("#c39bd3"))
 				_add_prop(fp, room.index, "shelf", 0.82, 0.72, 0.75, 1.45, 1.55, Color("#99f6e4"))
-			"storage", "workshop":
+			"storage":
 				_add_prop(fp, room.index, "crate", 0.25, 0.25, 0.82, 0.82, 0.82, Color("#5a3d28"))
 				_add_prop(fp, room.index, "crate", 0.72, 0.72, 0.68, 0.68, 0.62, Color("#fdba74"))
 				_add_prop(fp, room.index, "shelf", 0.80, 0.24, 0.62, 1.42, 1.65, Color("#6c6c72"))
+			"workshop":
+				_add_prop(fp, room.index, "workbench", 0.50, 0.22, 1.65, 0.72, 0.88, Color("#5a3d28"))
+				_add_prop(fp, room.index, "crate", 0.24, 0.72, 0.72, 0.72, 0.68, Color("#fdba74"))
+				_add_prop(fp, room.index, "shelf", 0.82, 0.70, 0.62, 1.35, 1.62, Color("#6c6c72"))
 			"hall":
 				if rng.randf() < 0.55:
 					_add_prop(fp, room.index, "bench", 0.50, 0.18, 1.25, 0.42, 0.48, Color("#5a3d28"))
@@ -493,6 +497,9 @@ static func _add_prop(fp: FloorPlan, ri: int, kind: String, u: float, v: float,
 			prop.utility = "water"
 		"tv", "stove":
 			prop.loot_table = "electronics" if kind == "tv" else "kitchen"
+			prop.utility = "power"
+		"workbench":
+			prop.loot_table = "tools"
 			prop.utility = "power"
 	fp.props.append(prop)
 

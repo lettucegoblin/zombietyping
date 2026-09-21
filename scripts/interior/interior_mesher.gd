@@ -259,6 +259,7 @@ const PROP_SPRITES := {
 	"stove": "res://assets/sprites/props/stove.png",
 	"shelf": "res://assets/sprites/props/shelf.png",
 	"desk": "res://assets/sprites/props/desk.png",
+	"workbench": "res://assets/sprites/props/desk.png",
 	"chair": "res://assets/sprites/props/chair.png",
 	"crate": "res://assets/sprites/props/crate.png",
 }

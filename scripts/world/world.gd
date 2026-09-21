@@ -12,6 +12,8 @@ const S := SectorData.SIZE
 const TILE_M := 5.0                 ## metres per tile in 3D
 const FLOOR_M := 3.6                ## metres per storey
 const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
+const WORK_CYCLE_SECONDS := 45.0
+const WorkforceRules = preload("res://scripts/settlement/workforce.gd")
 
 const PLACEMENT_SIZE := {
 	"wall": Vector2(2.4, 0.3),
@@ -44,6 +46,8 @@ var supply_links: Array[PackedStringArray] = []
 var placements: Array[Dictionary] = []
 var survivors: Dictionary = {}       ## stable survivor id -> named/traited roster record
 var pending_survivors: Array[String] = [] ## rescued before a base exists
+var settlement_cycle := 0
+var settlement_work_seconds := 0.0
 var persistence_enabled := true
 var _save_queued := false
 
@@ -59,7 +63,9 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
-	if persistence_enabled and _save_queued:
+	# The work-cycle clock advances without writing every frame. Always flush on a clean
+	# shutdown so partial progress toward the next cycle is not discarded.
+	if persistence_enabled:
 		save_now()
 
 
@@ -74,6 +80,8 @@ func save_snapshot() -> Dictionary:
 		"placements": placements.duplicate(true),
 		"survivors": survivors.duplicate(true),
 		"pending_survivors": pending_survivors.duplicate(),
+		"settlement_cycle": settlement_cycle,
+		"settlement_work_seconds": settlement_work_seconds,
 	}
 
 
@@ -95,6 +103,8 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	pending_survivors.clear()
 	for survivor_id in snapshot.get("pending_survivors", []):
 		pending_survivors.append(str(survivor_id))
+	settlement_cycle = int(snapshot.get("settlement_cycle", 0))
+	settlement_work_seconds = clampf(float(snapshot.get("settlement_work_seconds", 0.0)), 0.0, WORK_CYCLE_SECONDS)
 	_sectors.clear()
 	materials_changed.emit()
 	settlement_changed.emit()
@@ -488,6 +498,12 @@ func _assign_survivor_to_base(survivor_id: String, base_id: String) -> void:
 		residents.append(survivor_id)
 		base_state["resident_ids"] = residents
 		base_state["citizens"] = int(base_state.get("citizens", 0)) + 1
+	if str(survivor.get("job", "")) == "":
+		var base: BuildingData = building_by_id(base_id)
+		if base != null:
+			var profile: Dictionary = FacilityProfile.derive(seed, base, base_state)
+			survivor["job"] = WorkforceRules.suggested_job(str(survivor.get("trait", "")), profile, placement_count(base_id, "farm"))
+			survivors[survivor_id] = survivor
 	pending_survivors.erase(survivor_id)
 	state_changed.emit(base_id)
 	settlement_changed.emit()
@@ -530,11 +546,159 @@ func claimed_ids() -> Array[String]:
 	return out
 
 
+func resident_records(id: String) -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for survivor_id in building_state(id).get("resident_ids", []):
+		var person: Dictionary = survivors.get(str(survivor_id), {})
+		if not person.is_empty():
+			out.append(person.duplicate(true))
+	return out
+
+
+func auto_assign_jobs(id: String) -> String:
+	var b := building_by_id(id)
+	var st := building_state(id)
+	if b == null or not st.get("claimed", false):
+		return "crew can only be assigned at a claimed base"
+	var residents: Array = st.get("resident_ids", [])
+	if residents.is_empty():
+		return "no rescued survivors live at this base yet"
+	var profile: Dictionary = FacilityProfile.derive(seed, b, st)
+	var farms: int = placement_count(id, "farm")
+	var assigned: Array[String] = []
+	for survivor_id in residents:
+		var sid := str(survivor_id)
+		var person: Dictionary = survivors.get(sid, {})
+		if person.is_empty():
+			continue
+		var job: String = WorkforceRules.suggested_job(str(person.get("trait", "")), profile, farms)
+		person["job"] = job
+		survivors[sid] = person
+		assigned.append("%s → %s" % [person.get("name", "survivor"), job])
+	state_changed.emit(id)
+	settlement_changed.emit()
+	return "crew assigned: " + ", ".join(assigned)
+
+
+func assign_next_job(id: String, job: String) -> String:
+	job = job.to_lower()
+	if not WorkforceRules.JOBS.has(job):
+		return "job must be " + "|".join(WorkforceRules.JOBS)
+	var st := building_state(id)
+	if not st.get("claimed", false):
+		return "jobs can only be assigned at a claimed base"
+	var residents: Array = st.get("resident_ids", [])
+	if residents.is_empty():
+		return "no rescued survivors live at this base yet"
+	var cursor := posmod(int(st.get("job_cursor", 0)), residents.size())
+	var survivor_id := str(residents[cursor])
+	var person: Dictionary = survivors.get(survivor_id, {})
+	if person.is_empty():
+		return "resident roster is unavailable"
+	person["job"] = job
+	survivors[survivor_id] = person
+	st["job_cursor"] = (cursor + 1) % residents.size()
+	state_changed.emit(id)
+	settlement_changed.emit()
+	return "%s assigned %s (%d/%d)" % [person.get("name", "survivor"), job, cursor + 1, residents.size()]
+
+
 func has_supply_link(id: String) -> bool:
 	for link in supply_links:
 		if id in link:
 			return true
 	return false
+
+
+func seconds_until_work_cycle() -> int:
+	return maxi(0, ceili(WORK_CYCLE_SECONDS - settlement_work_seconds))
+
+
+func advance_settlement(dt: float) -> void:
+	if dt <= 0.0 or claimed_ids().is_empty():
+		return
+	settlement_work_seconds += dt
+	while settlement_work_seconds >= WORK_CYCLE_SECONDS:
+		settlement_work_seconds -= WORK_CYCLE_SECONDS
+		run_work_cycle()
+
+
+## A base is on the shared inventory network only when it connects through the persisted
+## road links to the founding base. Disconnected production remains visible in that site's
+## local stockpile and is delivered automatically after the route is restored.
+func networked_base_ids() -> Dictionary:
+	var claims: Array[String] = claimed_ids()
+	claims.sort()
+	if claims.is_empty():
+		return {}
+	var roots: Array[String] = []
+	for id in claims:
+		if int(building_state(id).get("founders", 0)) > 0:
+			roots.append(id)
+	if roots.is_empty():
+		roots.append(claims[0]) # compatibility with saves made before founder state existed
+	var connected := {}
+	var queue: Array[String] = []
+	for root in roots:
+		connected[root] = true
+		queue.append(root)
+	while not queue.is_empty():
+		var here: String = queue.pop_front()
+		for link in supply_links:
+			if link.size() < 2:
+				continue
+			var other := ""
+			if link[0] == here:
+				other = link[1]
+			elif link[1] == here:
+				other = link[0]
+			if other != "" and not connected.has(other) and claims.has(other):
+				connected[other] = true
+				queue.append(other)
+	return connected
+
+
+func _add_bundle(target: Dictionary, bundle: Dictionary) -> void:
+	for key in bundle:
+		target[key] = int(target.get(key, 0)) + int(bundle[key])
+
+
+func run_work_cycle() -> Dictionary:
+	settlement_cycle += 1
+	var connected: Dictionary = networked_base_ids()
+	var delivered := {}
+	var reports := {}
+	var claims: Array[String] = claimed_ids()
+	claims.sort()
+	for id in claims:
+		var b: BuildingData = building_by_id(id)
+		if b == null:
+			continue
+		var st: Dictionary = building_state(id)
+		var result: Dictionary = WorkforceRules.produce(seed, b, st, survivors, placement_count(id, "farm"), settlement_cycle)
+		var output: Dictionary = result["output"]
+		var stockpile: Dictionary = (st.get("local_stockpile", {}) as Dictionary).duplicate()
+		_add_bundle(stockpile, output)
+		var is_connected := connected.has(id)
+		if is_connected:
+			_add_bundle(delivered, stockpile)
+			stockpile.clear()
+		st["local_stockpile"] = stockpile
+		st["last_production"] = {
+			"cycle": settlement_cycle,
+			"output": output.duplicate(),
+			"delivered": is_connected,
+			"jobs": (result["jobs"] as Dictionary).duplicate(),
+			"tended_farms": result["tended_farms"],
+			"farm_count": result["farm_count"],
+		}
+		reports[id] = st["last_production"].duplicate(true)
+		state_changed.emit(id)
+	if not delivered.is_empty():
+		add_materials(delivered)
+	else:
+		settlement_changed.emit()
+	return { "cycle": settlement_cycle, "delivered": delivered, "bases": reports }
 
 
 func link_supply(id: String) -> String:
@@ -614,7 +778,7 @@ func build_farm(id: String) -> String:
 		return "no open farm plot remains inside this perimeter"
 	var result := place_item(id, "farm", site["pos"], site["yaw"])
 	if result == "farm placed":
-		return "farm plot established; it will produce food"
+		return "farm plot established; assign a farmer to produce food"
 	return result
 
 
@@ -833,6 +997,7 @@ func settlement_action(action: String, id: String) -> String:
 		"supply": return link_supply(id)
 		"claim": return claim_building(id)
 		"farm": return build_farm(id)
+		"crew": return auto_assign_jobs(id)
 	return "unknown building action"
 
 

@@ -33,7 +33,6 @@ var _last_sector := Vector2i(999999, 999999)
 var _citizens: Array[Node3D] = []
 var _citizen_memory: Dictionary = {}
 var _citizen_navigation: Dictionary = {}
-var _food_clock := 0.0
 var preview_rotation := 0
 var _ghost_root: Node3D
 var _ghost_kind := ""
@@ -189,15 +188,7 @@ func _process(dt: float) -> void:
 		_rebuild(sec)
 	_update_ghost()
 	_move_citizens(dt)
-	_food_clock += dt
-	if _food_clock >= 45.0:
-		_food_clock = 0.0
-		var farms := 0
-		for item in World.placements:
-			if item.get("kind", "") == "farm" and World.building_state(item.get("building", "")).get("claimed", false):
-				farms += 1
-		if farms > 0:
-			World.add_materials({ "food": farms })
+	World.advance_settlement(dt)
 
 
 func _rebuild(center: Vector2i) -> void:
@@ -339,6 +330,7 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 			n.set_meta("survivor_id", survivor_id)
 			n.set_meta("survivor_name", survivor.get("name", ""))
 			n.set_meta("trait", survivor.get("trait", ""))
+			n.set_meta("job", survivor.get("job", "unassigned"))
 	var body := MeshInstance3D.new()
 	var bm := CapsuleMesh.new()
 	bm.radius = 0.27

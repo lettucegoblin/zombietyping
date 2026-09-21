@@ -9,6 +9,7 @@ func _ready() -> void:
 	World.state.clear()
 	World.explored.clear()
 	World.supply_links.clear()
+	World.survivors.clear()
 	var main: Node = load("res://scenes/main.tscn").instantiate()
 	add_child(main)
 	await get_tree().process_frame
@@ -41,6 +42,14 @@ func _ready() -> void:
 	map.recompute_labels()
 	var all_count: int = map._placed.size()
 	var all_labels: Dictionary = map._labels.duplicate()
+	var crew_label: String = map._label_for_id(a.id())
+	var crew_id := "tab:test:resident"
+	World.survivors[crew_id] = { "id": crew_id, "name": "Bea", "trait": "medic", "job": "scavenger", "base_id": a.id(), "status": "assigned" }
+	World.state[a.id()] = { "cleared": true, "claimed": true, "founders": 0, "citizens": 1, "resident_ids": [crew_id] }
+	map._on_submit("job %s medic" % crew_label)
+	_check(World.survivors[crew_id]["job"] == "medic", "typed building-menu job command did not assign the resident")
+	World.state.erase(a.id())
+	World.survivors.clear()
 	var focused: Array = map._displayed_placed()
 	_check(all_count > map.FOCUS_EXPLORATION_SITES, "test view did not expose enough buildings for focus mode")
 	_check(focused.size() <= map.FOCUS_EXPLORATION_SITES, "focus mode did not reduce label overload")
@@ -125,6 +134,7 @@ func _ready() -> void:
 	World.supply_links.clear()
 	World.state.clear()
 	World.explored.clear()
+	World.survivors.clear()
 	if not _failed:
 		print("TAB MAP OK  cached route builds=", builds, "  focus=", focused.size(), "/", all_count, "  names + input captured")
 	get_tree().quit(1 if _failed else 0)
