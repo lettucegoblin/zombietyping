@@ -29,6 +29,8 @@ var _search_beat := 0.0
 var _searching := false               # a "search:" leg is running (walking back to a frontier)
 var _moving_on := false               # you typed a door/stairs/exit: zombies in view no longer stop the rail
 const ENGAGE_FAR := 40.0              # facing on arrival: anything in your sights at all
+const APPROACH_RANGE := 10.0          # closer than this and a zombie's word is live; walk in until then
+var _approach_beat := 0.0
 const HALT_RANGE := 14.0              # a zombie you can fire at (in sight, in range) stops the rail
 const AIM_RANGE := 14.0               # ...and turns you to face it whenever you are not walking
 
@@ -99,6 +101,22 @@ func _process(dt: float) -> void:
 		_resume_beat -= dt
 		if _resume_beat <= 0.0:
 			player.halt = false
+	# a big room: the zombie you are staring at is beyond word range, so walk in on it
+	# until its word goes live (the hold-on-sight rule stops you the moment it does)
+	if mode == Mode.INSIDE and interior.is_inside() and not player.is_moving() and not typist.in_combat() \
+			and interior.current_room >= 0 and not interior.is_room_cleared(interior.current_room):
+		_approach_beat += dt
+		if _approach_beat > 0.6:
+			_approach_beat = 0.0
+			var z: Zombie = director.nearest_in_room(interior.current_room)
+			if z != null and z.global_position.distance_to(player.global_position) > APPROACH_RANGE:
+				var to: Vector3 = z.global_position - player.global_position
+				to.y = 0.0
+				var goal: Vector3 = z.global_position - to.normalized() * (APPROACH_RANGE - 1.5)
+				goal.y = player.global_position.y
+				player.push_local(PackedVector3Array([goal]), "approach", 2.2)
+	else:
+		_approach_beat = 0.0
 	if _search_pending and mode == Mode.INSIDE:
 		_search_beat -= dt
 		if _search_beat <= 0.0 and not typist.in_combat() and not player.is_moving():
@@ -157,12 +175,15 @@ func _unhandled_input(event: InputEvent) -> void:
 		print("RAIL moving=%s halt=%s hold=%s leg=%s local=%d pos=%s room=%d mode=%d moving_on=%s pending=%s searching=%s threats=%s" % [
 			player.is_moving(), player.halt, player.hold, player._cur.get("id", "-"), player._local.size(), player.global_position,
 			interior.current_room, mode, _moving_on, _search_pending, _searching, director.targetable_words()])
+		for z in director.alive():
+			if z.global_position.distance_to(player.global_position) < 16.0:
+				print("  Z %s state=%d room=%d dist=%.2f los=%s fair=%s label_t=%.2f on_cam=%s" % [z.word, z.state, z.room, z.global_position.distance_to(player.global_position), z.in_los, z.fair(), z._label_time, z._on_camera()])
 	if OS.is_debug_build() and event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F7:
 		# debug: dump the minimap labels with storey counts (for scripted playtests)
 		var parts: Array[String] = []
 		for l in minimap.labels.keys():
 			var b := World.building_by_id(minimap.labels[l])
-			parts.append("%s=%d" % [l, b.floors if b else 0])
+			parts.append("%s=%d(%s,%s)" % [l, b.floors if b else 0, minimap.labels[l], b.kind if b else "?"])
 		print("LABELS ", " ".join(parts))
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F2:
 		var d: float = post_mat.get_shader_parameter("dither_strength")
@@ -233,6 +254,10 @@ func _on_arrived(id: String) -> void:
 		_face_arrival(ri)
 		if interior.is_room_cleared(ri):
 			_queue_search(0.35)
+		return
+	if id == "approach":
+		_refresh_prompts()
+		_face_arrival(interior.current_room)
 		return
 	if id.begins_with("search:"):
 		_searching = false
