@@ -6,6 +6,7 @@ extends RefCounted
 
 const JOBS := ["farmer", "scavenger", "builder", "mechanic", "medic"]
 const SCAVENGE_MATERIALS := ["wood", "metal", "building_materials", "textiles"]
+const UpgradeRules = preload("res://scripts/settlement/facility_upgrade.gd")
 
 
 static func suggested_job(survivor_trait: String, profile: Dictionary, farm_count: int) -> String:
@@ -35,6 +36,8 @@ static func suggested_job(survivor_trait: String, profile: Dictionary, farm_coun
 static func produce(world_seed: int, b: BuildingData, st: Dictionary, roster: Dictionary,
 		farm_count: int, cycle: int) -> Dictionary:
 	var profile: Dictionary = FacilityProfile.derive(world_seed, b, st)
+	var upgrade_level: int = int(profile.get("upgrade_level", 0)) if profile.get("upgrade_operational", false) else 0
+	var role_id: String = str(profile.get("role_id", ""))
 	var counts: Dictionary = {}
 	for job in JOBS:
 		counts[job] = 0
@@ -62,30 +65,35 @@ static func produce(world_seed: int, b: BuildingData, st: Dictionary, roster: Di
 	var output: Dictionary = {}
 	var tended_farms: int = mini(farm_count, int(counts["farmer"]) * 2)
 	if tended_farms > 0:
-		output["food"] = tended_farms * 2 + mini(skilled_growers, tended_farms)
+		var kitchen_bonus: int = upgrade_level if role_id == "kitchen" else 0
+		output["food"] = tended_farms * (2 + kitchen_bonus) + mini(skilled_growers, tended_farms)
 	for i in scavengers.size():
 		var roll := Det.h3(world_seed, b.seed_hash, cycle, i, 1301)
 		var material: String = SCAVENGE_MATERIALS[posmod(roll, SCAVENGE_MATERIALS.size())]
-		output[material] = int(output.get(material, 0)) + 1
+		output[material] = int(output.get(material, 0)) + 1 + (upgrade_level if role_id == "depot" else 0)
+	if role_id == "operations" and upgrade_level > 0 and not scavengers.is_empty() and cycle % 2 == 0:
+		output["electronics"] = int(output.get("electronics", 0)) + upgrade_level
 
 	var stats: Dictionary = profile["stats"]
 	var rooms: Dictionary = profile["rooms"]
 	var builders: int = int(counts["builder"])
 	if builders > 0 and (int(rooms.get("workshop", 0)) > 0 or int(stats.get("storage", 0)) > 0):
-		output["building_materials"] = int(output.get("building_materials", 0)) + builders
+		output["building_materials"] = int(output.get("building_materials", 0)) + builders * (1 + (upgrade_level if role_id == "workshop" else 0))
 	var mechanics: int = int(counts["mechanic"])
 	if mechanics > 0 and int(stats.get("power", 0)) > 0 and int(rooms.get("workshop", 0)) > 0:
+		var mechanic_output: int = mechanics * (1 + (upgrade_level if role_id == "workshop" else 0))
 		if cycle % 2 == 0:
-			output["tools"] = mechanics
+			output["tools"] = mechanic_output
 		if cycle % 3 == 0:
-			output["vehicle_parts"] = mechanics
+			output["vehicle_parts"] = mechanic_output
 	var medics: int = int(counts["medic"])
 	if medics > 0 and int(stats.get("water", 0)) > 0 and int(stats.get("storage", 0)) > 0 and cycle % 2 == 0:
-		output["medicine"] = medics
+		output["medicine"] = medics * (1 + (upgrade_level if role_id == "shelter" else 0))
 	return {
 		"output": output,
 		"jobs": counts,
 		"farm_count": farm_count,
 		"tended_farms": tended_farms,
 		"facility_role": profile["role_label"],
+		"upgrade_level": upgrade_level,
 	}

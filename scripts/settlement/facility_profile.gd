@@ -103,14 +103,24 @@ static func derive(world_seed: int, b: BuildingData, st: Dictionary = {}) -> Dic
 		return a["id"] < c["id"] if is_equal_approx(a["score"], c["score"]) else a["score"] > c["score"]
 	)
 	var primary: Dictionary = roles[0]
+	var locked_role := str(st.get("facility_role", ""))
+	if locked_role != "":
+		for candidate in roles:
+			if candidate["id"] == locked_role:
+				primary = candidate
+				break
 	var missing := _missing_requirements(primary["rule"], stats, rooms)
 	var cleared := bool(st.get("cleared", false))
 	var claimed := bool(st.get("claimed", false))
+	var upgrade_level := clampi(int(st.get("facility_level", 0)), 0, 3)
 	var readiness := "clear to survey intact utilities"
 	var readiness_kind := "unknown"
 	if cleared and not missing.is_empty():
-		readiness = "needs " + " · ".join(missing)
+		readiness = ("upgrade offline · " if upgrade_level > 0 else "needs ") + " · ".join(missing)
 		readiness_kind = "needs"
+	elif cleared and claimed and upgrade_level > 0:
+		readiness = "level %d operational" % upgrade_level
+		readiness_kind = "operational"
 	elif cleared and claimed:
 		readiness = "upgrade-ready from intact utilities"
 		readiness_kind = "ready"
@@ -133,6 +143,8 @@ static func derive(world_seed: int, b: BuildingData, st: Dictionary = {}) -> Dic
 		"cleared": cleared,
 		"claimed": claimed,
 		"upgrade_ready": cleared and claimed and missing.is_empty(),
+		"upgrade_level": upgrade_level,
+		"upgrade_operational": cleared and claimed and upgrade_level > 0 and missing.is_empty(),
 		"readiness": readiness,
 		"readiness_kind": readiness_kind,
 	}

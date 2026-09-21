@@ -74,6 +74,10 @@ func _ready() -> void:
 	var specialist_result := Workforce.produce(World.seed, specialist_base, specialist_state, specialist_roster, 0, 6)
 	var specialist_output: Dictionary = specialist_result["output"]
 	_check(int(specialist_output.get("tools", 0)) > 0 and int(specialist_output.get("vehicle_parts", 0)) > 0 and int(specialist_output.get("medicine", 0)) > 0, "intact workshop/water utilities did not enable specialists")
+	specialist_state["facility_role"] = "workshop"
+	specialist_state["facility_level"] = 1
+	var upgraded_result := Workforce.produce(World.seed, specialist_base, specialist_state, specialist_roster, 0, 6)
+	_check(int(upgraded_result["output"].get("tools", 0)) > int(specialist_output.get("tools", 0)), "operational workshop upgrade did not improve mechanic output")
 	var removed_power := {}
 	for floor in specialist_base.floors:
 		for prop in InteriorGen.generate(World.seed, specialist_base, floor).props:
@@ -83,6 +87,7 @@ func _ready() -> void:
 	var stripped_result := Workforce.produce(World.seed, specialist_base, specialist_state, specialist_roster, 0, 6)
 	var stripped_output: Dictionary = stripped_result["output"]
 	_check(int(stripped_output.get("tools", 0)) == 0 and int(stripped_output.get("vehicle_parts", 0)) == 0, "dismantled power props still enabled mechanic output")
+	_check(int(stripped_result.get("upgrade_level", -1)) == 0, "utility loss left the workshop upgrade operational")
 
 	if not _failed:
 		print("WORKFORCE OK  staffed farms + held stock + route delivery + persistent jobs")

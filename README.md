@@ -61,6 +61,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_survivor_cue.tscn` | stable positional rescue cadence, range gating, 3D attenuation/panning, movement, and permanent shutdown on resolution |
 | `scenes/tests/test_facility_profile.tscn` | generated room/prop utility totals, dismantled-prop subtraction, deterministic facility role, and claim-aware readiness |
 | `scenes/tests/test_workforce.tscn` | trait-aware jobs, staffed farm output, disconnected local stock, supply-route delivery, work cycles, and persistence |
+| `scenes/tests/test_facility_upgrade.tscn` | role locking, material/staffing gates, production bonuses, utility damage taking upgrades offline, and save/load |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
@@ -192,6 +193,15 @@ or with `job <label> farmer|scavenger|builder|mechanic|medic`. Farms only produc
 mechanics and medics require the relevant intact workshop, power, water, and storage; builders
 and scavengers recover material classes. A disconnected outpost keeps output in a local
 stockpile, and a restored road supply link delivers the backlog into the shared inventory.
+
+Each claimed building can be upgraded three times in its generated facility role from the Tab
+panel or with `upgrade <label>`. Levels require an equal number of residents plus role-specific
+materials. Kitchens improve tended plots, depots improve scavenging, workshops improve builder
+and mechanic output, shelters improve staffed care, and operations centers coordinate
+electronics recovery. The first upgrade locks the role to that physical building; dismantling
+required beds, storage, water, or power takes it offline until those utilities are restored.
+Installed levels add a role-coloured rooftop beacon; an offline facility's beacon turns dim
+red, so utility damage is visible in the safe zone as well as the management panel.
 
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only

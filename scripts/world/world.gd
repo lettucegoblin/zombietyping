@@ -14,6 +14,7 @@ const FLOOR_M := 3.6                ## metres per storey
 const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
 const WORK_CYCLE_SECONDS := 45.0
 const WorkforceRules = preload("res://scripts/settlement/workforce.gd")
+const FacilityUpgradeRules = preload("res://scripts/settlement/facility_upgrade.gd")
 
 const PLACEMENT_SIZE := {
 	"wall": Vector2(2.4, 0.3),
@@ -603,6 +604,43 @@ func assign_next_job(id: String, job: String) -> String:
 	return "%s assigned %s (%d/%d)" % [person.get("name", "survivor"), job, cursor + 1, residents.size()]
 
 
+func facility_upgrade_cost(id: String) -> Dictionary:
+	var b := building_by_id(id)
+	if b == null:
+		return {}
+	var st := building_state(id)
+	var profile: Dictionary = FacilityProfile.derive(seed, b, st)
+	var next_level := int(profile.get("upgrade_level", 0)) + 1
+	if next_level > FacilityUpgradeRules.MAX_LEVEL:
+		return {}
+	return FacilityUpgradeRules.cost(str(profile.get("role_id", "")), next_level)
+
+
+func upgrade_facility(id: String) -> String:
+	var b := building_by_id(id)
+	var st := building_state(id)
+	if b == null or not st.get("claimed", false):
+		return "facility upgrades require a claimed base"
+	var profile: Dictionary = FacilityProfile.derive(seed, b, st)
+	var level := int(profile.get("upgrade_level", 0))
+	if level >= FacilityUpgradeRules.MAX_LEVEL:
+		return "%s is already level %d" % [profile["role_label"], level]
+	if not (profile.get("missing", []) as Array).is_empty():
+		return "restore intact utilities before upgrading: " + " · ".join(profile["missing"])
+	var next_level := level + 1
+	var citizens := int(st.get("citizens", 0))
+	if citizens < next_level:
+		return "level %d needs %d resident%s" % [next_level, next_level, "" if next_level == 1 else "s"]
+	var cost: Dictionary = FacilityUpgradeRules.cost(str(profile["role_id"]), next_level)
+	if not spend(cost):
+		return "need " + cost_text(cost)
+	st["facility_role"] = profile["role_id"]
+	st["facility_level"] = next_level
+	state_changed.emit(id)
+	settlement_changed.emit()
+	return "%s upgraded to level %d — %s" % [profile["role_label"], next_level, FacilityUpgradeRules.effect_text(str(profile["role_id"]), next_level)]
+
+
 func has_supply_link(id: String) -> bool:
 	for link in supply_links:
 		if id in link:
@@ -998,6 +1036,7 @@ func settlement_action(action: String, id: String) -> String:
 		"claim": return claim_building(id)
 		"farm": return build_farm(id)
 		"crew": return auto_assign_jobs(id)
+		"upgrade": return upgrade_facility(id)
 	return "unknown building action"
 
 

@@ -18,9 +18,10 @@ unless noted.
    `create_map`) instead of the coloured squares. Keep labels and fog as they are.
 3. **Deeper survivor/base simulation.** Deterministic rescues, named rosters, trait-aware job
    assignment, facility roles, staffed farm/specialist production, intact utility capacity,
-   construction, local outpost stockpiles, and road delivery now exist and persist. Next:
-   utility-consuming upgrades, survivor needs/morale, injuries, deliberate transfers between
-   bases, and player-carried/container-by-container looting beyond material-class salvage.
+   construction, three-level utility-dependent facility upgrades, local outpost stockpiles,
+   and road delivery now exist and persist. Next: survivor needs/morale, injuries, deliberate
+   transfers between bases, and player-carried/container-by-container looting beyond
+   material-class salvage.
 4. **Broader campaign persistence.** Settlement state, rescues, rosters, explored fog, seed,
    placements, and supply links save now. Player position, hp/kills, live combat, and active
    travel/rescue session state still need a deliberate checkpoint/resume policy.

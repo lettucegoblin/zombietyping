@@ -15,6 +15,7 @@ const MIN_PPT := 4.0
 const MAX_PPT := 28.0
 const LABEL_MIN_PPT := 6.0
 const FOCUS_EXPLORATION_SITES := 8
+const FacilityUpgradeRules = preload("res://scripts/settlement/facility_upgrade.gd")
 
 const NAME_ROOTS := [
 	"Aster", "Bellweather", "Cinder", "Dovetail", "Elm", "Foxglove",
@@ -204,7 +205,7 @@ func _on_submit(text: String) -> void:
 		flash(World.assign_next_job(_selected_id, tokens[2]))
 		_invalidate()
 		return
-	var commands := { "info": "info", "salvage": "salvage", "car": "car", "fortify": "fortify", "supply": "supply", "claim": "claim", "farm": "farm", "crew": "crew" }
+	var commands := { "info": "info", "salvage": "salvage", "car": "car", "fortify": "fortify", "supply": "supply", "claim": "claim", "farm": "farm", "crew": "crew", "upgrade": "upgrade" }
 	if commands.has(tokens[0]):
 		if tokens.size() < 2 or not _labels.has(tokens[1]):
 			flash("use %s <map label>" % tokens[0])
@@ -743,9 +744,12 @@ func _draw_building_panel(font: Font) -> void:
 		for utility_line in FacilityProfile.utility_lines(profile):
 			draw_string(font, Vector2(x, y), utility_line, HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#ded8e8"))
 			y += 16.0
-		var readiness_color := Color("#a6e3a1") if profile["readiness_kind"] == "ready" else (Color("#ff6f91") if profile["readiness_kind"] == "needs" else Color("#f6c177"))
+		var readiness_color := Color("#a6e3a1") if profile["readiness_kind"] in ["ready", "operational"] else (Color("#ff6f91") if profile["readiness_kind"] == "needs" else Color("#f6c177"))
 		draw_string(font, Vector2(x, y), str(profile["readiness"]), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, readiness_color)
 		y += 20.0
+		if int(profile.get("upgrade_level", 0)) > 0:
+			draw_string(font, Vector2(x, y), FacilityUpgradeRules.effect_text(str(profile["role_id"]), int(profile["upgrade_level"])), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#a6e3a1") if profile.get("upgrade_operational", false) else Color("#ff6f91"))
+			y += 16.0
 	if st.get("claimed", false):
 		var residents := World.resident_records(_selected_id)
 		draw_string(font, Vector2(x, y), "CREW %d  ·  next work cycle %ds" % [int(st.get("citizens", 0)), World.seconds_until_work_cycle()], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#f6c177"))
@@ -784,6 +788,8 @@ func _draw_building_panel(font: Font) -> void:
 	if not st.get("claimed", false):
 		rows.append({ "action": "claim", "label": "Claim building", "cost": World.cost_text(World.claim_cost(b)) })
 	else:
+		if int(profile.get("upgrade_level", 0)) < FacilityUpgradeRules.MAX_LEVEL:
+			rows.append({ "action": "upgrade", "label": "Upgrade %s to level %d" % [profile["role_label"], int(profile.get("upgrade_level", 0)) + 1], "cost": World.cost_text(World.facility_upgrade_cost(_selected_id)) })
 		if not (st.get("resident_ids", []) as Array).is_empty():
 			rows.append({ "action": "crew", "label": "Auto-assign crew", "cost": "or type job <label> <role>" })
 		rows.append({ "action": "farm", "label": "Build farm plot", "cost": World.cost_text(World.farm_cost()) })

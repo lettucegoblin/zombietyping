@@ -213,6 +213,7 @@ func _rebuild(center: Vector2i) -> void:
 			continue
 		_add_perimeter(b)
 		if st.get("claimed", false):
+			_add_facility_upgrade(b, st)
 			for i in int(st.get("citizens", 0)):
 				_add_citizen(b, i)
 	for item in World.placements:
@@ -285,6 +286,53 @@ func _add_wall(pos: Vector3, size: Vector3, yaw: float = 0.0) -> void:
 	cap.mesh = cap_mesh
 	cap.position = Vector3(0, size.y * 0.5, 0)
 	wall.add_child(cap)
+
+
+func _add_facility_upgrade(b: BuildingData, st: Dictionary) -> void:
+	var level := clampi(int(st.get("facility_level", 0)), 0, 3)
+	if level <= 0:
+		return
+	var role := str(st.get("facility_role", "shelter"))
+	var profile: Dictionary = FacilityProfile.derive(World.seed, b, st)
+	var operational := bool(profile.get("upgrade_operational", false))
+	var colors := {
+		"shelter": Color("#ff6fb5"), "depot": Color("#68d5ff"),
+		"workshop": Color("#ff9f68"), "kitchen": Color("#7ee787"),
+		"operations": Color("#b9a4e0"),
+	}
+	var marker := Node3D.new()
+	marker.name = "Facility_%s_L%d" % [role.capitalize(), level]
+	marker.set_meta("facility_role", role)
+	marker.set_meta("facility_level", level)
+	marker.set_meta("operational", operational)
+	var footprint := World.building_rect_world(b)
+	marker.position = Vector3(footprint.get_center().x, b.floors * World.FLOOR_M + 0.35, footprint.get_center().y)
+	_root.add_child(marker)
+	var mast := MeshInstance3D.new()
+	var mast_mesh := CylinderMesh.new()
+	mast_mesh.top_radius = 0.08
+	mast_mesh.bottom_radius = 0.12
+	mast_mesh.height = 0.7 + level * 0.35
+	var mast_mat := StandardMaterial3D.new()
+	mast_mat.albedo_color = Color("#30263f")
+	mast_mesh.material = mast_mat
+	mast.mesh = mast_mesh
+	mast.position.y = mast_mesh.height * 0.5
+	marker.add_child(mast)
+	for i in level:
+		var lamp := MeshInstance3D.new()
+		var lamp_mesh := BoxMesh.new()
+		lamp_mesh.size = Vector3(0.5 + i * 0.14, 0.16, 0.5 + i * 0.14)
+		var lamp_mat := StandardMaterial3D.new()
+		lamp_mat.albedo_color = colors.get(role, Color("#f6c177")) if operational else Color("#ff4f87")
+		lamp_mat.emission_enabled = true
+		lamp_mat.emission = lamp_mat.albedo_color
+		lamp_mat.emission_energy_multiplier = 1.2 if operational else 0.15
+		lamp_mesh.material = lamp_mat
+		lamp.mesh = lamp_mesh
+		lamp.position.y = 0.55 + i * 0.34
+		lamp.rotation.y = i * PI * 0.25
+		marker.add_child(lamp)
 
 
 func _add_farm(pos: Vector3, yaw: float) -> void:
