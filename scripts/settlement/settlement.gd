@@ -16,6 +16,7 @@ const PROP_TEXTURES := {
 	"chair": preload("res://assets/sprites/props/chair.png"),
 }
 const BUILD_KINDS := ["wall", "crate", "bed", "chair", "farm"]
+const CitizenNav = preload("res://scripts/settlement/citizen_navigation.gd")
 const WALL_COLOR := Color("#623b55")
 const WALL_CAP := Color("#f6c177")
 
@@ -27,6 +28,8 @@ var _root: Node3D
 var _dirty := true
 var _last_sector := Vector2i(999999, 999999)
 var _citizens: Array[Node3D] = []
+var _citizen_memory: Dictionary = {}
+var _citizen_navigation: Dictionary = {}
 var _food_clock := 0.0
 
 
@@ -108,9 +111,11 @@ func _process(dt: float) -> void:
 
 func _rebuild(center: Vector2i) -> void:
 	_dirty = false
+	_remember_citizens()
 	for c in _root.get_children():
 		c.free()
 	_citizens.clear()
+	_citizen_navigation.clear()
 	# Cars are seed-derived street salvage, not authored encounter props.
 	for sy in range(center.y - 1, center.y + 2):
 		for sx in range(center.x - 1, center.x + 2):
@@ -229,6 +234,7 @@ func _add_farm(pos: Vector3, yaw: float) -> void:
 
 func _add_citizen(b: BuildingData, index: int) -> void:
 	var n := Node3D.new()
+	var citizen_key := "%s:%d" % [b.id(), index]
 	n.name = "Citizen_%s_%d" % [b.id(), index]
 	var body := MeshInstance3D.new()
 	var bm := CapsuleMesh.new()
@@ -241,34 +247,87 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	body.mesh = bm
 	body.position.y = 0.72
 	n.add_child(body)
-	var r := World.safe_rect_world(b).grow(-1.2)
-	n.position = Vector3(r.get_center().x + index * 0.6, 0.0, r.get_center().y)
-	n.set_meta("bounds", r)
-	n.set_meta("home_seed", b.seed_hash + index * 97)
-	n.set_meta("leg", 0)
-	n.set_meta("target", _citizen_target(n))
+	var nav := _navigation_for(b)
+	var seed_value := b.seed_hash + index * 97
+	var remembered: Dictionary = _citizen_memory.get(citizen_key, {})
+	var p2: Vector2 = nav.deterministic_point(seed_value, -1)
+	var leg := 0
+	if not remembered.is_empty():
+		var old: Vector3 = remembered.get("position", Vector3(p2.x, 0.0, p2.y))
+		p2 = Vector2(old.x, old.z) if nav.is_walkable(Vector2(old.x, old.z)) else nav.nearest_walkable(Vector2(old.x, old.z))
+		leg = int(remembered.get("leg", 0))
+		n.rotation.y = float(remembered.get("yaw", 0.0))
+	n.position = Vector3(p2.x, 0.0, p2.y)
+	n.set_meta("citizen_key", citizen_key)
+	n.set_meta("building_id", b.id())
+	n.set_meta("home_seed", seed_value)
+	n.set_meta("leg", leg)
 	_root.add_child(n)
 	_citizens.append(n)
+	_assign_citizen_route(n)
 
 
-func _citizen_target(n: Node3D) -> Vector3:
-	var r: Rect2 = n.get_meta("bounds")
-	var leg: int = n.get_meta("leg")
-	var seed_value: int = n.get_meta("home_seed")
-	var rx := Det.unit(World.seed, seed_value, leg, 701)
-	var rz := Det.unit(World.seed, seed_value, leg, 702)
-	return Vector3(lerpf(r.position.x, r.end.x, rx), 0.0, lerpf(r.position.y, r.end.y, rz))
+func _navigation_for(b: BuildingData) -> RefCounted:
+	var nav: RefCounted = _citizen_navigation.get(b.id())
+	if nav == null:
+		nav = CitizenNav.new(b, World.placements)
+		_citizen_navigation[b.id()] = nav
+	return nav
+
+
+func _remember_citizens() -> void:
+	for n in _citizens:
+		if not is_instance_valid(n):
+			continue
+		var key: String = n.get_meta("citizen_key", "")
+		if key != "":
+			_citizen_memory[key] = {
+				"position": n.position,
+				"yaw": n.rotation.y,
+				"leg": int(n.get_meta("leg", 0)),
+			}
+
+
+func _assign_citizen_route(n: Node3D) -> void:
+	var nav: RefCounted = _citizen_navigation.get(n.get_meta("building_id", ""))
+	if nav == null:
+		n.set_meta("path", PackedVector2Array())
+		return
+	var leg: int = n.get_meta("leg", 0)
+	var seed_value: int = n.get_meta("home_seed", 0)
+	var from := Vector2(n.position.x, n.position.z)
+	# A target can hash to the citizen's current cell. Advance deterministically until
+	# there is an actual walking leg, with a small bound for pathological one-cell yards.
+	for attempt in 8:
+		var target: Vector2 = nav.deterministic_point(seed_value, leg)
+		var path: PackedVector2Array = nav.route(from, target)
+		if path.size() > 1 or (path.size() == 1 and path[0].distance_to(from) > 0.15):
+			n.set_meta("leg", leg)
+			n.set_meta("path", path)
+			n.set_meta("path_index", 0)
+			return
+		leg += 1
+	n.set_meta("leg", leg)
+	n.set_meta("path", PackedVector2Array())
+	n.set_meta("path_index", 0)
 
 
 func _move_citizens(dt: float) -> void:
 	for n in _citizens:
 		if not is_instance_valid(n):
 			continue
-		var target: Vector3 = n.get_meta("target")
+		var path: PackedVector2Array = n.get_meta("path", PackedVector2Array())
+		var path_index: int = n.get_meta("path_index", 0)
+		if path.is_empty() or path_index >= path.size():
+			n.set_meta("leg", int(n.get_meta("leg", 0)) + 1)
+			_assign_citizen_route(n)
+			continue
+		var target2 := path[path_index]
+		var target := Vector3(target2.x, 0.0, target2.y)
 		var delta := target - n.position
-		if delta.length() < 0.18:
-			n.set_meta("leg", int(n.get_meta("leg")) + 1)
-			n.set_meta("target", _citizen_target(n))
+		if delta.length() < 0.08:
+			n.position = target
+			n.set_meta("path_index", path_index + 1)
 		else:
 			n.position += delta.normalized() * minf(delta.length(), dt * 0.75)
 			n.rotation.y = atan2(delta.x, delta.z)
