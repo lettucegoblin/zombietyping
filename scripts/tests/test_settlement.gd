@@ -39,9 +39,93 @@ func _ready() -> void:
 	_assert_ok(World.link_supply(second.id()), "link supply")
 	_assert_ok(World.claim_building(second.id()), "claim second")
 	var r := World.safe_rect_world(first)
-	_assert_ok(World.place_item(first.id(), "chair", Vector3(r.get_center().x, 0.05, r.get_center().y), 0.0), "place furniture")
+	World.add_materials({ "building_materials": 200, "wood": 200, "textiles": 200, "tools": 40 })
+	var chair_pos := Vector3(r.get_center().x, 0.05, r.get_center().y)
+	_assert_ok(World.place_item(first.id(), "chair", chair_pos, 0.0), "place furniture")
+	var before_overlap: int = World.materials["wood"]
+	var overlap := World.place_item(first.id(), "crate", chair_pos, 0.0)
+	if not overlap.contains("overlaps") or int(World.materials["wood"]) != before_overlap:
+		_fail("overlap was accepted or charged materials: " + overlap)
+		return
+	var edge_pos := Vector3(r.position.x + 0.05, 0.05, r.position.y + 0.05)
+	var outside := World.place_item(first.id(), "bed", edge_pos, 0.0)
+	if not outside.contains("fit fully"):
+		_fail("full-footprint bounds were not enforced: " + outside)
+		return
+	var farm_site := World.find_farm_site(first.id())
+	if farm_site.is_empty():
+		_fail("claimed site had no valid procedural farm position")
+		return
+	var farm_pos: Vector3 = farm_site["pos"]
+	var farm_yaw: float = farm_site["yaw"]
+	_assert_ok(World.build_farm(first.id()), "place farm")
+	var farm_item: Dictionary = World.placements[-1]
+	if farm_item["pos"] != farm_pos or not is_equal_approx(float(farm_item["yaw"]), farm_yaw):
+		_fail("farm transform was not persisted")
+		return
+	var building_fp := World.building_rect_world(first)
+	if building_fp.has_point(Vector2(farm_pos.x, farm_pos.z)):
+		_fail("farm site was placed inside the building")
+		return
+	var second_farm := World.place_item(first.id(), "farm", farm_pos, farm_yaw)
+	if not second_farm.contains("overlaps"):
+		_fail("duplicate farm footprint was accepted: " + second_farm)
+		return
+	var wall_site := _find_wall_site(first, r)
+	if wall_site == Vector3.INF:
+		_fail("could not find a valid wall site")
+		return
+	var wall_yaw := PI * 0.5
+	_assert_ok(World.place_item(first.id(), "wall", wall_site, wall_yaw), "place rotated wall")
+	var wall_item: Dictionary = World.placements[-1]
+	if not is_equal_approx(float(wall_item["yaw"]), wall_yaw):
+		_fail("wall yaw was not persisted")
+		return
+	var settlement := Settlement.new()
+	add_child(settlement)
+	settlement._add_placement(farm_item)
+	settlement._add_placement(wall_item)
+	var farm_node: Node3D = settlement._root.get_child(0)
+	var wall_node: Node3D = settlement._root.get_child(1)
+	if farm_node.name != "FarmPlot" or farm_node.position != farm_pos or not is_equal_approx(farm_node.rotation.y, farm_yaw):
+		_fail("farm renderer ignored its persisted transform")
+		return
+	if wall_node.name != "Wall" or not is_equal_approx(wall_node.rotation.y, wall_yaw):
+		_fail("wall renderer ignored its persisted yaw")
+		return
+	var cap := World.farm_capacity(first)
+	while World.placement_count(first.id(), "farm") < cap:
+		var farm_result := World.build_farm(first.id())
+		if farm_result.contains("no open"):
+			break
+		_assert_ok(farm_result, "fill farm capacity")
+	var farm_count := World.placement_count(first.id(), "farm")
+	if farm_count > cap:
+		_fail("farm capacity was exceeded")
+		return
+	var materials_before_limit: Dictionary = World.materials.duplicate()
+	var full_result := World.build_farm(first.id())
+	if not (full_result.contains("capacity") or full_result.contains("no open")):
+		_fail("full farm site accepted another plot: " + full_result)
+		return
+	if World.materials != materials_before_limit:
+		_fail("rejected farm charged materials")
+		return
 	print("SETTLEMENT OK  materials=", World.material_summary(), "  links=", World.supply_links.size(), "  placements=", World.placements.size())
 	get_tree().quit(0)
+
+
+func _find_wall_site(b: BuildingData, r: Rect2) -> Vector3:
+	var z := r.position.y + 1.0
+	while z < r.end.y - 1.0:
+		var x := r.position.x + 1.0
+		while x < r.end.x - 1.0:
+			var p := Vector3(x, 0.05, z)
+			if World.placement_error(b.id(), "wall", p, PI * 0.5) == "":
+				return p
+			x += 1.0
+		z += 1.0
+	return Vector3.INF
 
 
 func _assert_ok(msg: String, step: String) -> void:

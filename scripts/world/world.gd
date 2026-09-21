@@ -10,6 +10,15 @@ signal settlement_changed
 const S := SectorData.SIZE
 const TILE_M := 5.0                 ## metres per tile in 3D
 const FLOOR_M := 3.6                ## metres per storey
+const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
+
+const PLACEMENT_SIZE := {
+	"wall": Vector2(2.4, 0.3),
+	"crate": Vector2(0.9, 0.9),
+	"bed": Vector2(1.3, 2.1),
+	"chair": Vector2(0.8, 0.8),
+	"farm": Vector2(3.6, 2.4),
+}
 
 var seed: int = 1337
 var _sectors: Dictionary = {}       ## Vector2i -> SectorData
@@ -372,14 +381,15 @@ func build_farm(id: String) -> String:
 	var b := building_by_id(id)
 	if b == null or not building_state(id).get("claimed", false):
 		return "farms can only be built inside a claimed perimeter"
-	var cost := farm_cost()
-	if not spend(cost):
-		return "need " + cost_text(cost)
-	var st := building_state(id)
-	st["farms"] = int(st.get("farms", 0)) + 1
-	state_changed.emit(id)
-	settlement_changed.emit()
-	return "farm plot established; it will produce food"
+	if placement_count(id, "farm") >= farm_capacity(b):
+		return "farm capacity reached (%d plots)" % farm_capacity(b)
+	var site := find_farm_site(id)
+	if site.is_empty():
+		return "no open farm plot remains inside this perimeter"
+	var result := place_item(id, "farm", site["pos"], site["yaw"])
+	if result == "farm placed":
+		return "farm plot established; it will produce food"
+	return result
 
 
 func build_cost(kind: String) -> Dictionary:
@@ -392,19 +402,147 @@ func build_cost(kind: String) -> Dictionary:
 	return {}
 
 
-func place_item(id: String, kind: String, pos: Vector3, yaw: float) -> String:
+func placement_count(id: String, kind: String = "") -> int:
+	var count := 0
+	for item in placements:
+		if item.get("building", "") == id and (kind == "" or item.get("kind", "") == kind):
+			count += 1
+	return count
+
+
+## The cap represents room to tend and walk around plots, not merely their mesh area.
+## Spatial validation below can still exhaust a site before this theoretical maximum.
+func farm_capacity(b: BuildingData) -> int:
+	var safe := safe_rect_world(b)
+	var structure := building_rect_world(b)
+	var outdoor_area := maxf(0.0, safe.get_area() - structure.get_area())
+	return clampi(floori(outdoor_area / FARM_MIN_AREA_M2), 1, 12)
+
+
+func building_rect_world(b: BuildingData) -> Rect2:
+	return Rect2(Vector2(b.rect.position) * TILE_M, Vector2(b.rect.size) * TILE_M)
+
+
+func _placement_footprint(kind: String, pos: Vector3, yaw: float) -> Dictionary:
+	var size: Vector2 = PLACEMENT_SIZE[kind]
+	var axis_x := Vector2(cos(yaw), -sin(yaw))
+	var axis_z := Vector2(sin(yaw), cos(yaw))
+	return {
+		"kind": kind,
+		"center": Vector2(pos.x, pos.z),
+		"axis_x": axis_x,
+		"axis_z": axis_z,
+		"half": size * 0.5,
+	}
+
+
+func _rect_footprint(r: Rect2, kind: String = "structure") -> Dictionary:
+	return {
+		"kind": kind,
+		"center": r.get_center(),
+		"axis_x": Vector2.RIGHT,
+		"axis_z": Vector2.DOWN,
+		"half": r.size * 0.5,
+	}
+
+
+func _footprint_bounds(fp: Dictionary) -> Rect2:
+	var ax: Vector2 = fp["axis_x"]
+	var az: Vector2 = fp["axis_z"]
+	var half: Vector2 = fp["half"]
+	var extent := Vector2(
+		absf(ax.x) * half.x + absf(az.x) * half.y,
+		absf(ax.y) * half.x + absf(az.y) * half.y
+	)
+	return Rect2(fp["center"] - extent, extent * 2.0)
+
+
+func _footprints_overlap(a: Dictionary, b: Dictionary) -> bool:
+	var delta: Vector2 = b["center"] - a["center"]
+	var axes: Array[Vector2] = [a["axis_x"], a["axis_z"], b["axis_x"], b["axis_z"]]
+	for axis in axes:
+		var ah: Vector2 = a["half"]
+		var bh: Vector2 = b["half"]
+		var ar := ah.x * absf(axis.dot(a["axis_x"])) + ah.y * absf(axis.dot(a["axis_z"]))
+		var br := bh.x * absf(axis.dot(b["axis_x"])) + bh.y * absf(axis.dot(b["axis_z"]))
+		# Touching edges are intentional for wall runs and do not count as overlap.
+		if absf(delta.dot(axis)) >= ar + br - 0.01:
+			return false
+	return true
+
+
+func _entry_clearance(b: BuildingData) -> Dictionary:
+	var door := Vector2((b.door_tile.x + 0.5) * TILE_M, (b.door_tile.y + 0.5) * TILE_M)
+	var road := Vector2((b.road_tile.x + 0.5) * TILE_M, (b.road_tile.y + 0.5) * TILE_M)
+	var lo := Vector2(minf(door.x, road.x), minf(door.y, road.y)) - Vector2(1.15, 1.15)
+	var hi := Vector2(maxf(door.x, road.x), maxf(door.y, road.y)) + Vector2(1.15, 1.15)
+	return _rect_footprint(Rect2(lo, hi - lo), "entrance lane")
+
+
+## Empty means valid; otherwise the text is suitable for immediate HUD feedback.
+func placement_error(id: String, kind: String, pos: Vector3, yaw: float) -> String:
+	if not PLACEMENT_SIZE.has(kind):
+		return "unknown build item: " + kind
 	if not building_state(id).get("claimed", false):
 		return "placement is restricted to claimed safe zones"
 	var b := building_by_id(id)
-	if b == null or not safe_rect_world(b).has_point(Vector2(pos.x, pos.z)):
-		return "placement must stay inside the walls"
+	if b == null:
+		return "building no longer exists"
+	if kind == "farm" and placement_count(id, "farm") >= farm_capacity(b):
+		return "farm capacity reached (%d plots)" % farm_capacity(b)
+	var fp := _placement_footprint(kind, pos, yaw)
+	var bounds := _footprint_bounds(fp)
+	var safe := safe_rect_world(b)
+	if bounds.position.x < safe.position.x or bounds.position.y < safe.position.y \
+			or bounds.end.x > safe.end.x or bounds.end.y > safe.end.y:
+		return "%s must fit fully inside the perimeter" % kind
+	if kind == "farm" and _footprints_overlap(fp, _rect_footprint(building_rect_world(b))):
+		return "farm plots need open ground outside the building"
+	if kind in ["farm", "wall"] and _footprints_overlap(fp, _entry_clearance(b)):
+		return "%s would block the entrance lane" % kind
+	for item in placements:
+		if item.get("building", "") != id:
+			continue
+		var other_kind: String = item.get("kind", "")
+		if not PLACEMENT_SIZE.has(other_kind):
+			continue
+		var other := _placement_footprint(other_kind, item["pos"], float(item.get("yaw", 0.0)))
+		if _footprints_overlap(fp, other):
+			return "%s overlaps an existing %s" % [kind, other_kind]
+	return ""
+
+
+## Deterministically finds free outdoor ground for construction from the Tab panel.
+func find_farm_site(id: String) -> Dictionary:
+	var b := building_by_id(id)
+	if b == null or not building_state(id).get("claimed", false):
+		return {}
+	if placement_count(id, "farm") >= farm_capacity(b):
+		return {}
+	var safe := safe_rect_world(b)
+	for yaw in [0.0, PI * 0.5]:
+		var probe := _placement_footprint("farm", Vector3.ZERO, yaw)
+		var ext := _footprint_bounds(probe).size * 0.5
+		var z := safe.position.y + ext.y + 0.25
+		while z <= safe.end.y - ext.y - 0.25:
+			var x := safe.position.x + ext.x + 0.25
+			while x <= safe.end.x - ext.x - 0.25:
+				var pos := Vector3(x, 0.05, z)
+				if placement_error(id, "farm", pos, yaw) == "":
+					return { "pos": pos, "yaw": yaw }
+				x += 0.75
+			z += 0.75
+	return {}
+
+
+func place_item(id: String, kind: String, pos: Vector3, yaw: float) -> String:
+	var error := placement_error(id, kind, pos, yaw)
+	if error != "":
+		return error
 	var cost := build_cost(kind)
 	if not spend(cost):
 		return "need " + cost_text(cost)
 	placements.append({ "building": id, "kind": kind, "pos": pos, "yaw": yaw })
-	if kind == "farm":
-		var st := building_state(id)
-		st["farms"] = int(st.get("farms", 0)) + 1
 	settlement_changed.emit()
 	return "%s placed" % kind
 

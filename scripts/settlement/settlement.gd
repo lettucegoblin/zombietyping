@@ -99,9 +99,9 @@ func _process(dt: float) -> void:
 	if _food_clock >= 45.0:
 		_food_clock = 0.0
 		var farms := 0
-		for id in World.state:
-			if (World.state[id] as Dictionary).get("claimed", false):
-				farms += int((World.state[id] as Dictionary).get("farms", 0))
+		for item in World.placements:
+			if item.get("kind", "") == "farm" and World.building_state(item.get("building", "")).get("claimed", false):
+				farms += 1
 		if farms > 0:
 			World.add_materials({ "food": farms })
 
@@ -125,8 +125,6 @@ func _rebuild(center: Vector2i) -> void:
 		if b == null or maxi(absi(b.sector.x - center.x), absi(b.sector.y - center.y)) > 2:
 			continue
 		_add_perimeter(b)
-		for i in int(st.get("farms", 0)):
-			_add_farm(b, i)
 		if st.get("claimed", false):
 			for i in int(st.get("citizens", 0)):
 				_add_citizen(b, i)
@@ -176,7 +174,12 @@ func _add_perimeter(b: BuildingData) -> void:
 			_add_wall(Vector3(r.end.x, 0.8, z), Vector3(0.35, 1.6, 2.55))
 
 
-func _add_wall(pos: Vector3, size: Vector3) -> void:
+func _add_wall(pos: Vector3, size: Vector3, yaw: float = 0.0) -> void:
+	var wall := Node3D.new()
+	wall.name = "Wall"
+	wall.position = pos
+	wall.rotation.y = yaw
+	_root.add_child(wall)
 	var mi := MeshInstance3D.new()
 	var mesh := BoxMesh.new()
 	mesh.size = size
@@ -185,8 +188,7 @@ func _add_wall(pos: Vector3, size: Vector3) -> void:
 	mat.roughness = 0.9
 	mesh.material = mat
 	mi.mesh = mesh
-	mi.position = pos
-	_root.add_child(mi)
+	wall.add_child(mi)
 	var cap := MeshInstance3D.new()
 	var cap_mesh := BoxMesh.new()
 	cap_mesh.size = Vector3(size.x + 0.04, 0.12, size.z + 0.04)
@@ -194,15 +196,16 @@ func _add_wall(pos: Vector3, size: Vector3) -> void:
 	cap_mat.albedo_color = WALL_CAP
 	cap_mesh.material = cap_mat
 	cap.mesh = cap_mesh
-	cap.position = pos + Vector3(0, size.y * 0.5, 0)
-	_root.add_child(cap)
+	cap.position = Vector3(0, size.y * 0.5, 0)
+	wall.add_child(cap)
 
 
-func _add_farm(b: BuildingData, index: int) -> void:
-	var r := World.safe_rect_world(b)
-	var cols := maxi(1, int(r.size.x / 5.0))
-	var x := r.position.x + 2.0 + (index % cols) * 4.2
-	var z := r.end.y - 2.0 - floori(float(index) / cols) * 3.2
+func _add_farm(pos: Vector3, yaw: float) -> void:
+	var plot := Node3D.new()
+	plot.name = "FarmPlot"
+	plot.position = pos
+	plot.rotation.y = yaw
+	_root.add_child(plot)
 	var soil := MeshInstance3D.new()
 	var mesh := BoxMesh.new()
 	mesh.size = Vector3(3.6, 0.12, 2.4)
@@ -210,8 +213,8 @@ func _add_farm(b: BuildingData, index: int) -> void:
 	mat.albedo_color = Color("#65435a")
 	mesh.material = mat
 	soil.mesh = mesh
-	soil.position = Vector3(x, 0.08, z)
-	_root.add_child(soil)
+	soil.position = Vector3(0, 0.08, 0)
+	plot.add_child(soil)
 	for row in 3:
 		var crop := MeshInstance3D.new()
 		var cm := BoxMesh.new()
@@ -220,8 +223,8 @@ func _add_farm(b: BuildingData, index: int) -> void:
 		cmat.albedo_color = Color("#7ee787")
 		cm.material = cmat
 		crop.mesh = cm
-		crop.position = Vector3(x, 0.25, z - 0.72 + row * 0.72)
-		_root.add_child(crop)
+		crop.position = Vector3(0, 0.25, -0.72 + row * 0.72)
+		plot.add_child(crop)
 
 
 func _add_citizen(b: BuildingData, index: int) -> void:
@@ -274,9 +277,10 @@ func _move_citizens(dt: float) -> void:
 func _add_placement(item: Dictionary) -> void:
 	var kind: String = item["kind"]
 	if kind == "farm":
-		return # farms are represented from the building's aggregate farm count
+		_add_farm(item["pos"], float(item.get("yaw", 0.0)))
+		return
 	if kind == "wall":
-		_add_wall(item["pos"] + Vector3(0, 0.75, 0), Vector3(2.4, 1.5, 0.3))
+		_add_wall(item["pos"] + Vector3(0, 0.75, 0), Vector3(2.4, 1.5, 0.3), float(item.get("yaw", 0.0)))
 		return
 	if not PROP_TEXTURES.has(kind):
 		return
