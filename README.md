@@ -1,9 +1,10 @@
 # zombietyping
 
 A first-person, on-rails **typing survival game** in Godot 4.6.2 (GDScript) with pixel-art
-"Sunday Comic" zombies (PixelLab), set in an infinite procedural city. You never move
-yourself: you type where to go, type door words to breach, and every letter you type at a
-zombie's word is a bullet. Think *Typing of the Dead* meets a SWAT-style building clear.
+"Sunday Comic" zombies (PixelLab), set in an infinite procedural city. Outside claimed
+safe zones you travel on typed rails: type where to go, type door words to breach, and every
+letter you type at a zombie's word is a bullet. Think *Typing of the Dead* meets a SWAT-style
+building clear, growing into a survivor settlement sim.
 
 This README is the hand-off document: everything a fresh session needs to pick the project
 up. `NEXT_STEPS.md` holds the backlog and the open design questions.
@@ -26,7 +27,8 @@ up. `NEXT_STEPS.md` holds the backlog and the open design questions.
 - **Nothing sees you before you see it.** Zombies wake by line of sight or gunfire only.
 - **Fair jumpscares are not jumpscares:** a zombie may only hurt you while its word is on
   screen and has been readable for a beat.
-- Rails, not free movement. Tab pauses and opens the map. Buildings are labelled
+- Rails in the unsafe city; WASD is only enabled inside a claimed perimeter. Tab pauses and
+  opens the map. Buildings are labelled
   relative to the map view (`1a`, `3b`, `10e` …), digit first so labels can be typed from
   the HUD without opening the map.
 
@@ -50,6 +52,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 |---|---|
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed label queues a trip and releases the door hold |
+| `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, first base, required supply link for the second base, claim, and persistent furniture placement |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
@@ -73,6 +76,8 @@ scripts/
                          stairwell.gd (stair layouts/geometry/paths), interior_mesher.gd
                          (rooms, doors, glass, labels), interior.gd (the loaded storey)
   player/rail_player.gd  the rail: street legs (A* tiles) + local legs (points), hold/halt
+  settlement/            sparse-state settlement rendering: walls/gates, salvage cars,
+                         placed furniture, farm plots, citizens, and safe-zone build controls
   typing/                typist.gd (keyboard → prompts/zombies/destinations), word_label.gd,
                          word_overlay.gd (draws words on the UI layer), words.gd (pool)
   zombies/               zombie.gd (state machine), director.gd (spawns, LOS, targeting),
@@ -120,7 +125,9 @@ density, lots, setbacks, and height. Building uses are procedural (`apartments`,
 `shop`, `office`, `warehouse`) rather than a generic shell, and are chosen from district,
 lot geometry, density, and stable hash rolls. Buildings retain stable ids `"sx,sy:i"`, floors,
 a door tile and a road tile (the A* node in front of the door). `World.state` is a sparse
-dictionary of building state (visited, door_kicked, floors/rooms cleared, progress);
+dictionary of building state (visited, door_kicked, floors/rooms cleared, salvage,
+fortification, supply and claim progress); `World.materials`, `supply_links`, and `placements`
+hold the procedural settlement economy and player construction;
 `World.explored` is a fog bitmask per sector. Streamer keeps a radius of sectors built (one
 per frame).
 
@@ -130,6 +137,25 @@ building's interior is loaded so you can see in), a door-leaf MultiMesh (collaps
 kicked; persisted in state), window sprite bands from the same `window_slots()` the interior
 uses, and one box collider per building (blocks line of sight; disabled for the building you
 are inside).
+
+### Settlement loop
+
+Clearing a building is only a tactical milestone and never makes it claimable by itself.
+Click its label in the Tab map (or type `info <label>`) to open the building panel. The loop is:
+
+1. Clear all generated rooms, then salvage the generated furnishings into material classes.
+2. Dismantle seed-placed street cars over four persistent visual stages, ending as a frame
+   on blocks; stages yield metal, electronics, fuel, tools, and vehicle parts.
+3. Spend wood/metal/building materials to construct a gated perimeter.
+4. The first base can then be claimed; later sites require a road-valid supply line from an
+   existing claim before claiming.
+5. Arriving at a claimed building enters safe-zone mode: WASD moves inside the walls, `B`
+   toggles build mode, `Q/E` selects wall/crate/bed/chair/farm, and `F` places it. Farms
+   produce food and seed-derived citizens walk deterministic waypoints inside the perimeter.
+
+The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
+by a current map label. All geometry and yields derive from stable building/prop seeds; only
+the player's sparse mutations are stored.
 
 ## 6. Interiors
 

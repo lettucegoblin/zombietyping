@@ -15,6 +15,9 @@ var tile: Vector2i = Vector2i(16, 0)
 var facing := Vector3(1, 0, 0)
 var hold := false
 var halt := false      ## combat: stop in place (keeps the current leg for later)
+var manual_control := false
+var manual_speed := 4.2
+var _manual_bounds := Rect2()
 
 var _street: Array[Dictionary] = []   # {id, tiles: Array[Vector2i]}
 var _local: Array[Dictionary] = []    # {id, points: PackedVector3Array, speed}
@@ -35,11 +38,13 @@ func _ready() -> void:
 
 
 func is_moving() -> bool:
-	return not _cur.is_empty() or not _local.is_empty()
+	return not _cur.is_empty() or not _local.is_empty() or (manual_control and _manual_vector() != Vector2.ZERO)
 
 
 ## Speed of the leg being walked right now (0 when standing, held or halted).
 func current_speed() -> float:
+	if manual_control:
+		return manual_speed if _manual_vector() != Vector2.ZERO else 0.0
 	if halt or _cur.is_empty():
 		return 0.0
 	return _cur["speed"]
@@ -103,6 +108,61 @@ func resume() -> void:
 	hold = false
 
 
+func set_manual_zone(bounds: Rect2) -> void:
+	manual_control = true
+	_manual_bounds = bounds.grow(-0.45)
+	hold = false
+	halt = false
+	_cur.clear()
+	_local.clear()
+	_street.clear()
+	queue_changed.emit()
+
+
+func clear_manual_zone() -> void:
+	manual_control = false
+	_manual_bounds = Rect2()
+
+
+func snap_to_road(t: Vector2i) -> void:
+	clear_manual_zone()
+	global_position = World.tile_to_world(t)
+	tile = t
+	World.mark_explored(tile, reveal_radius)
+	tile_changed.emit(tile)
+
+
+func _manual_vector() -> Vector2:
+	var v := Vector2.ZERO
+	if Input.is_key_pressed(KEY_W): v.y -= 1.0
+	if Input.is_key_pressed(KEY_S): v.y += 1.0
+	if Input.is_key_pressed(KEY_A): v.x -= 1.0
+	if Input.is_key_pressed(KEY_D): v.x += 1.0
+	return v.normalized()
+
+
+func _manual_move(dt: float) -> void:
+	var v := _manual_vector()
+	if v == Vector2.ZERO:
+		return
+	# Movement is camera-relative: W follows the survivor's gaze, A/D strafe.
+	var forward := Vector2(facing.x, facing.z).normalized()
+	var right := Vector2(-forward.y, forward.x)
+	var d := (right * v.x + forward * -v.y).normalized()
+	var p := Vector2(global_position.x, global_position.z) + d * manual_speed * dt
+	p.x = clampf(p.x, _manual_bounds.position.x, _manual_bounds.end.x)
+	p.y = clampf(p.y, _manual_bounds.position.y, _manual_bounds.end.y)
+	global_position.x = p.x
+	global_position.z = p.y
+	if d.length() > 0.01:
+		facing = Vector3(d.x, 0, d.y)
+	var next_tile := World.world_to_tile(global_position)
+	if next_tile != tile:
+		tile = next_tile
+		World.mark_explored(tile, reveal_radius)
+		tile_changed.emit(tile)
+
+
 ## Turn (smoothly) to look at a world point; used when arriving in a room so the door
 ## words are in view.
 func face_toward(p: Vector3) -> void:
@@ -143,6 +203,10 @@ func _start_next() -> bool:
 
 
 func _process(dt: float) -> void:
+	if manual_control:
+		_manual_move(dt)
+		_update_cam(dt)
+		return
 	if halt:
 		_update_cam(dt)
 		return

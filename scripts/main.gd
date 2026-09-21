@@ -5,7 +5,7 @@ extends Node
 ##             With more stops queued you get a short window, then the rail moves on.
 ##   INSIDE  — in a storey; doors/stairs/exit are typed words.
 
-enum Mode { STREET, DOOR, INSIDE }
+enum Mode { STREET, DOOR, INSIDE, SAFEZONE }
 
 const DOOR_WORDS := ["breach", "kick", "shove", "pry", "force", "bash", "ram", "smash"]
 const DOOR_WINDOW := 4.0
@@ -47,6 +47,7 @@ const AIM_RANGE := 14.0               # ...and turns you to face it whenever you
 @onready var sfx: Node = $Sfx
 @onready var ash: GPUParticles3D = $View/Viewport/World/Player/Ash
 @onready var sky: Node3D = $View/Viewport/World/SkyLife
+@onready var settlement: Settlement = $View/Viewport/World/Settlement
 @onready var hud: RichTextLabel = $UI/HUD
 
 
@@ -58,13 +59,14 @@ func _ready() -> void:
 	sfx.player = player
 	sky.player = player
 	sky.sfx = sfx
+	settlement.configure(player)
 	minimap.player = player
 	minimap.tab_map = map
 	typist.dest_labels = func(): return minimap.labels
 	typist.destination_typed.connect(_on_hud_destination)
 	map.destinations_typed.connect(_on_destinations)
 	map.clear_requested.connect(func(): player.clear_queue(); map.queue_redraw())
-	map.closed.connect(func(): get_tree().paused = false; typist.enabled = true)
+	map.closed.connect(func(): get_tree().paused = false; typist.enabled = mode != Mode.SAFEZONE)
 	player.queue_changed.connect(_on_queue_changed)
 	player.arrived.connect(_on_arrived)
 	player.tile_changed.connect(func(t): map.mark_fog_dirty_around(World.sector_of_tile(t)))
@@ -92,6 +94,9 @@ func _process(dt: float) -> void:
 	var lock_close: bool = typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive() \
 		and typist.locked.global_position.distance_to(player.global_position) < HALT_RANGE
 	var threat: Zombie = director.threat_within(HALT_RANGE)
+	if mode == Mode.SAFEZONE:
+		threat = null
+		lock_close = false
 	if threat != null and _moving_on and threat.room < 0 and mode == Mode.INSIDE:
 		threat = null   # a street zombie seen through a window does not stop you indoors
 	if threat != null or (lock_close and not _moving_on):
@@ -151,7 +156,7 @@ func _process(dt: float) -> void:
 		if z != null:
 			player.face_toward(z.global_position)
 	if not director.get_meta("no_street", false):
-		director.street_spawning = mode != Mode.INSIDE
+		director.street_spawning = mode != Mode.INSIDE and mode != Mode.SAFEZONE
 	var room_kind := ""
 	if mode == Mode.INSIDE and interior.is_inside() and interior.current_room >= 0:
 		room_kind = interior.plan.rooms[interior.current_room].kind
@@ -172,6 +177,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_tree().paused = false
 		get_tree().reload_current_scene()
 		return
+	if mode == Mode.SAFEZONE and event is InputEventKey and event.pressed and not event.echo:
+		var msg := ""
+		match event.keycode:
+			KEY_B: msg = settlement.toggle_build()
+			KEY_Q: msg = "selected " + settlement.cycle_build(-1)
+			KEY_E: msg = "selected " + settlement.cycle_build(1)
+			KEY_F: msg = settlement.place_selected()
+		if msg != "":
+			minimap.flash(msg)
+			_refresh_hud()
+			get_viewport().set_input_as_handled()
+			return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
 		var on: float = post_mat.get_shader_parameter("enabled")
 		post_mat.set_shader_parameter("enabled", 0.0 if on > 0.5 else 1.0)
@@ -217,6 +234,8 @@ func _toggle_map() -> void:
 # ------------------------------------------------------------------ street
 
 func _on_destinations(ids: Array[String]) -> void:
+	if mode == Mode.SAFEZONE:
+		_leave_safezone_for_travel()
 	var ok := 0
 	for id in ids:
 		if player.enqueue(id):
@@ -308,6 +327,9 @@ func _on_arrived(id: String) -> void:
 		player.resume()
 		return
 	World.set_building_state(id, "visited", true)
+	if World.building_state(id).get("claimed", false):
+		_enter_safezone(b)
+		return
 	mode = Mode.DOOR
 	door_building = b
 	door_word = DOOR_WORDS[b.seed_hash % DOOR_WORDS.size()]
@@ -327,6 +349,30 @@ func _leave_door() -> void:
 	door_timer = -1.0
 	typist.clear_prompts()
 	_hide_door_label()
+
+
+func _enter_safezone(b: BuildingData) -> void:
+	mode = Mode.SAFEZONE
+	door_building = b
+	typist.clear_prompts()
+	typist.enabled = false
+	_hide_door_label()
+	interior.enter(b, 0)
+	interior.reveal_all()
+	settlement.enter(b.id())
+	director.clear_room_zombies()
+	minimap.flash("safe zone: WASD move · B build · Tab travel/manage")
+	_refresh_hud()
+
+
+func _leave_safezone_for_travel() -> void:
+	var b := World.building_by_id(settlement.active_building_id)
+	interior.unload()
+	settlement.leave()
+	mode = Mode.STREET
+	typist.enabled = true
+	if b != null:
+		player.snap_to_road(b.road_tile)
 
 
 func _show_door_label(word: String, pos: Vector3) -> void:
@@ -659,6 +705,10 @@ func _refresh_hud() -> void:
 			var p: Vector2i = interior.progress() if interior.is_inside() else Vector2i.ZERO
 			var fl: int = interior.plan.floor + 1 if interior.is_inside() else 0
 			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]nothing left here — moving on[/color]" if _searching else ""])
+		Mode.SAFEZONE:
+			var build := "[color=#ffd166]BUILD %s[/color]  Q/E select · F place" % settlement.selected_kind() if settlement.build_mode else "B: build mode"
+			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  Tab manage/travel" % build)
+			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
 	var parts: Array[String] = []
 	for p in typist.prompts():
 		var w: String = p["word"]

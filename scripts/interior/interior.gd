@@ -27,6 +27,15 @@ func enter(b: BuildingData, floor: int) -> void:
 	_build_all()
 
 
+## Claimed buildings use the same generated floor plan as clearing, but the whole ground
+## floor is visible for free-roam furnishing rather than gated by combat exploration.
+func reveal_all() -> void:
+	if plan == null:
+		return
+	for ri in plan.rooms.size():
+		_reveal(ri)
+
+
 ## Every room is built up front so walls (and closed doors) block sightlines everywhere;
 ## rooms you have not seen yet are simply invisible until revealed.
 func _build_all() -> void:

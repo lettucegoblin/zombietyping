@@ -26,6 +26,9 @@ var _placed: Array = []               # [{label, b, centre}]
 var _dragging := false
 var _msg := ""
 var _msg_until := 0.0
+var _selected_id := ""
+var _building_hitboxes: Array[Dictionary] = []
+var _action_hitboxes: Array[Dictionary] = []
 
 var buffer := ""                      # what the player has typed (we own key handling: typing game)
 var _view_key := ""                   # cache key of the last label recompute
@@ -124,7 +127,23 @@ func _gui_input(event: InputEvent) -> void:
 			_center += before - after
 			_invalidate()
 		elif event.button_index == MOUSE_BUTTON_LEFT:
-			_dragging = event.pressed
+			if event.pressed:
+				for hit in _action_hitboxes:
+					if (hit["rect"] as Rect2).has_point(event.position):
+						flash(World.settlement_action(hit["action"], _selected_id))
+						_invalidate()
+						accept_event()
+						return
+				for hit in _building_hitboxes:
+					if (hit["rect"] as Rect2).has_point(event.position):
+						_selected_id = hit["id"]
+						_dragging = false
+						queue_redraw()
+						accept_event()
+						return
+				_dragging = true
+			else:
+				_dragging = false
 	elif event is InputEventMouseMotion and _dragging:
 		_center -= event.relative / _ppt
 		_invalidate()
@@ -137,6 +156,16 @@ func _on_submit(text: String) -> void:
 	if tokens[0] in ["x", "clear", "stop"]:
 		clear_requested.emit()
 		flash("queue cleared")
+		return
+	var commands := { "info": "info", "salvage": "salvage", "car": "car", "fortify": "fortify", "supply": "supply", "claim": "claim", "farm": "farm" }
+	if commands.has(tokens[0]):
+		if tokens.size() < 2 or not _labels.has(tokens[1]):
+			flash("use %s <map label>" % tokens[0])
+			return
+		_selected_id = _labels[tokens[1]]
+		if tokens[0] != "info":
+			flash(World.settlement_action(commands[tokens[0]], _selected_id))
+		_invalidate()
 		return
 	var ids: Array[String] = []
 	var unknown: Array[String] = []
@@ -243,6 +272,8 @@ func recompute_labels() -> void:
 
 func _draw() -> void:
 	recompute_labels()
+	_building_hitboxes.clear()
+	_action_hitboxes.clear()
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#0b0b10"))
 	var vr := _visible_tiles()
 	var s0 := World.sector_of_tile(vr.position)
@@ -275,6 +306,19 @@ func _draw() -> void:
 		var pos := _tile_to_screen(Vector2(sd.origin_tile()))
 		draw_texture_rect(fog_texture(sd.coord), Rect2(pos, sec_px), false)
 	# routes
+	for link in World.supply_links:
+		if link.size() < 2:
+			continue
+		var a := World.building_by_id(link[0])
+		var b := World.building_by_id(link[1])
+		if a == null or b == null:
+			continue
+		var supply_path := World.find_path(a.road_tile, b.road_tile)
+		if supply_path.size() >= 2:
+			var supply_pts := PackedVector2Array()
+			for t in supply_path:
+				supply_pts.append(_tile_to_screen(Vector2(t) + Vector2(0.5, 0.5)))
+			draw_polyline(supply_pts, Color("#68d5ff", 0.9), maxf(2.0, _ppt * 0.18))
 	if player != null:
 		var li := 0
 		for path in player.all_paths():
@@ -293,9 +337,12 @@ func _draw() -> void:
 			var label: String = e["label"]
 			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			var qi := queued.find(b.id())
-			var bg := Color(0, 0, 0, 0.55) if qi < 0 else COL_ROUTE
+			var selected: bool = b.id() == _selected_id
+			var bg := Color("#5b3f8c") if selected else (Color(0, 0, 0, 0.55) if qi < 0 else COL_ROUTE)
 			var fg := Color.WHITE if qi < 0 else Color.BLACK
-			draw_rect(Rect2(p - Vector2(w * 0.5 + 2, fs * 0.6), Vector2(w + 4, fs * 1.15)), bg)
+			var lr := Rect2(p - Vector2(w * 0.5 + 4, fs * 0.7), Vector2(w + 8, fs * 1.35))
+			draw_rect(lr, bg)
+			_building_hitboxes.append({ "rect": lr, "id": b.id() })
 			draw_string(font, p + Vector2(-w * 0.5, fs * 0.38), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
 			if qi >= 0:
 				draw_string(font, p + Vector2(w * 0.5 + 4, fs * 0.38), str(qi + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COL_ROUTE)
@@ -308,13 +355,88 @@ func _draw() -> void:
 		draw_circle(pp, r + 2, Color.BLACK)
 		draw_circle(pp, r, COL_PLAYER)
 		draw_line(pp, pp + dir * r * 2.2, COL_PLAYER, 3.0)
+	_draw_building_panel(font)
 	# messages / status
 	var now := Time.get_ticks_msec() / 1000.0
 	status.text = _msg if now < _msg_until else ""
 	prompt.text = "> " + buffer + ("_" if int(now * 2.0) % 2 == 0 else " ")
-	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "type labels (e.g. 3b 1c) + Enter  ·  x = clear queue  ·  arrows/drag pan  ·  wheel zoom  ·  Tab/Esc close"
+	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "click a building to manage it  ·  type labels + Enter to travel  ·  info/salvage/fortify/supply/claim/farm <label>  ·  Tab close"
 	var sec := World.sector_of_tile(Vector2i(_center))
 	var sd_here := World.get_sector(sec.x, sec.y)
 	draw_string(font, Vector2(12, 24), "%s   sector %d,%d   %d labelled" % [District.NAME[sd_here.district], sec.x, sec.y, _placed.size()], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#dddddd"))
 
 
+func _draw_building_panel(font: Font) -> void:
+	var panel_w := minf(350.0, size.x * 0.36)
+	var pr := Rect2(Vector2(size.x - panel_w - 12.0, 42.0), Vector2(panel_w, size.y - 160.0))
+	draw_rect(pr, Color("#17131f", 0.96))
+	draw_rect(pr, Color("#8067a8"), false, 2.0)
+	var x := pr.position.x + 16.0
+	var y := pr.position.y + 25.0
+	draw_string(font, Vector2(x, y), "SETTLEMENT / BUILDINGS", HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#f6c177"))
+	y += 25.0
+	var material_lines := _wrap_text(World.material_summary(), 42)
+	for line in material_lines:
+		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#a6e3a1"))
+		y += 17.0
+	if _selected_id == "":
+		y += 18.0
+		draw_string(font, Vector2(x, y), "Click any visible map label", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
+		draw_string(font, Vector2(x, y + 20), "to inspect and develop that site.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
+		return
+	var b := World.building_by_id(_selected_id)
+	if b == null:
+		_selected_id = ""
+		return
+	var st: Dictionary = World.state.get(_selected_id, {})
+	y += 12.0
+	draw_string(font, Vector2(x, y), "%s  ·  %s  ·  %d floor%s" % [_selected_id, b.kind, b.floors, "" if b.floors == 1 else "s"], HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color.WHITE)
+	y += 22.0
+	var status_parts: Array[String] = []
+	for pair in [["visited", "visited"], ["cleared", "cleared"], ["salvaged", "salvaged"], ["fortified", "fortified"], ["supplied", "supplied"], ["claimed", "claimed"]]:
+		if st.get(pair[0], false):
+			status_parts.append(pair[1])
+	if status_parts.is_empty():
+		status_parts.append("unsecured")
+	draw_string(font, Vector2(x, y), " → ".join(status_parts), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#68d5ff") if st.get("claimed", false) else Color("#ff9f68"))
+	y += 24.0
+	if st.get("cleared", false) and not st.get("fortified", false):
+		draw_string(font, Vector2(x, y), "Cleared ≠ claimable. Build the perimeter.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#ff6f91"))
+		y += 21.0
+	var rows: Array[Dictionary] = []
+	if not st.get("salvaged", false):
+		rows.append({ "action": "salvage", "label": "Salvage contents", "cost": "yields material classes" })
+	if World.car_exists(b) and int(st.get("car_stage", 0)) < 4:
+		rows.append({ "action": "car", "label": "Dismantle parked car", "cost": "stage %d/4" % int(st.get("car_stage", 0)) })
+	if not st.get("fortified", false):
+		rows.append({ "action": "fortify", "label": "Build perimeter", "cost": World.cost_text(World.fortify_cost(b)) })
+	elif not st.get("claimed", false) and not World.claimed_ids().is_empty() and not st.get("supplied", false):
+		rows.append({ "action": "supply", "label": "Establish supply line", "cost": World.cost_text(World.supply_cost()) })
+	if not st.get("claimed", false):
+		rows.append({ "action": "claim", "label": "Claim building", "cost": World.cost_text(World.claim_cost(b)) })
+	else:
+		rows.append({ "action": "farm", "label": "Build farm plot", "cost": World.cost_text(World.farm_cost()) })
+	for row in rows:
+		if y + 45.0 > pr.end.y - 16.0:
+			break
+		var br := Rect2(Vector2(x, y), Vector2(pr.size.x - 32.0, 39.0))
+		draw_rect(br, Color("#30263f"))
+		draw_rect(br, Color("#8067a8"), false, 1.0)
+		draw_string(font, br.position + Vector2(10, 16), row["label"], HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color.WHITE)
+		draw_string(font, br.position + Vector2(10, 32), row["cost"], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#b8adca"))
+		_action_hitboxes.append({ "rect": br, "action": row["action"] })
+		y += 47.0
+
+
+func _wrap_text(text: String, width: int) -> Array[String]:
+	var out: Array[String] = []
+	var line := ""
+	for word in text.split(" "):
+		if line.length() + word.length() + 1 > width and line != "":
+			out.append(line)
+			line = word
+		else:
+			line += ("" if line == "" else " ") + word
+	if line != "":
+		out.append(line)
+	return out
