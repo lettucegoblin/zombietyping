@@ -188,6 +188,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_F: msg = settlement.place_selected() if settlement.build_mode else ""
 			KEY_ESCAPE: msg = settlement.cancel_build() if settlement.build_mode else ""
 			KEY_U: msg = settlement.undo_or_dismantle_last()
+			KEY_X:
+				if not settlement.build_mode:
+					msg = interior.salvage_nearest(player.global_position)
+					if msg.begins_with("dismantled"):
+						sfx.play_at("creak", player.global_position, -7.0, 0.1, 0.9, 12.0)
 			KEY_PAGEUP: msg = _safezone_floor(1)
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
@@ -777,6 +782,10 @@ func _refresh_hud() -> void:
 				build += "  ·  U undo %.1fs (full refund)" % undo_left
 			var floor_text := "floor %d/%d  ·  PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
 			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  %s  ·  Tab manage/travel" % [build, floor_text])
+			if not settlement.build_mode:
+				var salvage_text: String = interior.salvage_hint(player.global_position)
+				if salvage_text != "":
+					lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
 	var parts: Array[String] = []
 	for p in typist.prompts():

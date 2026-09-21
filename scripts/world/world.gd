@@ -297,6 +297,9 @@ func car_exists(b: BuildingData) -> bool:
 
 
 func salvage_preview(b: BuildingData) -> Dictionary:
+	# This first pass recovers loose stock, rubble and generic fixtures needed to establish
+	# a perimeter. Stable generated furniture remains in the world and is dismantled
+	# individually through PropSalvage, so its materials are never counted twice.
 	var found := {
 		"building_materials": 16 + b.floors * 4,
 		"wood": 12 + b.floors * 2,
@@ -307,17 +310,7 @@ func salvage_preview(b: BuildingData) -> Dictionary:
 		"medicine": 0,
 		"tools": 3,
 	}
-	for floor in b.floors:
-		var fp := InteriorGen.generate(seed, b, floor)
-		for prop in fp.props:
-			match prop.kind:
-				"bed", "sofa", "rug": found["textiles"] += 1
-				"dresser", "shelf", "desk", "chair", "counter": found["wood"] += 1
-				"fridge", "stove", "sink", "tub", "toilet": found["metal"] += 1
-				"tv": found["electronics"] += 2; found["metal"] += 1
-			if prop.loot_table == "kitchen":
-				found["food"] += 1
-	# Keep large procedural buildings valuable without turning every chair into a wall.
+	# Keep loose yields useful without turning generic site rubble into an entire base.
 	for key in found:
 		if key != "building_materials":
 			found[key] = ceili(float(found[key]) * 0.45)

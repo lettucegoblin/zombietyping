@@ -28,6 +28,25 @@ func _ready() -> void:
 	if not World.building_state(first.id()).get("claimed", false):
 		_fail("first base was not claimed")
 		return
+	var first_plan := InteriorGen.generate(World.seed, first, 0)
+	if first_plan.props.is_empty():
+		_fail("claimed building had no stable props to dismantle")
+		return
+	var salvage_prop: FloorPlan.Prop = first_plan.props[0]
+	var prop_yield := PropSalvage.material_yield(salvage_prop.kind)
+	var prop_before: Dictionary = World.materials.duplicate()
+	var prop_result := PropSalvage.salvage(first.id(), salvage_prop)
+	if not prop_result.begins_with("dismantled") or not PropSalvage.is_salvaged(first.id(), salvage_prop.id):
+		_fail("stable prop did not dismantle: " + prop_result)
+		return
+	for key in prop_yield:
+		if int(World.materials[key]) != int(prop_before.get(key, 0)) + int(prop_yield[key]):
+			_fail("prop yielded the wrong %s amount" % key)
+			return
+	var duplicate_prop := PropSalvage.salvage(first.id(), salvage_prop)
+	if not duplicate_prop.contains("already"):
+		_fail("prop could be dismantled twice: " + duplicate_prop)
+		return
 	var self_link := World.link_supply(first.id())
 	if not self_link.contains("themselves"):
 		_fail("claimed base accepted a self supply link: " + self_link)
@@ -133,7 +152,8 @@ func _ready() -> void:
 		return
 	if not World.building_state(first.id()).get("claimed", false) or World.supply_links.size() != 1 \
 			or World.placements.size() != snapshot["placements"].size() \
-			or World.placements[0]["pos"] != snapshot["placements"][0]["pos"]:
+			or World.placements[0]["pos"] != snapshot["placements"][0]["pos"] \
+			or not PropSalvage.is_salvaged(first.id(), salvage_prop.id):
 		_fail("restored snapshot lost typed settlement state")
 		return
 	SaveStore.erase(save_path)

@@ -55,6 +55,8 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, first base, required supply link for the second base, claim, and persistent furniture placement |
 | `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
 | `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
+| `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
+| `scenes/tests/test_citizen_navigation.tscn` | deterministic yard routing around buildings, farms, walls and furniture, plus rebuild-position preservation |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
 | `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
@@ -161,6 +163,12 @@ Click its label in the Tab map (or type `info <label>`) to open the building pan
    typed street travel, and `PageUp/PageDown` changes storeys. `B` toggles build mode, `Q/E`
    selects wall/crate/bed/chair/farm, and `F` places it. Farms produce food and seed-derived
    citizens walk deterministic waypoints inside the perimeter.
+
+Generated furnishings retain stable object IDs after claiming. Walk close to an intact item
+and press `X` to dismantle that specific bed, television, fridge, rug, fixture, or other prop;
+the object disappears, its material-class yield is shown, and the removed ID persists in the
+save. Build mode provides a green/red placement ghost: `R` rotates, `F` confirms, `Esc`
+cancels, and `U` gives a ten-second full-refund undo before becoming a 50% dismantle action.
 
 The Tab panel also accepts `salvage`, `car`, `fortify`, `supply`, `claim`, and `farm` followed
 by a current map label. All geometry and yields derive from stable building/prop seeds; only

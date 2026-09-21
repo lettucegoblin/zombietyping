@@ -225,6 +225,8 @@ static func _build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
 	for prop in fp.props:
 		if prop.room != ri:
 			continue
+		if PropSalvage.is_salvaged(fp.building_id, prop.id):
+			continue
 		if PROP_SPRITES.has(prop.kind):
 			root.add_child(_sprite_prop(prop))
 			sprite_count += 1

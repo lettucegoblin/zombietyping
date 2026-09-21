@@ -36,6 +36,37 @@ func reveal_all() -> void:
 		_reveal(ri)
 
 
+func nearest_salvageable_prop(world_pos: Vector3, max_distance: float = 3.4) -> FloorPlan.Prop:
+	if plan == null or building == null:
+		return null
+	var nearest: FloorPlan.Prop
+	var best := max_distance * max_distance
+	for prop in plan.props:
+		if PropSalvage.is_salvaged(building.id(), prop.id):
+			continue
+		var d := Vector2(prop.pos.x - world_pos.x, prop.pos.z - world_pos.z).length_squared()
+		if d < best:
+			best = d
+			nearest = prop
+	return nearest
+
+
+func salvage_hint(world_pos: Vector3) -> String:
+	var prop := nearest_salvageable_prop(world_pos)
+	return "" if prop == null else PropSalvage.hint(prop)
+
+
+func salvage_nearest(world_pos: Vector3) -> String:
+	var prop := nearest_salvageable_prop(world_pos)
+	if prop == null:
+		return "no intact furniture close enough to dismantle"
+	var result := PropSalvage.salvage(building.id(), prop)
+	if result.begins_with("dismantled"):
+		_rebuild(prop.room)
+		_set_room_visible(prop.room, true)
+	return result
+
+
 ## Every room is built up front so walls (and closed doors) block sightlines everywhere;
 ## rooms you have not seen yet are simply invisible until revealed.
 func _build_all() -> void:
