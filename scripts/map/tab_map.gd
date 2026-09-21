@@ -49,6 +49,7 @@ var _supply_route_cache: Array[Dictionary] = []
 var _supply_topology_key := ""
 var _supply_route_build_count := 0  # exposed to focused tests; never used by gameplay
 var _show_all_buildings := false
+var _facility_cache: Dictionary = {} # building id -> {signature, profile}
 
 var buffer := ""                      # what the player has typed (we own key handling: typing game)
 var _view_key := ""                   # cache key of the last label recompute
@@ -256,6 +257,33 @@ func building_name(b: BuildingData) -> String:
 	var suffixes: Array = NAME_SUFFIXES.get(b.kind, NAME_SUFFIXES["plain"])
 	var suffix_index := posmod((name_seed >> 7) ^ b.index ^ b.block, suffixes.size())
 	return "%s %s" % [NAME_ROOTS[roots_index], suffixes[suffix_index]]
+
+
+func facility_profile(b: BuildingData) -> Dictionary:
+	var st: Dictionary = World.state.get(b.id(), {})
+	var removed: Dictionary = st.get("salvaged_props", {})
+	var removed_ids: Array[String] = []
+	for id in removed:
+		removed_ids.append(str(id))
+	removed_ids.sort()
+	var signature := "%d|%s|%s|%s" % [World.seed, str(st.get("cleared", false)), str(st.get("claimed", false)), ",".join(removed_ids)]
+	var cached: Dictionary = _facility_cache.get(b.id(), {})
+	if cached.get("signature", "") != signature:
+		cached = { "signature": signature, "profile": FacilityProfile.derive(World.seed, b, st) }
+		_facility_cache[b.id()] = cached
+	return cached["profile"]
+
+
+func facility_panel_lines(b: BuildingData) -> Array[String]:
+	var profile := facility_profile(b)
+	var lines: Array[String] = ["FACILITY · " + str(profile["role_label"])]
+	if not profile["cleared"]:
+		lines.append(str(profile["readiness"]))
+		return lines
+	lines.append("program  " + FacilityProfile.program_text(profile))
+	lines.append_array(FacilityProfile.utility_lines(profile))
+	lines.append(str(profile["readiness"]))
+	return lines
 
 
 func _label_for_id(id: String) -> String:
@@ -695,6 +723,21 @@ func _draw_building_panel(font: Font) -> void:
 		status_parts.append("unsecured")
 	draw_string(font, Vector2(x, y), " → ".join(status_parts), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#68d5ff") if st.get("claimed", false) else Color("#ff9f68"))
 	y += 24.0
+	var profile := facility_profile(b)
+	draw_string(font, Vector2(x, y), "FACILITY  ·  %s" % profile["role_label"], HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#f6c177"))
+	y += 18.0
+	if not profile["cleared"]:
+		draw_string(font, Vector2(x, y), profile["readiness"], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#9f95ad"))
+		y += 20.0
+	else:
+		draw_string(font, Vector2(x, y), "program  " + FacilityProfile.program_text(profile), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#b8adca"))
+		y += 16.0
+		for utility_line in FacilityProfile.utility_lines(profile):
+			draw_string(font, Vector2(x, y), utility_line, HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#ded8e8"))
+			y += 16.0
+		var readiness_color := Color("#a6e3a1") if profile["readiness_kind"] == "ready" else (Color("#ff6f91") if profile["readiness_kind"] == "needs" else Color("#f6c177"))
+		draw_string(font, Vector2(x, y), str(profile["readiness"]), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, readiness_color)
+		y += 20.0
 	var supply_lines := _supply_lines_for(_selected_id)
 	for i in mini(2, supply_lines.size()):
 		draw_string(font, Vector2(x, y), supply_lines[i], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#68d5ff"))

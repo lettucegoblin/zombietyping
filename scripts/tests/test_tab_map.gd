@@ -23,6 +23,14 @@ func _ready() -> void:
 	var b: BuildingData = pair[1]
 	_check(map.building_name(a) == map.building_name(a), "building name is not deterministic")
 	_check(map.building_name(a).contains(" "), "building name is not human-readable")
+	World.state[a.id()] = { "cleared": true, "claimed": true }
+	var facility: Dictionary = map.facility_profile(a)
+	var facility_lines: Array[String] = map.facility_panel_lines(a)
+	_check(str(facility["role_label"]) != "", "building panel omitted deterministic facility role")
+	_check(facility_lines.size() >= 5, "building panel omitted intact utility details")
+	_check(facility_lines[0].contains(str(facility["role_label"])), "panel role disagrees with facility profile")
+	_check(facility_lines[-1] == facility["readiness"], "panel omitted upgrade readiness")
+	World.state.erase(a.id())
 
 	# Focus mode draws a small actionable subset without changing the complete label map
 	# consumed by typed navigation.
