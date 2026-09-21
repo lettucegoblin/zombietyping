@@ -17,11 +17,13 @@ func _ready() -> void:
 						for x in fp.cells.x:
 							var ri := fp.room_at_cell(Vector2i(x, y))
 							var k: String = fp.rooms[ri].kind
-							line += ("S" if k == "stair" else ("=" if k == "hall" else ("F" if k == "flat" else ("E" if k == "entrance" else "r")))) + ("%d" % (ri % 10))
+							var glyph: String = { "stair": "S", "hall": "=", "living": "L", "kitchen": "K", "bathroom": "B", "bedroom": "R", "studio": "U" }.get(k, "?")
+							line += glyph + ("%d" % (ri % 10))
 							line += " "
 						print(line)
 					var ds := []
 					for d in fp.doors:
 						ds.append("%d-%d:%s" % [d.a, d.b, d.word])
 					print("  doors: ", ", ".join(ds))
+					print("  furniture: ", fp.props.size())
 	get_tree().quit(0)

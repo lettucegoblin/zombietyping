@@ -207,7 +207,94 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 		if fp.floor > 0 and lps.has("down"):
 			labels.add_child(_label("down", lps["down"]))
 	root.add_child(labels)
+	var furnishings := _build_furnishings(fp, ri)
+	if furnishings != null:
+		root.add_child(furnishings)
 	return root
+
+
+## Furniture is batched per room and deliberately has no collision. It gives each
+## generated room a readable use without changing the rail, zombie paths, or LOS fairness.
+static func _build_furnishings(fp: FloorPlan, ri: int) -> MeshInstance3D:
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var count := 0
+	for prop in fp.props:
+		if prop.room != ri:
+			continue
+		_emit_prop(st, prop)
+		count += 1
+	if count == 0:
+		return null
+	var mi := MeshInstance3D.new()
+	mi.name = "Furnishings"
+	mi.mesh = st.commit()
+	mi.material_override = SectorMesher.flat_material()
+	return mi
+
+
+static func _emit_prop(st: SurfaceTool, p: FloorPlan.Prop) -> void:
+	var dark := p.color.darkened(0.28)
+	match p.kind:
+		"bed":
+			_part(st, p, Vector3(0, 0.0, 0), Vector3(p.size.x, 0.28, p.size.z), dark)
+			_part(st, p, Vector3(0, 0.28, 0), Vector3(p.size.x * 0.94, 0.22, p.size.z * 0.96), p.color)
+			_part(st, p, Vector3(0, 0.51, -p.size.z * 0.32), Vector3(p.size.x * 0.72, 0.16, p.size.z * 0.23), Color("#fdf6e3"))
+		"sofa":
+			_part(st, p, Vector3(0, 0.0, 0), Vector3(p.size.x, 0.42, p.size.z), p.color)
+			_part(st, p, Vector3(0, 0.40, -p.size.z * 0.38), Vector3(p.size.x, 0.50, p.size.z * 0.22), dark)
+			_part(st, p, Vector3(-p.size.x * 0.44, 0.34, 0), Vector3(p.size.x * 0.12, 0.42, p.size.z), dark)
+			_part(st, p, Vector3(p.size.x * 0.44, 0.34, 0), Vector3(p.size.x * 0.12, 0.42, p.size.z), dark)
+		"table", "coffee_table", "desk", "bench":
+			_part(st, p, Vector3(0, p.size.y - 0.12, 0), Vector3(p.size.x, 0.14, p.size.z), p.color)
+			for sx in [-1.0, 1.0]:
+				for sz in [-1.0, 1.0]:
+					_part(st, p, Vector3(sx * p.size.x * 0.38, 0, sz * p.size.z * 0.34), Vector3(0.12, p.size.y - 0.08, 0.12), dark)
+		"chair":
+			_part(st, p, Vector3(0, 0.42, 0), Vector3(p.size.x, 0.14, p.size.z), p.color)
+			_part(st, p, Vector3(0, 0.55, -p.size.z * 0.40), Vector3(p.size.x, 0.58, 0.12), dark)
+		"toilet":
+			_part(st, p, Vector3(0, 0, p.size.z * 0.10), Vector3(p.size.x * 0.72, 0.42, p.size.z * 0.72), p.color)
+			_part(st, p, Vector3(0, 0.38, -p.size.z * 0.28), Vector3(p.size.x, 0.48, p.size.z * 0.34), p.color.darkened(0.08))
+		"sink":
+			_part(st, p, Vector3(0, 0, 0), Vector3(p.size.x * 0.78, p.size.y * 0.82, p.size.z * 0.72), dark)
+			_part(st, p, Vector3(0, p.size.y * 0.80, 0), Vector3(p.size.x, p.size.y * 0.18, p.size.z), p.color)
+		"tub":
+			_part(st, p, Vector3(0, 0, 0), Vector3(p.size.x, p.size.y, p.size.z), p.color)
+			_part(st, p, Vector3(0, p.size.y * 0.58, 0), Vector3(p.size.x * 0.70, p.size.y * 0.48, p.size.z * 0.78), Color("#1d1f2a"))
+		"stove":
+			_part(st, p, Vector3.ZERO, p.size, p.color)
+			for x in [-0.22, 0.22]:
+				for z in [-0.22, 0.22]:
+					_part(st, p, Vector3(x * p.size.x, p.size.y, z * p.size.z), Vector3(0.16, 0.025, 0.16), Color("#1d1f2a"))
+		_:
+			_part(st, p, Vector3.ZERO, p.size, p.color)
+
+
+static func _part(st: SurfaceTool, p: FloorPlan.Prop, local_offset: Vector3, size: Vector3, color: Color) -> void:
+	var basis := Basis(Vector3.UP, p.yaw)
+	var base := p.pos + basis * Vector3(local_offset.x, 0, local_offset.z) + Vector3(0, local_offset.y, 0)
+	_box(st, base, size, basis, color)
+
+
+static func _box(st: SurfaceTool, base: Vector3, size: Vector3, basis: Basis, color: Color) -> void:
+	var hx := size.x * 0.5
+	var hz := size.z * 0.5
+	var y0 := 0.0
+	var y1 := size.y
+	var pts := [
+		Vector3(-hx, y0, -hz), Vector3(hx, y0, -hz), Vector3(hx, y0, hz), Vector3(-hx, y0, hz),
+		Vector3(-hx, y1, -hz), Vector3(hx, y1, -hz), Vector3(hx, y1, hz), Vector3(-hx, y1, hz),
+	]
+	for i in pts.size():
+		pts[i] = base + basis * pts[i]
+	var nx := basis * Vector3.RIGHT
+	var nz := basis * Vector3.BACK
+	SectorMesher._quad(st, pts[0], pts[1], pts[5], pts[4], -nz, color.darkened(0.16))
+	SectorMesher._quad(st, pts[2], pts[3], pts[7], pts[6], nz, color.darkened(0.24))
+	SectorMesher._quad(st, pts[1], pts[2], pts[6], pts[5], nx, color.darkened(0.10))
+	SectorMesher._quad(st, pts[3], pts[0], pts[4], pts[7], -nx, color.darkened(0.30))
+	SectorMesher._quad(st, pts[4], pts[5], pts[6], pts[7], Vector3.UP, color)
 
 
 static func _label(text: String, pos: Vector3) -> WordLabel:

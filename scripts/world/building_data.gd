@@ -11,7 +11,7 @@ var door_tile: Vector2i        ## footprint tile that holds the entrance
 var road_tile: Vector2i        ## road tile in front of the door (graph node)
 var block: int                 ## block id within the sector
 var seed_hash: int             ## per-building hash for cosmetic variation
-var kind := "plain"            ## "plain" | "apartments" (corridor + flats interior, brick facade)
+var kind := "plain"            ## apartments | house | shop | office | warehouse | legacy plain
 
 
 func id() -> String:

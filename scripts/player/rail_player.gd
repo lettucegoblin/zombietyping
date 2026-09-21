@@ -9,7 +9,7 @@ signal tile_changed(tile: Vector2i)
 
 @export var street_speed := 7.0
 @export var turn_speed := 6.0
-@export var reveal_radius := 7
+@export var reveal_radius := 10
 
 var tile: Vector2i = Vector2i(16, 0)
 var facing := Vector3(1, 0, 0)

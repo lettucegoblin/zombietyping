@@ -7,6 +7,7 @@ func _ready() -> void:
 	var checked := 0
 	var kinds := { 0: 0, 1: 0 }
 	var apartments := 0
+	var furnished := 0
 	var bad := 0
 	for sy in range(-2, 3):
 		for sx in range(-2, 3):
@@ -24,16 +25,25 @@ func _ready() -> void:
 						if b.kind == "apartments":
 							apartments += 1
 					if b.kind == "apartments" and fp.rooms[0].kind == "hall":
-						# every flat's front room opens onto the corridor; the stairwell too
+						# Every procedural unit has a complete room program and enters through
+						# its living room onto the corridor or stair landing.
+						var units := {}
 						for r in fp.rooms:
-							if r.kind == "flat":
+							if r.unit >= 0:
+								if not units.has(r.unit): units[r.unit] = {}
+								units[r.unit][r.kind] = true
+						for uid in units:
+							for required in ["living", "bedroom", "bathroom", "kitchen"]:
+								if not units[uid].has(required):
+									print("unit missing ", required, ": ", b.id(), " floor ", f, " unit ", uid); bad += 1
+							for r in fp.rooms:
+								if r.unit != uid or r.kind != "living": continue
 								var onto := false
 								for di in r.doors:
 									var o := fp.other_room(di, r.index)
-									if o == 0 or o == fp.stair_room:
-										onto = true
+									if o == 0 or o == fp.stair_room: onto = true
 								if not onto:
-									print("flat without a corridor/landing door: ", b.id(), " floor ", f); bad += 1
+									print("unit without corridor/landing door: ", b.id(), " floor ", f, " unit ", uid); bad += 1
 						var stair_ok := false
 						for di in fp.rooms[fp.stair_room].doors:
 							if fp.other_room(di, fp.stair_room) == 0:
@@ -72,8 +82,12 @@ func _ready() -> void:
 						var pts := Stairwell.climb_points(fp, fp.stair_layout, true)
 						if pts.is_empty() or absf(pts[-1].y - (fp.origin.y + World.FLOOR_M)) > 0.01:
 							print("bad climb path: ", b.id()); bad += 1
+					if not fp.props.is_empty():
+						furnished += 1
 					checked += 1
-	print("checked %d storeys; core %d, wall %d buildings (%d apartment blocks); problems %d" % [checked, kinds[0], kinds[1], apartments, bad])
+	if furnished < checked * 0.8:
+		print("too few furnished storeys: ", furnished, "/", checked); bad += 1
+	print("checked %d storeys; core %d, wall %d buildings (%d apartment blocks); furnished %d; problems %d" % [checked, kinds[0], kinds[1], apartments, furnished, bad])
 	if bad > 0:
 		push_error("STAIRS FAIL")
 		get_tree().quit(1)

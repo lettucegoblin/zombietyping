@@ -52,6 +52,20 @@ func _init() -> void:
 			if not CityGen._connected(sd):
 				bad += 1
 	print("disconnected sectors in 7x7: ", bad)
+	# Shared boundary ports must match exactly across independently generated sectors.
+	var seam_bad := 0
+	for sy in range(-3, 4):
+		for sx in range(-3, 4):
+			var here := CityGen.generate(seed, sx, sy)
+			var east := CityGen.generate(seed, sx + 1, sy)
+			var south := CityGen.generate(seed, sx, sy + 1)
+			for i in S:
+				if (here.road[SectorData.idx(S - 1, i)] != 0) != (east.road[SectorData.idx(0, i)] != 0): seam_bad += 1
+				if (here.road[SectorData.idx(i, S - 1)] != 0) != (south.road[SectorData.idx(i, 0)] != 0): seam_bad += 1
+	print("mismatched road seam tiles: ", seam_bad)
+	if bad > 0 or seam_bad > 0:
+		push_error("CITYGEN FAIL")
+		quit(1)
 	# macro district map (letters), 40x20 sectors around the start
 	var hist := {}
 	print("--- district map: a=downtown b=residential c=suburb e=strip d=industrial f=park  (start at col 12,row 8 marked *) ---")

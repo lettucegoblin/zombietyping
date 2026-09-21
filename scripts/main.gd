@@ -266,6 +266,11 @@ func _on_arrived(id: String) -> void:
 		_populate_room(ri)
 		_refresh_prompts()
 		_face_arrival(ri)
+		# A search target can become complete while we are walking to it (for example a
+		# zero-zombie living room reached through several already-open service rooms).
+		# Continue the automatic search instead of idling among irrelevant open-door words.
+		if interior.is_room_cleared(ri) and interior.unexplored_doors(ri).is_empty():
+			_queue_search(0.35)
 		return
 	if id == "stairs":
 		# standing on the landing of the new storey: look through the archways, shoot,

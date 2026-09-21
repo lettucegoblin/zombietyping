@@ -1,7 +1,9 @@
 # Next steps
 
-State as of 2026-09-20 (10 commits). Everything in `README.md` is implemented and the four
-headless tests pass. This is the backlog, roughly in the order the owner has brought things
+State as of 2026-09-21. Everything in `README.md` is implemented and the headless suite
+passes. City streets now follow a seed-derived tensor field with shared seam ports;
+districts, lots, building uses, apartment units, semantic rooms, and furnishings are all
+procedural. This is the remaining backlog, roughly in the order the owner has brought things
 up, plus the rough edges found while building. Nothing here has been started unless noted.
 
 ## Asked for by the owner, not built yet
@@ -23,11 +25,11 @@ up, plus the rough edges found while building. Nothing here has been started unl
 
 ## Rough edges seen while playtesting (owner has NOT reported these yet)
 
-- **Balance in small rooms**: two runners spawning ~2.5 m from the threshold of a 1-wide
+- **Balance in small rooms**: two runners spawning close to the threshold of a 1-wide
   hall is brutal. Options: spawn distance floor, longer notice beat in small rooms, fewer
   zombies in "hall"-kind rooms.
-- **Apartment landings** can have three doors around a 1.4 m landing (corridor + two
-  flats). Feels fine in tests; owner to judge.
+- **Large apartment clears** are now meaningfully long: a six-floor block can exceed 100
+  rooms. The generation is correct, but floor count and unit density may need balance tuning.
 - **Approach leg** walks a straight line at the zombie; in L-shaped halls it could clip a
   wall (rooms are rectangles so far, so it hasn't).
 - **Sweep facing** picks the nearest zombie still standing in the room; with several dormant

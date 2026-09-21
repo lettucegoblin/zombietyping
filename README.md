@@ -51,7 +51,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed label queues a trip and releases the door hold |
 | `scenes/tests/test_interior.tscn` (~5 min, run it ALONE) | full clear loop: door word → enter → fight → open doors → climb (stairwell landing) → auto-return from dead ends → down → exit → next building |
-| `scenes/tests/check_stairs.tscn` | generator invariants over ~2k storeys: every multi-storey building has a stairwell with the same footprint on every floor, doors with words, full cell coverage, connectivity, apartment flats open onto the corridor/landing |
+| `scenes/tests/check_stairs.tscn` | generator invariants over ~900 storeys: stair consistency, doors with words, full cell coverage/connectivity, complete apartment programs (living/kitchen/bathroom/bedroom), corridor access, and furnishing coverage |
 | `scenes/tests/check_fling.tscn` | a kicked door leaf really flies (physics) |
 | `scenes/tests/print_plan.tscn` | prints ASCII floor plans of the first apartment blocks (debug) |
 
@@ -106,13 +106,20 @@ Words must come after HUD/Minimap (draws above them) and before TabMap.
 
 ## 5. The city
 
-Deterministic and infinite from `World.seed`. Sector = 32×32 tiles, tile = 5 m. Arterial
-roads frame every sector (some hash-demoted), district from density + variation noise, local
-grids with pruning + connectivity check, lots placed per district params. Buildings have
-stable ids `"sx,sy:i"`, a `kind` (`plain` | `apartments`), floors, a door tile and a road
-tile (the A* node in front of the door). `World.state` is a sparse dictionary of building
-state (visited, door_kicked, floors/rooms cleared, progress); `World.explored` is a fog
-bitmask per sector. Streamer keeps a radius of sectors built (one per frame).
+Deterministic and infinite from `World.seed`. Sector = 32×32 tiles, tile = 5 m. A continuous
+directionless tensor field blends slow noise with radial/tangential influences from seeded
+regional centres. Each sector derives sparse boundary ports from hashes shared with its
+neighbours, traces orthogonal discrete hyperstreamlines through the field to a perturbed hub,
+then grows density-controlled secondary branches. This produces connected, curving street
+networks without the old sector-framing lattice, while matching roads exactly at seams.
+Polycentric density and flavour fields select districts; their parameters control branch
+density, lots, setbacks, and height. Building uses are procedural (`apartments`, `house`,
+`shop`, `office`, `warehouse`) rather than a generic shell, and are chosen from district,
+lot geometry, density, and stable hash rolls. Buildings retain stable ids `"sx,sy:i"`, floors,
+a door tile and a road tile (the A* node in front of the door). `World.state` is a sparse
+dictionary of building state (visited, door_kicked, floors/rooms cleared, progress);
+`World.explored` is a fog bitmask per sector. Streamer keeps a radius of sectors built (one
+per frame).
 
 Facades: walls from `InteriorGen.footprint(b)` (single source of truth for the inset), a real
 hole for the door, a dark "vestibule" box behind it (per-sector MultiMesh, hidden while that
@@ -123,16 +130,27 @@ are inside).
 
 ## 6. Interiors
 
-`InteriorGen.generate(seed, building, floor)` → `FloorPlan` (cells of ~2.5 m, rooms, doors
-with typeable words, entrance on floor 0 exactly where the facade door is). Two planners:
+`InteriorGen.generate(seed, building, floor)` → `FloorPlan` (cells of ~2.0 m, semantic rooms,
+procedural furniture, doors with typeable words, entrance on floor 0 exactly where the
+facade door is). Topology and furnishing use separate stable RNG streams, so adding a prop
+does not perturb the room graph or its door words. Two planners:
 
 - **BSP** (`_plan_bsp`): rooms by BSP, a **stairwell strip** carved out of whatever it
-  overlaps, doors as a spanning tree + ~22% loops. Stairwell doors may only sit on the
-  entry landing / walkway side (`Stairwell.allowed_edges`).
-- **Apartments** (`_plan_apartments`, `BuildingData.kind == "apartments"`, ~35% of larger
-  residential/downtown lots, 3–5 storeys, brick): a corridor down the long axis, a
-  switchback core in its last two cells, flats off both sides (front room on the corridor,
-  back rooms behind; flats over the stairwell open onto its landing).
+  overlaps, doors as a spanning tree + ~22% loops. The building use programs the resulting
+  rooms: houses get living/kitchen/bathroom/bedrooms; shops get sales/storage/office/bath;
+  warehouses get workshop/storage/office/bath; offices get lobby/office/conference/bath.
+  Stairwell doors may only sit on the entry landing / walkway side
+  (`Stairwell.allowed_edges`).
+- **Apartments** (`_plan_apartments`, `BuildingData.kind == "apartments"`, larger
+  residential/downtown lots, 3–6 storeys): entrance orientation chooses the corridor axis;
+  a switchback core occupies the far end, and seed-sized units line both sides. Every valid
+  unit has a living room opening to the corridor or landing plus a private kitchen,
+  bathroom, and bedroom.
+
+Every semantic room is dressed procedurally from its own bounds and seed: beds, nightstands,
+dressers, toilets, sinks, tubs, counters, stoves, fridges, dining tables, sofas, shelving,
+desks, sales fixtures, storage, and hall benches. Furniture is batched per room and remains
+non-colliding so visual variety does not change rail navigation or combat line-of-sight.
 
 **Stairwells** (`scripts/interior/stairwell.gd`): same footprint on every storey. `CORE` =
 1×2 switchback (two half-width flights, half-height landing, open shaft with the storey

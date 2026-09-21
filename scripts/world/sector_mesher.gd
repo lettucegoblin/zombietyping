@@ -74,6 +74,14 @@ static func wall_cell(district: int) -> Vector2:
 		_: return CELL_BRICK
 
 
+static func building_wall_cell(b: BuildingData) -> Vector2:
+	match b.kind:
+		"apartments", "shop": return CELL_BRICK
+		"house": return CELL_SIDING
+		"office", "warehouse": return CELL_CONCRETE
+		_: return wall_cell(b.district)
+
+
 static func build(sd: SectorData) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Sector_%d_%d" % [sd.coord.x, sd.coord.y]
@@ -94,8 +102,9 @@ static func build(sd: SectorData) -> Node3D:
 			if r != 0:
 				_quad_y(st, x0, z0, x0 + T, z0 + T, 0.0, ROAD_ARTERIAL if r == 2 else ROAD_LOCAL, CELL_ASPHALT)
 				if r == 2:
-					# centre dashes along the dominant axis of this arterial tile
-					var horiz := lx > 0 and ly == 0 or (ly == 0 and lx == 0 and sd.road[1] == 2)
+					# Centre dashes follow the same continuous tensor as the road trace.
+					var flow := CityGen.tensor_direction_at(World.seed, Vector2(org + Vector2i(lx, ly)))
+					var horiz := absf(flow.x) >= absf(flow.y)
 					if horiz:
 						_quad_y(st, x0 + 1.0, z0 + T * 0.5 - 0.12, x0 + 3.0, z0 + T * 0.5 + 0.12, 0.01, LANE)
 					else:
@@ -174,11 +183,9 @@ static func build(sd: SectorData) -> Node3D:
 
 
 static func _road_n(sd: SectorData, lx: int, ly: int) -> bool:
-	if lx == S or ly == S:
-		return true            # neighbour sector's framing arterial
-	if lx < 0 or ly < 0:
-		return false
-	return sd.road[ly * S + lx] != 0
+	if lx >= 0 and ly >= 0 and lx < S and ly < S:
+		return sd.road[ly * S + lx] != 0
+	return World.road_at(sd.origin_tile() + Vector2i(lx, ly)) != 0
 
 
 static func building_color(b: BuildingData) -> Color:
@@ -197,7 +204,7 @@ static func _building(st: SurfaceTool, b: BuildingData) -> void:
 	var x1 := fpr.end.x
 	var z1 := fpr.end.y
 	var h := b.floors * FLOOR_H + (0.4 if b.district == District.Kind.INDUSTRIAL else 0.0)
-	var wc := CELL_BRICK if b.kind == "apartments" else wall_cell(b.district)
+	var wc := building_wall_cell(b)
 	# textured walls: neutral tint (brightness varies per building), texture carries the colour
 	var bright := 0.82 + float(b.seed_hash & 0xFF) / 255.0 * 0.18
 	var c := Color(bright, bright, bright)

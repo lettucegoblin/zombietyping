@@ -17,6 +17,10 @@ func _ready() -> void:
 	Engine.time_scale = 30.0
 	_main = load("res://scenes/main.tscn").instantiate()
 	add_child(_main)
+	# This test exercises routing/map state, not combat. Organic routes can be longer than
+	# the old sector grid, so disable random street encounters that would intentionally halt
+	# an automated survivor which never types zombie words.
+	_main.get_node("View/Viewport/World/Director").process_mode = Node.PROCESS_MODE_DISABLED
 	_player = _main.get_node("View/Viewport/World/Player")
 	_map = _main.get_node("UI/TabMap")
 	_player.arrived.connect(func(id): _arrivals.append(id))
@@ -100,4 +104,6 @@ func _process(_dt: float) -> void:
 		print("GAMELOOP OK")
 		get_tree().quit(0)
 	elif _frames > 6000:
+		print("rail debug: halt=", _player.halt, " hold=", _player.hold, " moving=", _player.is_moving(),
+			" current=", _player._cur, " queued=", _player._street, " mode=", _main.mode)
 		_fail("timed out waiting for arrivals (%s)" % [_arrivals])

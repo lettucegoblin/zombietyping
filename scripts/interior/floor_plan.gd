@@ -6,12 +6,21 @@ extends RefCounted
 class Room:
 	var index: int
 	var rect: Rect2i            ## in cells
-	var kind: String            ## "room", "hall", "stair", "entrance"
+	var kind: String            ## semantic use: bedroom, bathroom, kitchen, living, hall, etc.
+	var unit := -1              ## apartment unit id, or -1 for shared/non-apartment space
 	var doors: Array[int] = []
 	var is_stair := false
 	var is_entrance := false
 	func center_cell() -> Vector2:
 		return Vector2(rect.position) + Vector2(rect.size) * 0.5
+
+class Prop:
+	var kind: String
+	var room: int
+	var pos: Vector3            ## world-space floor position at the prop centre
+	var size: Vector3           ## approximate footprint and height
+	var yaw := 0.0
+	var color := Color.WHITE
 
 class Door:
 	var index: int
@@ -33,6 +42,7 @@ var cell_size: Vector2        ## metres per cell (x, z)
 var origin: Vector3           ## world position of cell (0,0)'s min corner, y = floor height
 var rooms: Array[Room] = []
 var doors: Array[Door] = []
+var props: Array[Prop] = []
 var entrance_door := -1
 var stair_room := -1
 var stair_cell := Vector2i.ZERO        ## entry cell of the stairwell (see Stairwell.layout)

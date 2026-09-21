@@ -1,10 +1,10 @@
 class_name InteriorGen
-## Deterministic floor plans: BSP rooms on a ~2.5 m cell grid over the building footprint,
+## Deterministic floor plans: BSP rooms on a ~2.0 m cell grid over the building footprint,
 ## doors as a spanning tree plus a few loops, a stairwell anchored per building so up/down
 ## line up across storeys, and the street entrance on floor 0 exactly where the facade's
 ## door quad is. Every door gets a typeable word, unique per floor and prefix-free.
 
-const CELL_M := 2.5
+const CELL_M := 2.0
 const RESERVED := ["up", "down", "exit"]
 const WORDS := [
 	"attic","basin","bench","blade","bolt","bucket","cabin","candle","cellar","chain","chalk","chest",
@@ -54,14 +54,18 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 	fp.cell_room.fill(-1)
 	var rng := Det.rng_for(seed, b.seed_hash, floor, 500 + b.index)
 
-	if b.kind == "apartments" and _plan_apartments(fp, b, fpr, rng):
-		pass
-	else:
+	var apartment_plan := b.kind == "apartments" and _plan_apartments(fp, b, fpr, rng)
+	if not apartment_plan:
 		_plan_bsp(fp, b, fpr, rng, floor)
+		_assign_bsp_uses(fp, b, fpr, rng)
 
 	# --- street entrance on the ground floor, at the facade door position
 	if floor == 0:
 		_add_entrance(fp, b, fpr)
+
+	# Furniture is regenerated from a separate stream so adding a chair never changes
+	# doors or room topology for an existing seed.
+	_furnish(fp, b, Det.rng_for(seed, b.seed_hash, floor, 900 + b.index))
 
 	# --- words: unique per floor, no prefix of another prompt (typing is prefix-matched)
 	var chosen: Array[String] = []
@@ -210,76 +214,89 @@ static func _add_entrance(fp: FloorPlan, b: BuildingData, fpr: Rect2) -> void:
 	fp.doors.append(door)
 	fp.rooms[ra].doors.append(door.index)
 	fp.rooms[ra].is_entrance = true
-	fp.rooms[ra].kind = "entrance"
 	fp.entrance_door = door.index
 
 
-## Apartment block: a corridor down the long axis with a switchback core at one end and
-## flats off both sides (a front room on the corridor, back rooms behind). Returns false
-## when the footprint is too small, so the caller falls back to the BSP plan.
-static func _plan_apartments(fp: FloorPlan, b: BuildingData, fpr: Rect2, rng: RandomNumberGenerator) -> bool:
-	var along_x := fp.cells.x >= fp.cells.y
-	var L := fp.cells.x if along_x else fp.cells.y     # cells along the corridor
-	var Wc := fp.cells.y if along_x else fp.cells.x    # cells across
-	if L < 4 or Wc < 2 or b.floors < 2:
+## Apartment block: a shared corridor leads from the street to a switchback core. Each
+## side is split into complete, seed-driven units whose cells have real uses rather than
+## anonymous "flat" rectangles. Returns false for footprints too small to hold a useful
+## apartment program, so the caller can fall back to BSP.
+static func _plan_apartments(fp: FloorPlan, b: BuildingData, _fpr: Rect2, rng: RandomNumberGenerator) -> bool:
+	var outside := b.road_tile - b.door_tile
+	var along_x := outside.x != 0
+	var L := fp.cells.x if along_x else fp.cells.y
+	var Wc := fp.cells.y if along_x else fp.cells.x
+	if L < 6 or Wc < 5 or b.floors < 2:
 		return false
-	var mid := Wc / 2                                  # corridor row/column
-	var rooms: Array = []                              # [Rect2i, kind]
-	# stairwell: the last two corridor cells, entered from the corridor
-	var stair_end := (b.seed_hash >> 9) % 2 == 0       # which end of the corridor
-	var s0 := (L - 2) if stair_end else 0
+	var mid := Wc / 2
+	var stair_end := outside.x < 0 if along_x else outside.y < 0
+	var s0 := L - 2 if stair_end else 0
 	var stair_rect := Rect2i(s0, mid, 2, 1) if along_x else Rect2i(mid, s0, 1, 2)
-	# `along` runs from the entry cell (next to the corridor) to the far end of the strip
 	var along := Vector2i(1, 0) if along_x else Vector2i(0, 1)
 	if not stair_end:
 		along = -along
-	var corr_rect := (Rect2i(0 if stair_end else 2, mid, L - 2, 1)) if along_x else (Rect2i(mid, 0 if stair_end else 2, 1, L - 2))
-	rooms.append([corr_rect, "hall"])
-	# flats on each side: strips split along the corridor into units 1-3 cells wide
-	var sides: Array = []
-	if mid > 0:
-		sides.append([0, mid])                         # rows [0, mid)
-	if mid + 1 < Wc:
-		sides.append([mid + 1, Wc])
-	var unit_doors: Array = []                         # [front room rect index, corridor-facing dir]
+	var corr_rect := Rect2i(0 if stair_end else 2, mid, L - 2, 1) if along_x else Rect2i(mid, 0 if stair_end else 2, 1, L - 2)
+	var defs: Array = [{ "rect": corr_rect, "kind": "hall", "unit": -1 }]
+	var links: Array = []          # room-definition index pairs that receive a door
+	var living_rooms: Array[int] = []
+	var unit_id := 0
+	var sides := [[0, mid], [mid + 1, Wc]]
 	for side in sides:
 		var r0: int = side[0]
 		var r1: int = side[1]
 		var depth := r1 - r0
-		var toward_corr := Vector2i(0, 1) if r0 < mid else Vector2i(0, -1)   # from the front row to the corridor
-		if not along_x:
-			toward_corr = Vector2i(1, 0) if r0 < mid else Vector2i(-1, 0)
+		if depth <= 0:
+			continue
+		var front_cross := mid - 1 if r0 < mid else mid + 1
+		var away := -1 if r0 < mid else 1
+		var widths := _unit_widths(L, rng)
 		var t := 0
-		while t < L:
-			var w := mini(rng.randi_range(1, 3), L - t)
-			if L - (t + w) == 1:
-				w += 1                                 # no 1-cell leftovers
-			if t == 0 and not stair_end and w < 2:
-				w = 2                                  # never a flat that only sits over the far stair cell
-			var front_row := (mid - 1) if r0 < mid else (mid + 1)
-			var front := Rect2i(t, front_row, w, 1) if along_x else Rect2i(front_row, t, 1, w)
-			rooms.append([front, "flat"])
-			unit_doors.append([rooms.size() - 1, toward_corr])
-			var front_idx := rooms.size() - 1
-			if depth >= 2:
-				# back rooms behind the front room, away from the corridor
-				var back_rows := Vector2i(r0, mid - 1) if r0 < mid else Vector2i(mid + 2, r1)   # [a, b)
-				var back := Rect2i(t, back_rows.x, w, back_rows.y - back_rows.x) if along_x else Rect2i(back_rows.x, t, back_rows.y - back_rows.x, w)
-				if w >= 2 and rng.randf() < 0.55:
-					var cut := rng.randi_range(1, w - 1)
-					var b1 := Rect2i(t, back.position.y, cut, back.size.y) if along_x else Rect2i(back.position.x, t, back.size.x, cut)
-					var b2 := Rect2i(t + cut, back.position.y, w - cut, back.size.y) if along_x else Rect2i(back.position.x, t + cut, back.size.x, w - cut)
-					rooms.append([b1, "room"]); _link_back(fp, rooms, front_idx, rooms.size() - 1, along_x)
-					rooms.append([b2, "room"]); _link_back(fp, rooms, front_idx, rooms.size() - 1, along_x)
-				else:
-					rooms.append([back, "room"]); _link_back(fp, rooms, front_idx, rooms.size() - 1, along_x)
-			t += w
-	# materialise rooms
-	for i in rooms.size():
+		for width in widths:
+			var living_rect := _oriented_rect(along_x, t, front_cross, width, 1)
+			var living_idx := defs.size()
+			defs.append({ "rect": living_rect, "kind": "living", "unit": unit_id })
+			living_rooms.append(living_idx)
+			var back_depth := depth - 1
+			if back_depth <= 0:
+				defs[living_idx]["kind"] = "studio"
+			elif back_depth == 1:
+				# A compact unit still has all three private/service rooms along its back wall.
+				var cuts := [1, 1, width - 2]
+				var names := ["bathroom", "kitchen", "bedroom"]
+				var off := 0
+				for j in 3:
+					if cuts[j] <= 0:
+						continue
+					var rr := _oriented_rect(along_x, t + off, front_cross + away, cuts[j], 1)
+					var idx := defs.size()
+					defs.append({ "rect": rr, "kind": names[j], "unit": unit_id })
+					links.append([living_idx, idx])
+					off += cuts[j]
+			else:
+				# Service band behind the living room; bedrooms occupy the quiet exterior band.
+				var bath_rect := _oriented_rect(along_x, t, front_cross + away, 1, 1)
+				var kitchen_rect := _oriented_rect(along_x, t + 1, front_cross + away, width - 1, 1)
+				var bath_idx := defs.size()
+				defs.append({ "rect": bath_rect, "kind": "bathroom", "unit": unit_id })
+				var kitchen_idx := defs.size()
+				defs.append({ "rect": kitchen_rect, "kind": "kitchen", "unit": unit_id })
+				links.append([living_idx, bath_idx])
+				links.append([living_idx, kitchen_idx])
+				var bedroom_cross := front_cross + 2 if away > 0 else front_cross - back_depth
+				var bedroom_rect := _oriented_rect(along_x, t, bedroom_cross, width, back_depth - 1)
+				var bedroom_idx := defs.size()
+				defs.append({ "rect": bedroom_rect, "kind": "bedroom", "unit": unit_id })
+				links.append([kitchen_idx, bedroom_idx])
+			t += width
+			unit_id += 1
+
+	# Materialise the semantic room program before choosing door positions.
+	for i in defs.size():
 		var r := FloorPlan.Room.new()
 		r.index = i
-		r.rect = rooms[i][0]
-		r.kind = rooms[i][1]
+		r.rect = defs[i]["rect"]
+		r.kind = defs[i]["kind"]
+		r.unit = defs[i]["unit"]
 		fp.rooms.append(r)
 		for y in range(r.rect.position.y, r.rect.end.y):
 			for x in range(r.rect.position.x, r.rect.end.x):
@@ -294,62 +311,165 @@ static func _plan_apartments(fp: FloorPlan, b: BuildingData, fpr: Rect2, rng: Ra
 		for x in range(stair_rect.position.x, stair_rect.end.x):
 			fp.cell_room[y * fp.cells.x + x] = stair.index
 	fp.stair_room = stair.index
-	var side_v := Vector2i(-along.y, along.x)
-	fp.stair_layout = { "kind": Stairwell.Kind.CORE, "rect": stair_rect, "along": along, "side": side_v }
+	fp.stair_layout = { "kind": Stairwell.Kind.CORE, "rect": stair_rect, "along": along, "side": Vector2i(-along.y, along.x) }
 	fp.stair_cell = Stairwell.entry_cell(fp.stair_layout)
-	# doors: every flat's front room onto the corridor, back rooms into the front room
-	# (queued by _link_back), the stairwell off the corridor's end
-	for ud in unit_doors:
-		var fi: int = ud[0]
-		var dir: Vector2i = ud[1]
-		var fr: Rect2i = fp.rooms[fi].rect
-		# the door goes where the corridor is across the wall; a flat sitting over the
-		# stairwell opens onto its landing (entry cell) instead
-		var onto_corr: Array = []
-		var onto_stair: Array = []
-		for y in range(fr.position.y, fr.end.y):
-			for x in range(fr.position.x, fr.end.x):
-				var c := Vector2i(x, y)
-				var across := fp.room_at_cell(c + dir)
-				if across == 0:
-					onto_corr.append(c)
-				elif across == stair.index and c + dir == fp.stair_cell:
-					onto_stair.append(c)
-		if not onto_corr.is_empty():
-			_add_door(fp, onto_corr[rng.randi_range(0, onto_corr.size() - 1)], dir, fi, 0)
-		elif not onto_stair.is_empty():
-			_add_door(fp, onto_stair[0], dir, fi, stair.index)
-	for link in _pending_links:
-		_add_door(fp, link[0], link[1], link[2], link[3])
-	_pending_links.clear()
-	var entry := fp.stair_cell
-	_add_door(fp, entry, -along, stair.index, 0)
+
+	# Each unit enters through its living room. Units overlapping the core may use its
+	# landing, but never create disconnected slivers.
+	for living_idx in living_rooms:
+		if not _door_between(fp, living_idx, 0, rng):
+			_door_between(fp, living_idx, stair.index, rng)
+	for link in links:
+		_door_between(fp, link[0], link[1], rng)
+	_door_between(fp, stair.index, 0, rng)
 	return true
 
 
-static var _pending_links: Array = []
+static func _unit_widths(length: int, rng: RandomNumberGenerator) -> Array[int]:
+	var out: Array[int] = []
+	var left := length
+	while left > 0:
+		if left <= 5:
+			out.append(left)
+			break
+		var width := rng.randi_range(3, 4)
+		if left - width < 3:
+			width = left - 3
+		out.append(width)
+		left -= width
+	return out
 
 
-## Queue a door from a back room into its front room (they share the row edge).
-static func _link_back(fp: FloorPlan, rooms: Array, front_idx: int, back_idx: int, along_x: bool) -> void:
-	var fr: Rect2i = rooms[front_idx][0]
-	var br: Rect2i = rooms[back_idx][0]
-	# the back room touches the front room along the axis; pick the middle shared cell
-	var cell: Vector2i
-	var dir: Vector2i
-	if along_x:
-		var x := br.position.x + br.size.x / 2
-		if br.position.y < fr.position.y:
-			cell = Vector2i(x, br.end.y - 1); dir = Vector2i(0, 1)
+static func _oriented_rect(along_x: bool, along0: int, cross0: int, along_size: int, cross_size: int) -> Rect2i:
+	return Rect2i(along0, cross0, along_size, cross_size) if along_x else Rect2i(cross0, along0, cross_size, along_size)
+
+
+static func _door_between(fp: FloorPlan, ra: int, rb: int, rng: RandomNumberGenerator) -> bool:
+	var options: Array = []
+	var r := fp.rooms[ra]
+	for y in range(r.rect.position.y, r.rect.end.y):
+		for x in range(r.rect.position.x, r.rect.end.x):
+			var cell := Vector2i(x, y)
+			for dir: Vector2i in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+				if fp.room_at_cell(cell + dir) == rb:
+					options.append([cell, dir])
+	if options.is_empty():
+		return false
+	var pick: Array = options[rng.randi_range(0, options.size() - 1)]
+	_add_door(fp, pick[0], pick[1], ra, rb)
+	return true
+
+
+## Give non-apartment BSP rooms a plausible program based on the generated building use.
+## This is semantic generation, not decoration: the labels drive each room's furniture set.
+static func _assign_bsp_uses(fp: FloorPlan, b: BuildingData, fpr: Rect2, rng: RandomNumberGenerator) -> void:
+	var usable: Array[int] = []
+	for r in fp.rooms:
+		if not r.is_stair:
+			usable.append(r.index)
+	if usable.is_empty():
+		return
+	usable.sort_custom(func(a: int, c: int):
+		var ar: Rect2i = fp.rooms[a].rect
+		var cr: Rect2i = fp.rooms[c].rect
+		return ar.size.x * ar.size.y > cr.size.x * cr.size.y)
+	var entry := fp.room_at_cell(_entrance_cell(b, fp, fpr))
+	if entry < 0 or fp.rooms[entry].is_stair:
+		entry = usable[0]
+	var use := b.kind
+	if use == "plain":
+		if b.district in [District.Kind.RESIDENTIAL, District.Kind.SUBURB]:
+			use = "house"
+		elif b.district == District.Kind.STRIP:
+			use = "shop"
+		elif b.district == District.Kind.INDUSTRIAL:
+			use = "warehouse"
 		else:
-			cell = Vector2i(x, br.position.y); dir = Vector2i(0, -1)
-	else:
-		var y := br.position.y + br.size.y / 2
-		if br.position.x < fr.position.x:
-			cell = Vector2i(br.end.x - 1, y); dir = Vector2i(1, 0)
-		else:
-			cell = Vector2i(br.position.x, y); dir = Vector2i(-1, 0)
-	_pending_links.append([cell, dir, back_idx, front_idx])
+			use = "office"
+	match use:
+		"house":
+			for ri in usable: fp.rooms[ri].kind = "bedroom"
+			fp.rooms[entry].kind = "living"
+			var rest := usable.duplicate()
+			rest.erase(entry)
+			if not rest.is_empty(): fp.rooms[rest[0]].kind = "kitchen"
+			if rest.size() > 1: fp.rooms[rest[-1]].kind = "bathroom"
+		"shop":
+			for ri in usable: fp.rooms[ri].kind = "storage"
+			fp.rooms[entry].kind = "sales"
+			if usable.size() > 1: fp.rooms[usable[-1]].kind = "bathroom"
+			if usable.size() > 2: fp.rooms[usable[1]].kind = "office"
+		"warehouse":
+			for ri in usable: fp.rooms[ri].kind = "storage"
+			fp.rooms[entry].kind = "workshop"
+			if usable.size() > 1: fp.rooms[usable[-1]].kind = "bathroom"
+			if usable.size() > 2: fp.rooms[usable[1]].kind = "office"
+		_:
+			for ri in usable: fp.rooms[ri].kind = "office"
+			fp.rooms[entry].kind = "lobby"
+			if usable.size() > 2: fp.rooms[usable[-1]].kind = "bathroom"
+			if usable.size() > 3 and rng.randf() < 0.7: fp.rooms[usable[1]].kind = "conference"
+
+
+static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator) -> void:
+	for room in fp.rooms:
+		if room.is_stair:
+			continue
+		match room.kind:
+			"bedroom":
+				_add_prop(fp, room.index, "bed", 0.27, 0.34, 1.35, 1.95, 0.52, Color("#c39bd3"))
+				_add_prop(fp, room.index, "nightstand", 0.72, 0.22, 0.48, 0.48, 0.58, Color("#5a3d28"))
+				_add_prop(fp, room.index, "dresser", 0.78, 0.78, 1.05, 0.42, 0.95, Color("#fdba74"))
+			"bathroom":
+				_add_prop(fp, room.index, "toilet", 0.26, 0.30, 0.56, 0.72, 0.72, Color("#fdf6e3"))
+				_add_prop(fp, room.index, "sink", 0.72, 0.25, 0.66, 0.48, 0.86, Color("#99f6e4"))
+				if room.rect.size.x * room.rect.size.y > 1:
+					_add_prop(fp, room.index, "tub", 0.70, 0.73, 0.76, 1.45, 0.55, Color("#b9a4e0"))
+			"kitchen":
+				_add_prop(fp, room.index, "counter", 0.50, 0.18, 1.75, 0.58, 0.92, Color("#fdba74"))
+				_add_prop(fp, room.index, "stove", 0.22, 0.22, 0.62, 0.62, 0.92, Color("#6c6c72"))
+				_add_prop(fp, room.index, "fridge", 0.82, 0.22, 0.72, 0.68, 1.75, Color("#99f6e4"))
+				if room.rect.size.x * room.rect.size.y >= 3:
+					_add_prop(fp, room.index, "table", 0.54, 0.66, 1.15, 0.78, 0.74, Color("#5a3d28"))
+			"living":
+				_add_prop(fp, room.index, "sofa", 0.50, 0.22, 1.75, 0.72, 0.82, Color("#ea580c"))
+				_add_prop(fp, room.index, "coffee_table", 0.50, 0.56, 1.05, 0.62, 0.42, Color("#5a3d28"))
+				_add_prop(fp, room.index, "shelf", 0.82, 0.78, 0.92, 0.34, 1.45, Color("#b9a4e0"))
+			"studio":
+				_add_prop(fp, room.index, "bed", 0.25, 0.32, 1.20, 1.80, 0.50, Color("#c39bd3"))
+				_add_prop(fp, room.index, "counter", 0.72, 0.20, 1.25, 0.52, 0.90, Color("#fdba74"))
+				_add_prop(fp, room.index, "table", 0.66, 0.70, 0.78, 0.78, 0.72, Color("#5a3d28"))
+			"office", "conference", "lobby":
+				_add_prop(fp, room.index, "desk", 0.48, 0.34, 1.35, 0.68, 0.76, Color("#5a3d28"))
+				_add_prop(fp, room.index, "chair", 0.50, 0.62, 0.52, 0.52, 0.92, Color("#6c6c72"))
+				_add_prop(fp, room.index, "cabinet", 0.82, 0.78, 0.82, 0.42, 1.35, Color("#b9a4e0"))
+			"sales":
+				_add_prop(fp, room.index, "counter", 0.52, 0.28, 1.85, 0.62, 0.92, Color("#fdba74"))
+				_add_prop(fp, room.index, "shelf", 0.18, 0.72, 0.75, 1.45, 1.55, Color("#c39bd3"))
+				_add_prop(fp, room.index, "shelf", 0.82, 0.72, 0.75, 1.45, 1.55, Color("#99f6e4"))
+			"storage", "workshop":
+				_add_prop(fp, room.index, "crate", 0.25, 0.25, 0.82, 0.82, 0.82, Color("#5a3d28"))
+				_add_prop(fp, room.index, "crate", 0.72, 0.72, 0.68, 0.68, 0.62, Color("#fdba74"))
+				_add_prop(fp, room.index, "shelf", 0.80, 0.24, 0.62, 1.42, 1.65, Color("#6c6c72"))
+			"hall":
+				if rng.randf() < 0.55:
+					_add_prop(fp, room.index, "bench", 0.50, 0.18, 1.25, 0.42, 0.48, Color("#5a3d28"))
+
+
+static func _add_prop(fp: FloorPlan, ri: int, kind: String, u: float, v: float,
+		sx: float, sz: float, height: float, color: Color, yaw: float = 0.0) -> void:
+	var room := fp.rooms[ri]
+	var p0 := fp.cell_to_world(Vector2(room.rect.position))
+	var p1 := fp.cell_to_world(Vector2(room.rect.end))
+	var prop := FloorPlan.Prop.new()
+	prop.kind = kind
+	prop.room = ri
+	prop.pos = Vector3(lerpf(p0.x, p1.x, u), fp.origin.y + 0.04, lerpf(p0.z, p1.z, v))
+	prop.size = Vector3(minf(sx, maxf(0.35, (p1.x - p0.x) * 0.42)), height,
+		minf(sz, maxf(0.35, (p1.z - p0.z) * 0.42)))
+	prop.yaw = yaw
+	prop.color = color
+	fp.props.append(prop)
 
 
 ## The footprint cell the street door opens into.

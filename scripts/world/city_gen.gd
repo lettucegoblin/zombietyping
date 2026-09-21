@@ -1,17 +1,20 @@
 class_name CityGen
-## Deterministic per-sector city generation. A sector is framed by arterial roads on
-## its top row and left column (the lattice), so its interior can be generated with
-## no knowledge of neighbours: infinite, cacheable, regenerable from (seed, sx, sy).
+## Deterministic per-sector city generation. Neighbouring sectors agree on sparse edge
+## ports, then connect those ports through a continuous global tensor field. This keeps
+## the world infinite/cacheable while avoiding the old square road around every sector.
 ##
 ## Pipeline per sector:
-##   density field -> district -> frame arterials (some hash-demoted to local streets)
-##   -> district-local grid -> prune segments (connectivity-checked) -> cul-de-sacs
+##   density field -> district -> shared boundary ports -> tensor-guided street traces
+##   -> local branches and cul-de-sacs
 ##   -> blocks (flood fill) -> lots (must front a road) -> buildings.
+## Tensor-field approach adapted to a discrete tile graph from the Purdue SIGGRAPH 2011
+## urban-modelling course notes: https://www.cs.purdue.edu/cgvlab/urban/sg_2011_course/umc_SG11_02_urban_layouts.pdf
 
 const S := SectorData.SIZE
 
 static var _noise: FastNoiseLite
 static var _vnoise: FastNoiseLite
+static var _tnoise: FastNoiseLite
 static var _noise_seed := -0x7FFFFFFF
 
 
@@ -31,6 +34,12 @@ static func _noise_for(seed: int) -> FastNoiseLite:
 		_vnoise.fractal_type = FastNoiseLite.FRACTAL_FBM
 		_vnoise.fractal_octaves = 2
 		_vnoise.frequency = 0.16
+		_tnoise = FastNoiseLite.new()
+		_tnoise.seed = seed ^ 0x27d4eb2d
+		_tnoise.noise_type = FastNoiseLite.TYPE_SIMPLEX_SMOOTH
+		_tnoise.fractal_type = FastNoiseLite.FRACTAL_FBM
+		_tnoise.fractal_octaves = 3
+		_tnoise.frequency = 0.006
 		_noise_seed = seed
 	return _noise
 
@@ -50,8 +59,23 @@ static func density_at(seed: int, sx: int, sy: int) -> float:
 	var core := Vector2(4.0, 1.0)
 	var dist2 := Vector2(sx, sy).distance_squared_to(core)
 	d = d * 0.85 + 0.40 * exp(-dist2 / 5.0)
-	# ease the start sector towards mid density (residential edge), never a park
-	d = lerp(d, 0.48, 0.7 * exp(-(sx * sx + sy * sy) / 2.0))
+	# Ease the opening neighbourhood (including the sectors across its borders) toward a
+	# residential edge, so the first visible destinations demonstrate homes/apartments.
+	d = lerp(d, 0.52, 0.9 * exp(-(sx * sx + sy * sy) / 6.0))
+	# Every coarse region contributes a different soft urban centre. The maximum of the
+	# nearby centres produces polycentric growth instead of one infinite downtown blob.
+	var region_size := 12
+	var rx := floori(float(sx) / region_size)
+	var ry := floori(float(sy) / region_size)
+	for oy in range(-1, 2):
+		for ox in range(-1, 2):
+			var crx := rx + ox
+			var cry := ry + oy
+			var cx := crx * region_size + 2.0 + Det.unit(seed, crx, cry, 41) * (region_size - 4.0)
+			var cy := cry * region_size + 2.0 + Det.unit(seed, crx, cry, 42) * (region_size - 4.0)
+			var strength := 0.18 + Det.unit(seed, crx, cry, 43) * 0.28
+			var r2 := Vector2(sx - cx, sy - cy).length_squared()
+			d = maxf(d, 0.18 + strength * exp(-r2 / 18.0))
 	return clampf(d, 0.0, 1.0)
 
 
@@ -70,14 +94,35 @@ static func district_at(seed: int, sx: int, sy: int) -> int:
 	return District.Kind.PARK if u < 0.55 else District.Kind.INDUSTRIAL
 
 
-## Lattice line classes. Vertical line on col 0 of sector (sx, sy); horizontal on row 0.
-## ~30% of segments are demoted to local streets so the lattice reads irregular.
-static func arterial_v(seed: int, sx: int, sy: int) -> int:
-	return 1 if Det.unit(seed, sx, sy, 7) < 0.30 else 2
-
-
-static func arterial_h(seed: int, sx: int, sy: int) -> int:
-	return 1 if Det.unit(seed, sx, sy, 8) < 0.30 else 2
+## Major eigenvector of a continuous, directionless tensor field at a GLOBAL tile point.
+## Double-angle vectors let straight and radial/tangential basis fields blend without the
+## 180-degree sign ambiguity of ordinary direction vectors.
+static func tensor_direction_at(seed: int, tile: Vector2) -> Vector2:
+	_noise_for(seed)
+	var base_angle := (_tnoise.get_noise_2d(tile.x, tile.y) * 0.5 + 0.5) * PI
+	var tx := cos(2.0 * base_angle)
+	var ty := sin(2.0 * base_angle)
+	var core := Vector2(4.5 * S, 1.5 * S)
+	var delta := tile - core
+	var influence := exp(-delta.length_squared() / pow(7.0 * S, 2.0)) * 2.6
+	if delta.length_squared() > 0.01:
+		var tangent := delta.angle() + PI * 0.5
+		tx += cos(2.0 * tangent) * influence
+		ty += sin(2.0 * tangent) * influence
+	# A nearby regional centre adds local curvature and makes distant districts distinct.
+	var span := 10 * S
+	var rx := floori(tile.x / span)
+	var ry := floori(tile.y / span)
+	var rc := Vector2((rx + 0.18 + Det.unit(seed, rx, ry, 61) * 0.64) * span,
+		(ry + 0.18 + Det.unit(seed, rx, ry, 62) * 0.64) * span)
+	var rd := tile - rc
+	var rw := exp(-rd.length_squared() / pow(3.5 * S, 2.0)) * 1.7
+	if rd.length_squared() > 0.01:
+		var radial := rd.angle()
+		tx += cos(2.0 * radial) * rw
+		ty += sin(2.0 * radial) * rw
+	var angle := 0.5 * atan2(ty, tx)
+	return Vector2(cos(angle), sin(angle)).normalized()
 
 
 # ---------------------------------------------------------------- sector
@@ -90,110 +135,150 @@ static func generate(seed: int, sx: int, sy: int) -> SectorData:
 	var p := District.params(sd.district)
 	var rng := Det.rng_for(seed, sx, sy, 100)
 
-	# 1. frame arterials
-	var cv := arterial_v(seed, sx, sy)
-	var ch := arterial_h(seed, sx, sy)
-	for i in S:
-		sd.road[SectorData.idx(0, i)] = cv
-		sd.road[SectorData.idx(i, 0)] = ch
-	sd.road[0] = maxi(cv, ch)
+	# 1. Four sparse, shared edge ports. Each boundary's offset/class depends only on that
+	# boundary, so the independently generated neighbour creates the matching road tile.
+	var ports := [
+		[Vector2i(0, _vertical_port(seed, sx, sy)), _edge_class(seed, sx, sy, 0)],
+		[Vector2i(S - 1, _vertical_port(seed, sx + 1, sy)), _edge_class(seed, sx + 1, sy, 0)],
+		[Vector2i(_horizontal_port(seed, sx, sy), 0), _edge_class(seed, sx, sy, 1)],
+		[Vector2i(_horizontal_port(seed, sx, sy + 1), S - 1), _edge_class(seed, sx, sy + 1, 1)],
+	]
+	var hub := Vector2i(rng.randi_range(S / 2 - 4, S / 2 + 4), rng.randi_range(S / 2 - 4, S / 2 + 4))
+	for entry in ports:
+		var port: Vector2i = entry[0]
+		var cls: int = entry[1]
+		_trace_road(sd, seed, port, hub, cls)
 
-	# 2. district-local grid (lines never hug the frame: keeps 2-tile lots off arterials)
+	# 2. Secondary tensor streamlines branch from the connected spine. District density
+	# controls their count/length; unlike the old grid, they bend with the global field.
 	var sp: int = p["spacing"]
 	if sp > 0:
-		var ox := rng.randi_range(0, sp - 1)
-		var oy := rng.randi_range(0, sp - 1)
-		for y in range(1, S):
-			for x in range(1, S):
-				var on_col := posmod(x - ox, sp) == 0 and x >= 3 and x <= S - 3
-				var on_row := posmod(y - oy, sp) == 0 and y >= 3 and y <= S - 3
-				if on_col or on_row:
-					sd.road[SectorData.idx(x, y)] = 1
-		# 3. prune segments -> bigger, irregular blocks (kept only if network stays connected)
-		_prune_segments(sd, rng, p["drop"])
-		# 4. dead ends: remove, or keep as cul-de-sacs
-		_trim_dead_ends(sd, rng, p["culdesac"])
+		var branch_count := clampi(roundi(float(S) / sp * 1.6), 2, 8)
+		for branch in branch_count:
+			_grow_branch(sd, seed, rng, 5 + rng.randi_range(0, maxi(3, 15 - sp)), branch % 2)
 
-	# 5. blocks
+	# 3. blocks
 	_flood_blocks(sd)
 
-	# 6. lots + buildings
+	# 4. lots + buildings
 	if not (p["lots"] as Array).is_empty():
 		_place_lots(sd, rng, p, seed)
 	return sd
 
 
+static func _vertical_port(seed: int, boundary_x: int, sy: int) -> int:
+	return 4 + floori(Det.unit(seed, boundary_x, sy, 71) * float(S - 8))
+
+
+static func _horizontal_port(seed: int, sx: int, boundary_y: int) -> int:
+	# The player starts on this shared boundary; keep the opening deterministic and on-road.
+	if sx == 0 and boundary_y == 0:
+		return S / 2
+	return 4 + floori(Det.unit(seed, sx, boundary_y, 72) * float(S - 8))
+
+
+static func _edge_class(seed: int, a: int, b: int, axis: int) -> int:
+	return 2 if Det.unit(seed, a, b, 73 + axis) < 0.58 else 1
+
+
+## Monotone Manhattan trace between two points. Both candidate steps get closer, while
+## the tensor alignment and a turn penalty decide which one wins. This is the discrete
+## hyperstreamline equivalent appropriate for the game's tile navigation graph.
+static func _trace_road(sd: SectorData, seed: int, start: Vector2i, target: Vector2i, cls: int) -> void:
+	var cur := start
+	var last := Vector2i.ZERO
+	var org := sd.origin_tile()
+	var family := 0
+	var first_delta := target - start
+	var at_start := tensor_direction_at(seed, Vector2(org + start))
+	if absf(at_start.dot(Vector2(first_delta).normalized())) < absf(Vector2(-at_start.y, at_start.x).dot(Vector2(first_delta).normalized())):
+		family = 1
+	while cur != target:
+		sd.road[SectorData.idx(cur.x, cur.y)] = maxi(sd.road[SectorData.idx(cur.x, cur.y)], cls)
+		# Leave a shared edge immediately. Otherwise a trace may run along the seam and
+		# create tiles its independently generated neighbour cannot mirror.
+		if cur == start and (cur.x == 0 or cur.x == S - 1 or cur.y == 0 or cur.y == S - 1):
+			var inward := Vector2i(signi(target.x - cur.x), 0) if cur.x in [0, S - 1] else Vector2i(0, signi(target.y - cur.y))
+			cur += inward
+			last = inward
+			continue
+		var options: Array[Vector2i] = []
+		if cur.x != target.x:
+			options.append(Vector2i(signi(target.x - cur.x), 0))
+		if cur.y != target.y:
+			options.append(Vector2i(0, signi(target.y - cur.y)))
+		var field := tensor_direction_at(seed, Vector2(org + cur))
+		if family == 1:
+			field = Vector2(-field.y, field.x)
+		var best := options[0]
+		var best_score := -INF
+		for dir in options:
+			var align := absf(field.dot(Vector2(dir)))
+			var keep := 0.22 if dir == last else 0.0
+			var jitter := Det.unit(seed, org.x + cur.x, org.y + cur.y, 80 + dir.x * 3 + dir.y) * 0.08
+			var score := align + keep + jitter
+			if score > best_score:
+				best_score = score
+				best = dir
+		cur += best
+		last = best
+	sd.road[SectorData.idx(target.x, target.y)] = maxi(sd.road[SectorData.idx(target.x, target.y)], cls)
+
+
+static func _road_tiles(sd: SectorData) -> Array[Vector2i]:
+	var out: Array[Vector2i] = []
+	for y in range(1, S - 1):
+		for x in range(1, S - 1):
+			if sd.road[SectorData.idx(x, y)] != 0:
+				out.append(Vector2i(x, y))
+	return out
+
+
+static func _grow_branch(sd: SectorData, seed: int, rng: RandomNumberGenerator, length: int, family: int) -> void:
+	var roads := _road_tiles(sd)
+	if roads.is_empty():
+		return
+	var cur: Vector2i = roads[rng.randi_range(0, roads.size() - 1)]
+	var org := sd.origin_tile()
+	var heading := tensor_direction_at(seed, Vector2(org + cur))
+	if family == 1:
+		heading = Vector2(-heading.y, heading.x)
+	if rng.randf() < 0.5:
+		heading = -heading
+	for step in length:
+		var field := tensor_direction_at(seed, Vector2(org + cur))
+		if family == 1:
+			field = Vector2(-field.y, field.x)
+		if heading.dot(field) < 0.0:
+			field = -field
+		heading = heading.lerp(field, 0.35).normalized()
+		var primary := Vector2i(signi(roundi(heading.x)), 0) if absf(heading.x) >= absf(heading.y) else Vector2i(0, signi(roundi(heading.y)))
+		var secondary := Vector2i(0, signi(roundi(heading.y))) if primary.x != 0 else Vector2i(signi(roundi(heading.x)), 0)
+		var dir := primary if step % 3 != 2 or secondary == Vector2i.ZERO else secondary
+		if dir == Vector2i.ZERO:
+			break
+		var nxt := cur + dir
+		if nxt.x < 2 or nxt.y < 2 or nxt.x >= S - 2 or nxt.y >= S - 2:
+			break
+		if sd.road[SectorData.idx(nxt.x, nxt.y)] != 0 and step > 2:
+			break
+		cur = nxt
+		sd.road[SectorData.idx(cur.x, cur.y)] = 1
+
+
 # ---------------------------------------------------------------- helpers
 
 static func _is_road(sd: SectorData, x: int, y: int) -> bool:
-	# Tiles at x == S or y == S are the next sector's framing arterial: always road.
-	if x == S or y == S:
-		return true
-	if x < 0 or y < 0:
+	if x < 0 or y < 0 or x >= S or y >= S:
 		return false
 	return sd.road[SectorData.idx(x, y)] != 0
-
-
-static func _degree(sd: SectorData, x: int, y: int) -> int:
-	var d := 0
-	if _is_road(sd, x + 1, y): d += 1
-	if _is_road(sd, x - 1, y): d += 1
-	if _is_road(sd, x, y + 1): d += 1
-	if _is_road(sd, x, y - 1): d += 1
-	return d
-
-
-static func _is_node(sd: SectorData, x: int, y: int) -> bool:
-	return _is_road(sd, x, y) and _degree(sd, x, y) != 2
 
 
 const DIRS := [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 
 
-## Local-road segments (runs of degree-2 tiles between two nodes), interior only.
-static func _segments(sd: SectorData) -> Array:
-	var segs := []
-	var seen := {}
-	for y in range(1, S):
-		for x in range(1, S):
-			if not _is_node(sd, x, y):
-				continue
-			for d in DIRS:
-				var cx: int = x + d.x
-				var cy: int = y + d.y
-				var px := x
-				var py := y
-				var path: Array[Vector2i] = []
-				while cx >= 1 and cy >= 1 and cx < S and cy < S and _is_road(sd, cx, cy) and not _is_node(sd, cx, cy):
-					path.append(Vector2i(cx, cy))
-					var nxt := Vector2i(-1, -1)
-					for d2 in DIRS:
-						var ax: int = cx + d2.x
-						var ay: int = cy + d2.y
-						if Vector2i(ax, ay) == Vector2i(px, py):
-							continue
-						if _is_road(sd, ax, ay):
-							nxt = Vector2i(ax, ay)
-							break
-					if nxt.x < 0:
-						break
-					px = cx
-					py = cy
-					cx = nxt.x
-					cy = nxt.y
-				if path.is_empty():
-					continue
-				var k := path[0] if path[0] < path[-1] else path[-1]
-				var k2 := path[-1] if path[0] < path[-1] else path[0]
-				var key := "%d,%d-%d,%d" % [k.x, k.y, k2.x, k2.y]
-				if seen.has(key):
-					continue
-				seen[key] = true
-				segs.append(path)
-	return segs
-
-
-## Every road tile must reach the arterial frame (own frame, or the neighbours' via x/y == S).
+## Verify that every generated road tile reaches one of the sector's shared edge ports.
+## Kept public-to-the-script so the generator invariant test can exercise it directly.
 static func _connected(sd: SectorData) -> bool:
 	var seen := PackedByteArray()
 	seen.resize(S * S)
@@ -220,39 +305,6 @@ static func _connected(sd: SectorData) -> bool:
 				reached += 1
 				q.append(n)
 	return reached == total
-
-
-static func _prune_segments(sd: SectorData, rng: RandomNumberGenerator, drop: float) -> void:
-	for path in _segments(sd):
-		var all_local := true
-		for t in path:
-			if sd.road[SectorData.idx(t.x, t.y)] != 1:
-				all_local = false
-				break
-		if not all_local or rng.randf() >= drop:
-			continue
-		for t in path:
-			sd.road[SectorData.idx(t.x, t.y)] = 0
-		if not _connected(sd):
-			for t in path:
-				sd.road[SectorData.idx(t.x, t.y)] = 1
-
-
-static func _trim_dead_ends(sd: SectorData, rng: RandomNumberGenerator, keep_p: float) -> void:
-	var keep := {}
-	var changed := true
-	while changed:
-		changed = false
-		for y in range(1, S):
-			for x in range(1, S):
-				var i := SectorData.idx(x, y)
-				if sd.road[i] != 1 or keep.has(i) or _degree(sd, x, y) > 1:
-					continue
-				if keep_p > 0.0 and rng.randf() < keep_p:
-					keep[i] = true
-					continue
-				sd.road[i] = 0
-				changed = true
 
 
 static func _flood_blocks(sd: SectorData) -> void:
@@ -310,7 +362,9 @@ static func _place_lots(sd: SectorData, rng: RandomNumberGenerator, p: Dictionar
 				var best_door := Vector2i(-1, -1)
 				var best_road := Vector2i(-1, -1)
 				var best_class := 0
+				var best_score := -INF
 				var blk := sd.block[i0]
+				var lot_center := Vector2(x + w * 0.5, y + h * 0.5)
 				for yy in range(y, y + h):
 					for xx in range(x, x + w):
 						var i := SectorData.idx(xx, yy)
@@ -322,8 +376,12 @@ static func _place_lots(sd: SectorData, rng: RandomNumberGenerator, p: Dictionar
 							var ny: int = yy + d.y
 							if _is_road(sd, nx, ny):
 								fronts = true
-								var cls := 2 if (nx == S or ny == S) else sd.road[SectorData.idx(nx, ny)]
-								if cls > best_class:
+								var cls := sd.road[SectorData.idx(nx, ny)]
+								# Prefer arterials, then the middle of a facade. Centred doors make
+								# the apartment lobby/corridor relationship legible.
+								var score := cls * 20.0 - Vector2(xx + 0.5, yy + 0.5).distance_to(lot_center)
+								if score > best_score:
+									best_score = score
 									best_class = cls
 									best_door = Vector2i(xx, yy)
 									best_road = Vector2i(nx, ny)
@@ -347,11 +405,21 @@ static func _place_lots(sd: SectorData, rng: RandomNumberGenerator, p: Dictionar
 					# skew low so towers are the exception, not the rule
 					var t := rng.randf()
 					b.floors = fmin + int(round((fmax - fmin) * t * t))
-					# some residential / downtown lots are apartment blocks (3-5 storeys of flats
-					# off a corridor); decided from the hash so the rng stream stays put
-					if (sd.district == District.Kind.RESIDENTIAL or sd.district == District.Kind.DOWNTOWN) and w * h >= 6 and (b.seed_hash >> 12) % 100 < 35:
-						b.kind = "apartments"
-						b.floors = 3 + (b.seed_hash >> 20) % 3
+					# Building use is procedural data, not inferred later from facade colour.
+					var roll := (b.seed_hash >> 12) % 100
+					match sd.district:
+						District.Kind.DOWNTOWN:
+							b.kind = "apartments" if w >= 3 and h >= 3 and roll < 52 else "office"
+						District.Kind.RESIDENTIAL:
+							b.kind = "apartments" if w >= 3 and h >= 3 and roll < 48 else "house"
+						District.Kind.SUBURB:
+							b.kind = "house"
+						District.Kind.STRIP:
+							b.kind = "shop"
+						District.Kind.INDUSTRIAL:
+							b.kind = "warehouse"
+					if b.kind == "apartments":
+						b.floors = 3 + (b.seed_hash >> 20) % 4
 					b.door_tile = origin + best_door
 					b.road_tile = origin + best_road
 					sd.buildings.append(b)
