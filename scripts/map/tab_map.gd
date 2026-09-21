@@ -29,6 +29,9 @@ var _msg_until := 0.0
 var _selected_id := ""
 var _building_hitboxes: Array[Dictionary] = []
 var _action_hitboxes: Array[Dictionary] = []
+var _supply_route_cache: Array[Dictionary] = []
+var _supply_topology_key := ""
+var _supply_route_build_count := 0  # exposed to focused tests; never used by gameplay
 
 var buffer := ""                      # what the player has typed (we own key handling: typing game)
 var _view_key := ""                   # cache key of the last label recompute
@@ -49,6 +52,8 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	World.sector_generated.connect(func(_sd): _invalidate())
+	World.settlement_changed.connect(_sync_supply_route_cache)
+	_sync_supply_route_cache()
 
 
 func _process(_dt: float) -> void:
@@ -120,6 +125,19 @@ func _input(event: InputEvent) -> void:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton:
+		# The building panel is opaque UI, not part of the pannable map. Consume every
+		# mouse button over it so hidden building labels, zoom, and drag never leak through.
+		if _panel_rect().has_point(event.position):
+			_dragging = false
+			if event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+				for hit in _action_hitboxes:
+					if (hit["rect"] as Rect2).has_point(event.position):
+						flash(World.settlement_action(hit["action"], _selected_id))
+						_invalidate()
+						accept_event()
+						return
+			accept_event()
+			return
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP or event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			var before := _screen_to_tile(event.position)
 			_ppt = clampf(_ppt * (1.15 if event.button_index == MOUSE_BUTTON_WHEEL_UP else 1.0 / 1.15), MIN_PPT, MAX_PPT)
@@ -128,12 +146,6 @@ func _gui_input(event: InputEvent) -> void:
 			_invalidate()
 		elif event.button_index == MOUSE_BUTTON_LEFT:
 			if event.pressed:
-				for hit in _action_hitboxes:
-					if (hit["rect"] as Rect2).has_point(event.position):
-						flash(World.settlement_action(hit["action"], _selected_id))
-						_invalidate()
-						accept_event()
-						return
 				for hit in _building_hitboxes:
 					if (hit["rect"] as Rect2).has_point(event.position):
 						_selected_id = hit["id"]
@@ -144,9 +156,13 @@ func _gui_input(event: InputEvent) -> void:
 				_dragging = true
 			else:
 				_dragging = false
-	elif event is InputEventMouseMotion and _dragging:
-		_center -= event.relative / _ppt
-		_invalidate()
+	elif event is InputEventMouseMotion:
+		if _panel_rect().has_point(event.position):
+			_dragging = false
+			accept_event()
+		elif _dragging:
+			_center -= event.relative / _ppt
+			_invalidate()
 
 
 func _on_submit(text: String) -> void:
@@ -189,6 +205,136 @@ func _tile_to_screen(t: Vector2) -> Vector2:
 
 func _screen_to_tile(p: Vector2) -> Vector2:
 	return (p - size * 0.5) / _ppt + _center
+
+
+func _panel_rect() -> Rect2:
+	var panel_w := minf(350.0, size.x * 0.36)
+	return Rect2(Vector2(size.x - panel_w - 12.0, 42.0), Vector2(panel_w, size.y - 160.0))
+
+
+# ------------------------------------------------------------------ supply route cache
+
+func _supply_topology_signature() -> String:
+	var links: Array[String] = []
+	for link in World.supply_links:
+		var ids: Array[String] = []
+		for id in link:
+			ids.append(str(id))
+		links.append("\u001f".join(ids))
+	return "%d|%s" % [World.seed, "\u001e".join(links)]
+
+
+## Route finding is intentionally excluded from _draw: the map redraws continuously while
+## open for its blinking caret. Rebuild only when the ordered supply topology changes.
+func _sync_supply_route_cache() -> void:
+	var topology := _supply_topology_signature()
+	if topology == _supply_topology_key:
+		return
+	_supply_topology_key = topology
+	_supply_route_cache.clear()
+	for i in World.supply_links.size():
+		var link: PackedStringArray = World.supply_links[i]
+		if link.size() < 2:
+			continue
+		var a := World.building_by_id(link[0])
+		var b := World.building_by_id(link[1])
+		if a == null or b == null:
+			continue
+		var points := PackedVector2Array()
+		if a.road_tile == b.road_tile:
+			points.append(Vector2(a.road_tile) + Vector2(0.5, 0.5))
+		else:
+			_supply_route_build_count += 1
+			points = _simplify_supply_path(World.find_path(a.road_tile, b.road_tile))
+		var status := "route" if points.size() >= 2 else ("point" if points.size() == 1 else "broken")
+		_supply_route_cache.append({
+			"index": i,
+			"source_id": link[0],
+			"target_id": link[1],
+			"points": points,
+			"source": Vector2(a.road_tile) + Vector2(0.5, 0.5),
+			"target": Vector2(b.road_tile) + Vector2(0.5, 0.5),
+			"status": status,
+		})
+	queue_redraw()
+
+
+func _simplify_supply_path(path: Array[Vector2i]) -> PackedVector2Array:
+	var points := PackedVector2Array()
+	if path.is_empty():
+		return points
+	points.append(Vector2(path[0]) + Vector2(0.5, 0.5))
+	for i in range(1, path.size() - 1):
+		var before := path[i] - path[i - 1]
+		var after := path[i + 1] - path[i]
+		if before != after:
+			points.append(Vector2(path[i]) + Vector2(0.5, 0.5))
+	if path.size() > 1:
+		points.append(Vector2(path[path.size() - 1]) + Vector2(0.5, 0.5))
+	return points
+
+
+func _draw_supply_routes() -> void:
+	_sync_supply_route_cache()
+	var color := Color("#68d5ff", 0.9)
+	var width := maxf(2.0, _ppt * 0.18)
+	for route in _supply_route_cache:
+		var tile_points: PackedVector2Array = route["points"]
+		var points := PackedVector2Array()
+		for p in tile_points:
+			points.append(_tile_to_screen(p))
+		match route["status"]:
+			"route":
+				draw_polyline(points, color, width)
+				_draw_supply_endpoints(points, color, width)
+			"point":
+				# A zero-length valid link still needs a readable map mark.
+				var p := points[0]
+				draw_circle(p, maxf(4.0, width * 1.8), Color("#17131f"))
+				draw_circle(p, maxf(2.5, width), color)
+			"broken":
+				# Corrupt/stale links should be conspicuous rather than silently disappearing.
+				_draw_broken_supply(_tile_to_screen(route["source"]), _tile_to_screen(route["target"]), width)
+
+
+func _draw_supply_endpoints(points: PackedVector2Array, color: Color, width: float) -> void:
+	var start := points[0]
+	var finish := points[points.size() - 1]
+	draw_circle(start, maxf(2.5, width * 1.15), color)
+	var direction := (finish - points[points.size() - 2]).normalized()
+	if direction.is_zero_approx():
+		draw_circle(finish, maxf(2.5, width * 1.15), color, false, maxf(1.0, width * 0.6))
+		return
+	var side := Vector2(-direction.y, direction.x)
+	var length := maxf(7.0, width * 3.2)
+	var arrow := PackedVector2Array([
+		finish,
+		finish - direction * length + side * length * 0.48,
+		finish - direction * length - side * length * 0.48,
+	])
+	draw_colored_polygon(arrow, color)
+
+
+func _draw_broken_supply(a: Vector2, b: Vector2, width: float) -> void:
+	var color := Color("#ff6f91", 0.9)
+	var delta := b - a
+	var distance := delta.length()
+	if distance < 0.5:
+		draw_circle(a, maxf(4.0, width * 1.8), color, false, maxf(1.5, width))
+		return
+	var direction := delta / distance
+	var dash := 9.0
+	# Bound work for a stale link whose endpoints are far outside the current view.
+	var stride := maxf(dash * 2.0, distance / 128.0)
+	var cursor := 0.0
+	while cursor < distance:
+		var end := minf(cursor + minf(dash, stride * 0.5), distance)
+		draw_line(a + direction * cursor, a + direction * end, color, width)
+		cursor += stride
+	var mid := (a + b) * 0.5
+	var mark := maxf(4.0, width * 1.5)
+	draw_line(mid - Vector2(mark, mark), mid + Vector2(mark, mark), color, width)
+	draw_line(mid + Vector2(mark, -mark), mid + Vector2(-mark, mark), color, width)
 
 
 # ------------------------------------------------------------------ textures
@@ -306,19 +452,7 @@ func _draw() -> void:
 		var pos := _tile_to_screen(Vector2(sd.origin_tile()))
 		draw_texture_rect(fog_texture(sd.coord), Rect2(pos, sec_px), false)
 	# routes
-	for link in World.supply_links:
-		if link.size() < 2:
-			continue
-		var a := World.building_by_id(link[0])
-		var b := World.building_by_id(link[1])
-		if a == null or b == null:
-			continue
-		var supply_path := World.find_path(a.road_tile, b.road_tile)
-		if supply_path.size() >= 2:
-			var supply_pts := PackedVector2Array()
-			for t in supply_path:
-				supply_pts.append(_tile_to_screen(Vector2(t) + Vector2(0.5, 0.5)))
-			draw_polyline(supply_pts, Color("#68d5ff", 0.9), maxf(2.0, _ppt * 0.18))
+	_draw_supply_routes()
 	if player != null:
 		var li := 0
 		for path in player.all_paths():
@@ -367,8 +501,7 @@ func _draw() -> void:
 
 
 func _draw_building_panel(font: Font) -> void:
-	var panel_w := minf(350.0, size.x * 0.36)
-	var pr := Rect2(Vector2(size.x - panel_w - 12.0, 42.0), Vector2(panel_w, size.y - 160.0))
+	var pr := _panel_rect()
 	draw_rect(pr, Color("#17131f", 0.96))
 	draw_rect(pr, Color("#8067a8"), false, 2.0)
 	var x := pr.position.x + 16.0
