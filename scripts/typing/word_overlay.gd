@@ -35,6 +35,7 @@ func _draw() -> void:
 	var vp_size := Vector2(viewport.size)
 	var scale := size / vp_size if vp_size.x > 0.0 else Vector2.ONE
 	var inner := Rect2(EDGE_MARGIN, size - EDGE_MARGIN * 2.0)
+	var items: Array[Dictionary] = []
 	for n in get_tree().get_nodes_in_group("words"):
 		var w: WordLabel = n
 		if not w.is_visible_in_tree() or w.word == "":
@@ -79,12 +80,13 @@ func _draw() -> void:
 		var y := sp.y + fs * 0.35
 		var oc := LOCK if w.locked else INK
 		var osz := maxi(3, int(fs * 0.14))
+		var tip := Vector2.ZERO
+		var d := Vector2.ZERO
+		var s := fs * 0.55
 		if arrow != Vector2.ZERO:
 			# pinned: the arrow sits against the screen edge, the word just inside it
-			var s := fs * 0.55
 			var horizontal := absf(arrow.x) >= absf(arrow.y)
-			var d := Vector2(signf(arrow.x), 0.0) if horizontal else Vector2(0.0, signf(arrow.y))
-			var tip: Vector2
+			d = Vector2(signf(arrow.x), 0.0) if horizontal else Vector2(0.0, signf(arrow.y))
 			if horizontal:
 				tip = Vector2(size.x - 6.0 if d.x > 0.0 else 6.0, clampf(sp.y, 40.0, size.y - 40.0))
 				x = (tip.x - s * 1.25 - (wt + wr) - 4.0) if d.x > 0.0 else (tip.x + s * 1.25 + 4.0)
@@ -93,24 +95,139 @@ func _draw() -> void:
 				tip = Vector2(clampf(sp.x, 60.0, size.x - 60.0), size.y - 6.0 if d.y > 0.0 else 6.0)
 				x = tip.x - (wt + wr) * 0.5
 				y = (tip.y - s * 1.25 - 6.0) if d.y > 0.0 else (tip.y + s * 1.25 + fs * 0.9)
-			_draw_arrow(tip, d, s, w.typed > 0)
-		var typed_col := RETIRED if w.retired else GOLD
-		var rest_col := RETIRED if w.retired else (GOLD if w.recommended else CREAM)
+		var marker_width := 0.0
 		if w.recommended and not w.retired:
-			var marker := "▶"
-			var mw := _font.get_string_size(marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-			draw_string_outline(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, INK)
-			draw_string(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, GOLD)
-		if t != "":
-			draw_string_outline(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, oc)
-			draw_string(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, typed_col)
-		if r != "":
-			draw_string_outline(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, oc)
-			draw_string(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, rest_col)
-		if w.retired:
-			var strike_y := y - fs * 0.28
-			draw_line(Vector2(x - 2.0, strike_y), Vector2(x + wt + wr + 2.0, strike_y), INK, 6.0)
-			draw_line(Vector2(x - 2.0, strike_y), Vector2(x + wt + wr + 2.0, strike_y), RETIRED, 2.0)
+			marker_width = _font.get_string_size("▶", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 7.0
+		var rect := Rect2(Vector2(x - marker_width, y - fs * 0.9), Vector2(wt + wr + marker_width, fs * 1.18)).grow(osz + 2.0)
+		items.append({
+			"label": w, "typed_text": t, "rest_text": r, "typed_width": wt,
+			"rest_width": wr, "x": x, "y": y, "font_size": fs, "outline": osz,
+			"outline_color": oc, "tip": tip, "direction": d, "arrow_size": s,
+			"base_rect": rect, "offset": Vector2.ZERO,
+			"priority": (2000 if w.typed > 0 else 0) + (1000 if w.locked else 0)
+				+ (250 if w.recommended else 0) + (0 if w.retired else 100),
+			"stable_id": w.get_instance_id(),
+		})
+
+	_resolve_nudges(items, Rect2(Vector2(8.0, 8.0), size - Vector2(16.0, 16.0)))
+	for item in items:
+		if item.get("layout_visible", true):
+			_draw_word_item(item)
+
+
+func _draw_word_item(item: Dictionary) -> void:
+	var w: WordLabel = item["label"]
+	var offset: Vector2 = item["offset"]
+	var x: float = item["x"] + offset.x
+	var y: float = item["y"] + offset.y
+	var fs: int = item["font_size"]
+	var osz: int = item["outline"]
+	var t: String = item["typed_text"]
+	var r: String = item["rest_text"]
+	var wt: float = item["typed_width"]
+	var tip: Vector2 = item["tip"] + offset
+	var d: Vector2 = item["direction"]
+	if d != Vector2.ZERO:
+		_draw_arrow(tip, d, float(item["arrow_size"]), w.typed > 0)
+	# Gold once again means "these letters have been typed". A recommendation keeps its
+	# gold chevron, but no longer paints the untyped suffix gold and masks progress.
+	var typed_col := GOLD
+	var rest_col := RETIRED if w.retired else CREAM
+	if w.recommended and not w.retired:
+		var marker := "▶"
+		var mw := _font.get_string_size(marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		draw_string_outline(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, INK)
+		draw_string(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, GOLD)
+	if t != "":
+		draw_string_outline(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, item["outline_color"])
+		draw_string(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, typed_col)
+	if r != "":
+		draw_string_outline(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, item["outline_color"])
+		draw_string(_font, Vector2(x + wt, y), r, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, rest_col)
+	if w.retired:
+		var strike_y := y - fs * 0.28
+		var word_width: float = item["typed_width"] + item["rest_width"]
+		draw_line(Vector2(x - 2.0, strike_y), Vector2(x + word_width + 2.0, strike_y), INK, 6.0)
+		draw_line(Vector2(x - 2.0, strike_y), Vector2(x + word_width + 2.0, strike_y), RETIRED, 2.0)
+
+
+## Resolve labels in priority order. Active typing and route recommendations keep their
+## anchors; other words try increasingly broad vertical/diagonal offsets. Edge hints move
+## only along their edge, so their arrows continue pointing in the correct direction.
+func _resolve_nudges(items: Array[Dictionary], bounds: Rect2) -> void:
+	items.sort_custom(func(a: Dictionary, b: Dictionary):
+		if int(a["priority"]) != int(b["priority"]):
+			return int(a["priority"]) > int(b["priority"])
+		return int(a["stable_id"]) < int(b["stable_id"])
+	)
+	var placed: Array[Rect2] = []
+	for item in items:
+		var offsets := _nudge_offsets(item)
+		var best_offset := Vector2.ZERO
+		var best_rect: Rect2 = item["base_rect"]
+		var best_score := INF
+		var found_slot := false
+		for raw_offset in offsets:
+			var offset: Vector2 = raw_offset
+			var rect: Rect2 = item["base_rect"]
+			rect.position += offset
+			offset += _fit_rect(rect, bounds, item["direction"])
+			rect = item["base_rect"]
+			rect.position += offset
+			var overlap := 0.0
+			for other in placed:
+				if rect.intersects(other, true):
+					overlap += rect.intersection(other).get_area()
+			var score := overlap * 1000.0 + offset.length_squared() * 0.01
+			if score < best_score:
+				best_score = score
+				best_offset = offset
+				best_rect = rect
+			if overlap <= 0.001:
+				found_slot = true
+				break
+		item["offset"] = best_offset
+		item["layout_visible"] = found_slot
+		if found_slot:
+			placed.append(best_rect)
+
+
+func _nudge_offsets(item: Dictionary) -> Array[Vector2]:
+	var offsets: Array[Vector2] = [Vector2.ZERO]
+	var rect: Rect2 = item["base_rect"]
+	var step := maxf(28.0, rect.size.y + 7.0)
+	var d: Vector2 = item["direction"]
+	for ring in range(1, 11):
+		var amount := step * ring
+		if absf(d.x) > 0.5: # left/right edge: slide vertically
+			offsets.append(Vector2(0, -amount))
+			offsets.append(Vector2(0, amount))
+		elif absf(d.y) > 0.5: # top/bottom edge: slide horizontally
+			offsets.append(Vector2(-amount, 0))
+			offsets.append(Vector2(amount, 0))
+		else:
+			offsets.append(Vector2(0, -amount))
+			offsets.append(Vector2(0, amount))
+			offsets.append(Vector2(-amount * 0.72, -amount * 0.72))
+			offsets.append(Vector2(amount * 0.72, -amount * 0.72))
+			offsets.append(Vector2(-amount, 0))
+			offsets.append(Vector2(amount, 0))
+	return offsets
+
+
+func _fit_rect(rect: Rect2, bounds: Rect2, edge_direction: Vector2) -> Vector2:
+	var correction := Vector2.ZERO
+	if absf(edge_direction.x) <= 0.5:
+		if rect.position.x < bounds.position.x:
+			correction.x += bounds.position.x - rect.position.x
+		elif rect.end.x > bounds.end.x:
+			correction.x -= rect.end.x - bounds.end.x
+	if absf(edge_direction.y) <= 0.5:
+		if rect.position.y < bounds.position.y:
+			correction.y += bounds.position.y - rect.position.y
+		elif rect.end.y > bounds.end.y:
+			correction.y -= rect.end.y - bounds.end.y
+	return correction
 
 
 ## Screen anchor of a world point for a label with `keep`: {pos, on_screen}. Shared with

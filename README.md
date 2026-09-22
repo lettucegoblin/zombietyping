@@ -58,6 +58,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_room_visibility.tscn` | unrevealed structural occlusion, hidden-room encounter visibility, and furniture sprite alpha |
+| `scenes/tests/test_word_overlay_layout.tscn` | typed-prefix priority, collision-free label nudging, and edge-hint sliding constraints |
 | `scenes/tests/test_citizen_navigation.tscn` | deterministic yard routing around buildings, farms, walls and furniture, plus rebuild-position preservation |
 | `scenes/tests/test_rescue_loop.tscn` | deterministic semantic-room survivor target, rescue-priority guidance, typed `help`, directional cue lifecycle, pending roster, save/load, base assignment, and named citizens |
 | `scenes/tests/test_survivor_cue.tscn` | stable positional rescue cadence, range gating, 3D attenuation/panning, movement, and permanent shutdown on resolution |
