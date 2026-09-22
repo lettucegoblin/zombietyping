@@ -9,6 +9,7 @@ func _ready() -> void:
 	World.persistence_enabled = false
 	World.state.clear()
 	_check_entrance_lanes()
+	_check_ceiling_palette()
 	var b: BuildingData = World.get_sector(0, 0).buildings[2]
 	var interior = load("res://scripts/interior/interior.gd").new()
 	add_child(interior)
@@ -48,7 +49,7 @@ func _ready() -> void:
 		_check(not image.is_empty() and image.get_pixel(0, 0).a < 0.01, "%s has an opaque background" % path)
 
 	if not _failed:
-		print("ROOM VISIBILITY OK  safe entrance lanes + structural occlusion + hidden encounters + transparent props")
+		print("ROOM VISIBILITY OK  safe entrance lanes + room-tinted ceilings + structural occlusion + hidden encounters + transparent props")
 	get_tree().quit(1 if _failed else 0)
 
 
@@ -82,6 +83,12 @@ func _check_entrance_lanes() -> void:
 func _room_at(fp: FloorPlan, p: Vector3) -> int:
 	var c := Vector2i(floori((p.x - fp.origin.x) / fp.cell_size.x), floori((p.z - fp.origin.z) / fp.cell_size.y))
 	return fp.room_at_cell(c)
+
+
+func _check_ceiling_palette() -> void:
+	for wall_col in InteriorMesher.WALL_COLS:
+		var ceiling := InteriorMesher.ceiling_color(wall_col)
+		_check(ceiling.is_equal_approx(wall_col), "ceiling lost its room wall swatch")
 
 
 func _check(ok: bool, message: String) -> void:

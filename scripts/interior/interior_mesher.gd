@@ -25,6 +25,14 @@ static func wall_color(b: BuildingData, ri: int) -> Color:
 	return WALL_COLS[(b.seed_hash >> (ri % 5)) % WALL_COLS.size()]
 
 
+## Ceilings use the room's exact wall swatch instead of one global cream slab. With a
+## horizontal first-person camera the ceiling projects down to the tops of distant
+## openings; a white slab therefore reads like a missing lintel even though the wall
+## geometry is present. The exact palette swatch also survives the quantization pass.
+static func ceiling_color(wall_col: Color) -> Color:
+	return wall_col
+
+
 static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictionary) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Room_%d" % ri
@@ -47,7 +55,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 		if fp.floor < fp.floors_total - 1:
 			ceil_hole = Stairwell.shaft_rect(fp, fp.stair_layout, fp.floor)
 	_slab(st, slab, p00.y + 0.02, Vector3.UP, FLOOR_COL[b.district], floor_hole)
-	_slab(st, slab, p00.y + H - 0.06, Vector3.DOWN, CEIL_COL, ceil_hole)
+	_slab(st, slab, p00.y + H - 0.06, Vector3.DOWN, ceiling_color(wall_col), ceil_hole)
 
 	# walls, cell edge by cell edge
 	var fpr := InteriorGen.footprint(b)
