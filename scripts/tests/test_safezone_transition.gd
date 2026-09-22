@@ -52,6 +52,19 @@ func _run() -> void:
 	if not street.is_queued_for_deletion():
 		_fail("the retained street zombie was not removed")
 		return
+	World.add_materials({ "wood": 10 })
+	main.settlement.build_index = Settlement.BUILD_KINDS.find("crate")
+	_press(main, KEY_B)
+	var cursor_start: Vector3 = main.settlement._ghost_root.position
+	_press(main, KEY_RIGHT)
+	if not is_equal_approx(main.settlement._ghost_root.position.distance_to(cursor_start), Settlement.NUDGE_STEP):
+		_fail("safe-zone arrow input did not nudge the build cursor")
+		return
+	_press(main, KEY_C)
+	if not main.settlement._ghost_root.position.is_equal_approx(cursor_start):
+		_fail("safe-zone C input did not recenter the build cursor")
+		return
+	_press(main, KEY_ESCAPE)
 	var gate_dir := Vector2(b.road_tile - b.door_tile).normalized()
 	var gate_world := World.tile_to_world(b.road_tile)
 	main.player.global_position = gate_world + Vector3(gate_dir.x, 0, gate_dir.y) * 1.9
@@ -94,8 +107,15 @@ func _run() -> void:
 		_fail("safe-zone stash control did not deposit carried loot")
 		return
 
-	print("SAFEZONE TRANSITION OK  gate exit + multi-storey free roam + backpack controls")
+	print("SAFEZONE TRANSITION OK  build cursor input + gate exit + multi-storey free roam + backpack controls")
 	get_tree().quit(0)
+
+
+func _press(main: Node, keycode: Key) -> void:
+	var event := InputEventKey.new()
+	event.pressed = true
+	event.keycode = keycode
+	main._unhandled_input(event)
 
 
 func _fail(msg: String) -> void:

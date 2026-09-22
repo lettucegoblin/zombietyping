@@ -31,6 +31,19 @@ func _ready() -> void:
 	if not toggle_msg.contains("build mode on") or not settlement._ghost_root.visible or not settlement.ghost_is_valid():
 		_fail("valid placement ghost did not appear: " + settlement.ghost_error())
 		return
+	var cursor_before := settlement._ghost_root.position
+	var heading_before := settlement._ghost_root.rotation.y
+	builder.global_position += Vector3(0.4, 0, 0)
+	builder.facing = Vector3(0, 0, 1)
+	settlement._update_ghost()
+	if not settlement._ghost_root.position.is_equal_approx(cursor_before) \
+			or not is_equal_approx(settlement._ghost_root.rotation.y, heading_before):
+		_fail("WASD movement dragged or spun the world-space build cursor")
+		return
+	settlement.nudge_preview(Vector2.RIGHT)
+	if not is_equal_approx(settlement._ghost_root.position.distance_to(cursor_before), Settlement.NUDGE_STEP):
+		_fail("arrow nudge did not move the build cursor by one fine-placement step")
+		return
 	var yaw_before := settlement._ghost_root.rotation.y
 	settlement.rotate_preview()
 	if not is_equal_approx(absf(settlement._ghost_root.rotation.y - yaw_before), PI * 0.5):
@@ -59,6 +72,19 @@ func _ready() -> void:
 	var dismantle_msg := settlement.undo_or_dismantle_last()
 	if not dismantle_msg.contains("50% rounded-up") or int(World.materials["wood"]) != wood_before - 1:
 		_fail("late dismantle did not return the documented partial refund: " + dismantle_msg)
+		return
+	# Once the undo window has expired, dismantle the nearby object rather than whichever
+	# construction happens to be newest elsewhere in the base.
+	var near_item := { "building": b.id(), "kind": "chair", "pos": builder.global_position + Vector3(0.8, 0, 0), "yaw": 0.0 }
+	var far_item := { "building": b.id(), "kind": "crate", "pos": target + Vector3(5.0, 0, 0), "yaw": 0.0 }
+	World.placements.append(near_item)
+	World.placements.append(far_item)
+	settlement._last_built.clear()
+	settlement._undo_until_msec = 0
+	var targeted_msg := settlement.undo_or_dismantle_last()
+	if not targeted_msg.begins_with("dismantled chair") or World.placements.size() != 1 \
+			or World.placements[0].get("kind", "") != "crate":
+		_fail("late dismantle removed the newest object instead of the nearby target: " + targeted_msg)
 		return
 	var cancel_wood := int(World.materials["wood"])
 	var cancel_msg := settlement.cancel_build()
@@ -91,7 +117,7 @@ func _ready() -> void:
 	if World.ward_cell_count(b.id()) != initial_cells + 1 or not World.ward_contains_point(b.id(), extension_center):
 		_fail("closing wall segment did not procedurally expand the ward")
 		return
-	print("CONSTRUCTION OK  ghost/rotate/confirm/cancel/refunds/permanent-ward-expansion")
+	print("CONSTRUCTION OK  stable cursor/nudge/rotate/confirm/cancel/targeted refunds/permanent-ward-expansion")
 	get_tree().quit(0)
 
 

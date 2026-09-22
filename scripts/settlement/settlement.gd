@@ -22,6 +22,9 @@ const WALL_CAP := Color("#b86cff")
 const GHOST_VALID := Color("#7ee787", 0.58)
 const GHOST_INVALID := Color("#ff4f87", 0.62)
 const UNDO_WINDOW_MSEC := 10000
+const BUILD_CURSOR_DISTANCE := 2.6
+const BUILD_REACH := 6.0
+const NUDGE_STEP := 0.25
 
 var player: Node3D
 var active_building_id := ""
@@ -42,6 +45,8 @@ var _ghost_valid := false
 var _ghost_error := ""
 var _last_built: Dictionary = {}
 var _undo_until_msec := 0
+var _preview_cursor := Vector3.INF
+var _preview_heading := 0.0
 
 
 func _ready() -> void:
@@ -65,6 +70,7 @@ func enter(id: String) -> void:
 	active_building_id = id
 	build_mode = false
 	_ghost_root.visible = false
+	_preview_cursor = Vector3.INF
 	var b := World.building_by_id(id)
 	if b != null:
 		player.set_manual_zone(World.ward_bounds_world(id), b.road_tile, World.ward_gate_world(id))
@@ -77,6 +83,7 @@ func leave() -> void:
 	_ghost_root.visible = false
 	_last_built.clear()
 	_undo_until_msec = 0
+	_preview_cursor = Vector3.INF
 	if player != null:
 		player.clear_manual_zone()
 
@@ -87,8 +94,9 @@ func toggle_build() -> String:
 	build_mode = not build_mode
 	if build_mode:
 		preview_rotation = 0
+		_reset_preview_cursor()
 		_update_ghost(true)
-		return "build mode on — Q/E item, R rotate, F confirm, Esc cancel"
+		return "build mode on — arrows nudge, Q/E item, R rotate, F confirm"
 	_ghost_root.visible = false
 	return "build mode off"
 
@@ -119,20 +127,60 @@ func cancel_build() -> String:
 		return "build mode is already off"
 	build_mode = false
 	_ghost_root.visible = false
+	_preview_cursor = Vector3.INF
 	return "placement cancelled — no materials spent"
 
 
 func _preview_position() -> Vector3:
-	var p: Vector3 = player.global_position + player.facing * 2.6
-	p.y = player.global_position.y + 0.05
+	var p := _preview_cursor
+	if p == Vector3.INF:
+		p = player.global_position + player.facing * BUILD_CURSOR_DISTANCE
+		p.y = player.global_position.y + 0.05
 	if selected_kind() == "wall":
 		p = World.snap_wall_position(p, _preview_yaw())
 	return p
 
 
 func _preview_yaw() -> float:
-	var yaw := atan2(player.facing.x, player.facing.z) + preview_rotation * PI * 0.5
+	var yaw := _preview_heading + preview_rotation * PI * 0.5
 	return snappedf(yaw, PI * 0.5) if selected_kind() == "wall" else yaw
+
+
+func _reset_preview_cursor() -> void:
+	if player == null:
+		return
+	var forward := Vector2(player.facing.x, player.facing.z).normalized()
+	if forward == Vector2.ZERO:
+		forward = Vector2.RIGHT
+	_preview_cursor = player.global_position + Vector3(forward.x, 0, forward.y) * BUILD_CURSOR_DISTANCE
+	_preview_cursor.y = player.global_position.y + 0.05
+	_preview_heading = atan2(forward.x, forward.y)
+
+
+func reset_preview() -> String:
+	if not build_mode:
+		return "turn on build mode first"
+	_reset_preview_cursor()
+	_update_ghost()
+	return "%s cursor recentered" % selected_kind()
+
+
+## Fine placement stays independent from WASD movement and uses the current camera-facing
+## frame, so the cursor behaves like an editor gizmo without unexpectedly orbiting the item.
+func nudge_preview(screen_direction: Vector2) -> String:
+	if not build_mode or player == null:
+		return "turn on build mode first"
+	if _preview_cursor == Vector3.INF:
+		_reset_preview_cursor()
+	var forward := Vector2(player.facing.x, player.facing.z).normalized()
+	if forward == Vector2.ZERO:
+		forward = Vector2.RIGHT
+	var right := Vector2(-forward.y, forward.x)
+	var step := World.WARD_GRID if selected_kind() == "wall" else NUDGE_STEP
+	var delta := (right * screen_direction.x - forward * screen_direction.y) * step
+	_preview_cursor += Vector3(delta.x, 0, delta.y)
+	_update_ghost()
+	return "%s cursor moved" % selected_kind()
 
 
 func _refresh_manual_zone() -> void:
@@ -176,9 +224,9 @@ func undo_or_dismantle_last() -> String:
 	if active_building_id == "":
 		return "enter a claimed safe zone first"
 	var full_refund := not _last_built.is_empty() and Time.get_ticks_msec() <= _undo_until_msec
-	var target := _last_built if full_refund else World.last_placement_for(active_building_id)
+	var target := _last_built if full_refund else World.nearest_placement_for(active_building_id, player.global_position)
 	if target.is_empty():
-		return "nothing built here to dismantle"
+		return "move close to placed furniture, a farm, or a wall to dismantle it"
 	var msg := World.remove_placement(target, 1.0 if full_refund else 0.5)
 	if msg.begins_with("undid") or msg.begins_with("dismantled"):
 		_last_built.clear()
@@ -187,6 +235,16 @@ func undo_or_dismantle_last() -> String:
 		_refresh_manual_zone()
 		_update_ghost()
 	return msg
+
+
+func dismantle_hint() -> String:
+	if active_building_id == "" or player == null or undo_seconds_remaining() > 0.0:
+		return ""
+	var target := World.nearest_placement_for(active_building_id, player.global_position)
+	if target.is_empty():
+		return ""
+	var kind: String = target.get("kind", "construction")
+	return "U dismantle %s → %s" % [kind, World.cost_text(World.placement_refund(kind, 0.5))]
 
 
 func _process(dt: float) -> void:
@@ -539,7 +597,10 @@ func _update_ghost(force_rebuild: bool = false) -> void:
 	_ghost_root.visible = true
 	_ghost_root.position = _preview_position()
 	_ghost_root.rotation.y = _preview_yaw()
-	_ghost_error = World.placement_error(active_building_id, kind, _ghost_root.position, _ghost_root.rotation.y)
+	if player.global_position.distance_to(_ghost_root.position) > BUILD_REACH:
+		_ghost_error = "move closer to the build cursor"
+	else:
+		_ghost_error = World.placement_error(active_building_id, kind, _ghost_root.position, _ghost_root.rotation.y)
 	if _ghost_error == "" and not World.can_afford(World.build_cost(kind)):
 		_ghost_error = "need " + World.cost_text(World.build_cost(kind))
 	_ghost_valid = _ghost_error == ""

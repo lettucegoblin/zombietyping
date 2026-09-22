@@ -172,14 +172,16 @@ Click its label in the Tab map (or type `info <label>`) to open the building pan
 5. Arriving at—or claiming while standing in—a claimed building enters safe-zone mode:
    WASD moves with generated wall/door collision, walking through the visible gate restores
    typed street travel, and `PageUp/PageDown` changes storeys. `B` toggles build mode, `Q/E`
-   selects wall/crate/bed/chair/farm, and `F` places it. Farms produce food and seed-derived
-   citizens walk deterministic waypoints inside the perimeter.
+   selects wall/crate/bed/chair/farm, arrow keys nudge a world-stable placement cursor, `C`
+   recenters it, and `F` places it. Farms produce food and seed-derived citizens walk
+   deterministic waypoints inside the perimeter.
 
 Generated furnishings retain stable object IDs after claiming. Walk close to an intact item
 and press `X` to dismantle that specific bed, television, fridge, rug, fixture, or other prop;
 the object disappears, its material-class yield is shown, and the removed ID persists in the
 save. Build mode provides a green/red placement ghost: `R` rotates, `F` confirms, `Esc`
-cancels, and `U` gives a ten-second full-refund undo before becoming a 50% dismantle action.
+cancels, and `U` gives a ten-second full-refund undo before dismantling the nearby placed
+object for a 50% rounded-up refund. It never silently removes the newest object elsewhere.
 
 Searchable dressers, cabinets, shelves, fridges, crates, televisions, stoves, and workbenches
 roll contents from their procedural loot-table tag and stable prop ID. Once a room is safe,

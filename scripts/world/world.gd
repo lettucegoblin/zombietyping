@@ -1417,11 +1417,41 @@ func last_placement_for(id: String) -> Dictionary:
 	return {}
 
 
+## The placed object the survivor is actually standing beside. Late dismantling must be
+## spatially intentional; silently removing the newest object elsewhere in the base is a
+## nasty failure mode once players have furnished more than one room.
+func nearest_placement_for(id: String, world_pos: Vector3, max_distance: float = 3.4) -> Dictionary:
+	var nearest: Dictionary = {}
+	var best := max_distance * max_distance
+	for i in range(placements.size() - 1, -1, -1):
+		var item: Dictionary = placements[i]
+		if item.get("building", "") != id:
+			continue
+		var pos: Vector3 = item.get("pos", Vector3.INF)
+		if pos == Vector3.INF or absf(pos.y - world_pos.y) > 1.0:
+			continue
+		var distance := Vector2(pos.x - world_pos.x, pos.z - world_pos.z).length_squared()
+		if distance < best:
+			best = distance
+			nearest = item.duplicate(true)
+	return nearest
+
+
 func _same_placement(a: Dictionary, b: Dictionary) -> bool:
 	return a.get("building", "") == b.get("building", "") \
 			and a.get("kind", "") == b.get("kind", "") \
 			and a.get("pos", Vector3.INF) == b.get("pos", Vector3.INF) \
 			and is_equal_approx(float(a.get("yaw", 0.0)), float(b.get("yaw", 0.0)))
+
+
+func placement_refund(kind: String, refund_fraction: float) -> Dictionary:
+	var refund: Dictionary = {}
+	var cost := build_cost(kind)
+	for material in cost:
+		var amount := ceili(float(cost[material]) * clampf(refund_fraction, 0.0, 1.0))
+		if amount > 0:
+			refund[material] = amount
+	return refund
 
 
 ## Removes a specific placed object. A just-built undo uses 1.0; later dismantling uses
@@ -1437,12 +1467,7 @@ func remove_placement(target: Dictionary, refund_fraction: float) -> String:
 	var item: Dictionary = placements[index]
 	var kind: String = item.get("kind", "")
 	placements.remove_at(index)
-	var refund: Dictionary = {}
-	var original_cost := build_cost(kind)
-	for material in original_cost:
-		var amount := ceili(float(original_cost[material]) * clampf(refund_fraction, 0.0, 1.0))
-		if amount > 0:
-			refund[material] = amount
+	var refund := placement_refund(kind, refund_fraction)
 	if not refund.is_empty():
 		add_materials(refund)
 	else:

@@ -192,6 +192,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_E: msg = settlement.cycle_build(1) if settlement.build_mode else ""
 			KEY_R: msg = settlement.rotate_preview() if settlement.build_mode else ""
 			KEY_F: msg = settlement.place_selected() if settlement.build_mode else ""
+			KEY_LEFT: msg = settlement.nudge_preview(Vector2.LEFT) if settlement.build_mode else ""
+			KEY_RIGHT: msg = settlement.nudge_preview(Vector2.RIGHT) if settlement.build_mode else ""
+			KEY_UP: msg = settlement.nudge_preview(Vector2.UP) if settlement.build_mode else ""
+			KEY_DOWN: msg = settlement.nudge_preview(Vector2.DOWN) if settlement.build_mode else ""
+			KEY_C: msg = settlement.reset_preview() if settlement.build_mode else ""
 			KEY_ESCAPE: msg = settlement.cancel_build() if settlement.build_mode else ""
 			KEY_U: msg = settlement.undo_or_dismantle_last()
 			KEY_X:
@@ -460,6 +465,8 @@ func _safezone_floor(delta: int) -> String:
 		player.global_position = interior.plan.room_stand_world(interior.plan.stair_room) + Vector3(0, 0.05, 0)
 	else:
 		player.global_position.y = next_floor * World.FLOOR_M + 0.05
+	if settlement.build_mode:
+		settlement.reset_preview()
 	return "safe-zone floor %d/%d" % [next_floor + 1, door_building.floors]
 
 
@@ -862,21 +869,27 @@ func _refresh_hud() -> void:
 				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
-			var build := "B build · G stash · V sort · H bandage · J eat · U dismantle"
+			var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
+			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  Tab manage/travel" % floor_text)
 			if settlement.build_mode:
 				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
-				build = "[color=#ffd166]BUILD %s %d°[/color]  %s  ·  Q/E item · R rotate · F confirm · Esc cancel" % [
-					settlement.selected_kind(), settlement.preview_rotation * 90, preview_state]
+				var cost := World.cost_text(World.build_cost(settlement.selected_kind()))
+				lines.append("[color=#ffd166][b]BUILD %s %d°[/b][/color]  cost %s  ·  %s" % [
+					settlement.selected_kind(), settlement.preview_rotation * 90, cost, preview_state])
+				lines.append("arrows nudge · C recenter · Q/E item · R rotate · F place · Esc cancel")
+			else:
+				lines.append("B build · G store supplies · V break down loot · H bandage · J eat")
 			var undo_left := settlement.undo_seconds_remaining()
 			if undo_left > 0.0:
-				build += "  ·  U undo %.1fs (full refund)" % undo_left
-			var floor_text := "floor %d/%d  ·  PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  %s  ·  Tab manage/travel" % [build, floor_text])
+				lines.append("[color=#ffd166]U undo %.1fs · full refund[/color]" % undo_left)
 			if not settlement.build_mode:
 				var salvage_text: String = interior.salvage_hint(player.global_position)
 				if salvage_text != "":
 					lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
+				var dismantle_text := settlement.dismantle_hint()
+				if dismantle_text != "":
+					lines.append("[color=#ffb86c]%s[/color]" % dismantle_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 			var stored_items: Dictionary = World.building_state(settlement.active_building_id).get("stored_items", {})
