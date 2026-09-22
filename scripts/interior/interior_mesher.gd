@@ -148,6 +148,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 
 	var mi := MeshInstance3D.new()
 	mi.name = "Mesh"
+	mi.set_meta("room_structure", true)
 	mi.mesh = st.commit()
 	mi.material_override = SectorMesher.flat_material()
 	root.add_child(mi)
@@ -168,6 +169,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 			Stairwell.build_pit(ds, fp, fp.stair_layout, fp.floor)
 			var dm := MeshInstance3D.new()
 			dm.name = "DownFlights"
+			dm.set_meta("room_structure", true)
 			dm.mesh = ds.commit()
 			dm.material_override = SectorMesher.flat_material()
 			root.add_child(dm)
@@ -177,6 +179,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 			Stairwell.build_cap(cs2, fp, fp.stair_layout, fp.floor)
 			var cm := MeshInstance3D.new()
 			cm.name = "ShaftCap"
+			cm.set_meta("room_structure", true)
 			cm.mesh = cs2.commit()
 			cm.material_override = SectorMesher.flat_material()
 			root.add_child(cm)

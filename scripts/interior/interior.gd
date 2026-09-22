@@ -124,13 +124,21 @@ func _set_room_visible(ri: int, v: bool) -> void:
 	if n == null:
 		return
 	for c in n.find_children("*", "VisualInstance3D", true, false):
-		(c as VisualInstance3D).visible = v and not c.get_meta("hidden", false)
+		# Structural shells stay rendered for unrevealed rooms. Hiding those meshes made
+		# the one-way exterior facade disappear from an interior camera, exposing the city
+		# (and any pre-seeded encounter actors) through a building-shaped hole.
+		var structure := bool(c.get_meta("room_structure", false))
+		(c as VisualInstance3D).visible = (v or structure) and not c.get_meta("hidden", false)
 	for c in n.find_children("*", "AudioStreamPlayer3D", true, false):
 		var audio := c as AudioStreamPlayer3D
 		if v and not audio.playing:
 			audio.play()
 		elif not v and audio.playing:
 			audio.stop()
+
+
+func is_room_revealed(ri: int) -> bool:
+	return _revealed.has(ri)
 
 
 ## Hide/show one part of a room's build (the stairwell's DownFlights / ShaftCap while the

@@ -32,7 +32,7 @@ func alive() -> Array[Zombie]:
 func targetable() -> Array[Zombie]:
 	var out: Array[Zombie] = []
 	for z in alive():
-		if z.in_los and z.state != Zombie.State.DORMANT:
+		if z.visible and z.in_los and z.state != Zombie.State.DORMANT:
 			out.append(z)
 	return out
 
@@ -128,6 +128,7 @@ func _spawn(t: ZombieType, pos: Vector3, room := -1, dormant := false) -> Zombie
 	z.setup(t, w, player)
 	z.room = room
 	z.interior = interior
+	z.visible = room < 0 or (interior != null and interior.is_inside() and interior.is_room_revealed(room))
 	z.state = Zombie.State.DORMANT if dormant else Zombie.State.CHASE
 	z.position = pos
 	add_child(z)
@@ -265,6 +266,7 @@ func _process(dt: float) -> void:
 		if is_instance_valid(z) and z.room < 0 and World.is_world_safe(z.global_position):
 			z.queue_free()
 	zombies = zombies.filter(func(z): return is_instance_valid(z) and not z.is_queued_for_deletion())
+	_sync_room_visibility()
 	if street_spawning and player != null:
 		_spawn_timer -= dt
 		if _spawn_timer <= 0.0:
@@ -315,6 +317,9 @@ func _update_los() -> void:
 	var space := get_world_3d().direct_space_state
 	var from := cam.global_position
 	for z in alive():
+		if not z.visible:
+			z.in_los = false
+			continue
 		var to := z.global_position + Vector3(0, 1.0, 0)
 		var visible_now := false
 		# A zombie almost touching the survivor can put its head below the camera frustum,
@@ -334,3 +339,14 @@ func _update_los() -> void:
 			z.last_seen = Time.get_ticks_msec() / 1000.0
 		if visible_now and z.state == Zombie.State.DORMANT:
 			z.wake()
+
+
+func _sync_room_visibility() -> void:
+	for z in alive():
+		if z.room < 0:
+			z.visible = true
+			continue
+		var revealed: bool = interior != null and interior.is_inside() and interior.is_room_revealed(z.room)
+		z.visible = revealed
+		if not revealed:
+			z.in_los = false
