@@ -263,10 +263,16 @@ dressers, toilets, sinks, tubs, counters, stoves, fridges, dining tables, sofas,
 desks, powered workbenches, chairs, rugs, paintings, televisions, sales fixtures, storage,
 and hall benches.
 PixelLab sprites cover the recognizable household props; any unmapped utility shape retains
-the procedural mesh treatment. Furnishings remain non-colliding and are clamped inside their
-room, so visual variety cannot change rail navigation or combat line-of-sight. Each prop has
-a stable id plus loot-table and utility metadata (`storage`, `water`, `power`, `comfort`,
-etc.), ready for persisted looting and base upgrades without making art placement stateful.
+the procedural mesh treatment. Each room-use template first proposes normalized anchors,
+then a deterministic settlement pass clamps footprints to the room, keeps a 1.65 m × 1.8 m
+lane clear behind every door, and separates solid props where the available area permits.
+Rugs may sit beneath furniture; a prop that cannot fit without occupying a door lane is
+omitted. Paintings choose the closest usable wall, slide along it around doors, and render as
+fixed textured planes with a one-pixel-scale wall offset rather than camera-facing sprites.
+Furnishings remain non-colliding, so visual variety cannot change rail navigation or combat
+line-of-sight. Each prop has a stable id plus loot-table and utility metadata (`storage`,
+`water`, `power`, `comfort`, etc.), ready for persisted looting and base upgrades without
+making art placement stateful.
 Visible televisions animate palette static and play the original indoor static/rumble bed
 as a looped, distance-faded 3D source through an 85-degree directional cone; hidden rooms
 neither render nor emit it.

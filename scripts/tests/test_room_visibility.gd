@@ -10,6 +10,7 @@ func _ready() -> void:
 	World.state.clear()
 	_check_entrance_lanes()
 	_check_ceiling_palette()
+	_check_furnishing_clearance_and_wall_art()
 	var b: BuildingData = World.get_sector(0, 0).buildings[2]
 	var interior = load("res://scripts/interior/interior.gd").new()
 	add_child(interior)
@@ -49,7 +50,7 @@ func _ready() -> void:
 		_check(not image.is_empty() and image.get_pixel(0, 0).a < 0.01, "%s has an opaque background" % path)
 
 	if not _failed:
-		print("ROOM VISIBILITY OK  safe entrance lanes + room-tinted ceilings + structural occlusion + hidden encounters + transparent props")
+		print("ROOM VISIBILITY OK  clear furnished doorways + fixed wall art + room-tinted ceilings + structural occlusion + hidden encounters + transparent props")
 	get_tree().quit(1 if _failed else 0)
 
 
@@ -89,6 +90,27 @@ func _check_ceiling_palette() -> void:
 	for wall_col in InteriorMesher.WALL_COLS:
 		var ceiling := InteriorMesher.ceiling_color(wall_col)
 		_check(ceiling.is_equal_approx(wall_col), "ceiling lost its room wall swatch")
+
+
+func _check_furnishing_clearance_and_wall_art() -> void:
+	var paintings := 0
+	for sy in range(-1, 2):
+		for sx in range(-1, 2):
+			for b in World.get_sector(sx, sy).buildings:
+				for floor in b.floors:
+					var fp := InteriorGen.generate(World.seed, b, floor)
+					for prop in fp.props:
+						_check(not InteriorGen.prop_overlaps_door_clearance(fp, prop),
+							"%s floor %d %s occupied a doorway lane" % [b.id(), floor, prop.kind])
+						if prop.kind != "painting":
+							continue
+						paintings += 1
+						var visual := InteriorMesher._sprite_prop(prop)
+						_check(visual is MeshInstance3D and not visual is Sprite3D,
+							"painting was not rendered as a fixed wall plane")
+						_check(bool(visual.get_meta("wall_art", false)), "painting lost its wall-art marker")
+						visual.free()
+	_check(paintings > 0, "fixture generated no paintings")
 
 
 func _check(ok: bool, message: String) -> void:

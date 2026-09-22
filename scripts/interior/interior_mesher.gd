@@ -305,6 +305,24 @@ const PROP_SPRITES := {
 
 
 static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
+	if p.kind == "painting":
+		var painting := MeshInstance3D.new()
+		painting.name = "Prop_" + p.id.replace(":", "_")
+		painting.set_meta("wall_art", true)
+		var painting_quad := QuadMesh.new()
+		painting_quad.size = Vector2(p.size.x, p.size.y)
+		painting.mesh = painting_quad
+		painting.position = p.pos + Vector3(0, 1.45, 0)
+		painting.rotation.y = p.yaw
+		var painting_mat := StandardMaterial3D.new()
+		painting_mat.albedo_texture = load(PROP_SPRITES[p.kind])
+		painting_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR
+		painting_mat.alpha_scissor_threshold = 0.35
+		painting_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		painting_mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		painting_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		painting.material_override = painting_mat
+		return painting
 	if p.kind == "rug":
 		var rug := MeshInstance3D.new()
 		rug.name = "Prop_" + p.id.replace(":", "_")
@@ -326,7 +344,7 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 	sprite.name = "Prop_" + p.id.replace(":", "_")
 	sprite.texture = load(PROP_SPRITES[p.kind])
 	sprite.pixel_size = maxf(p.size.x / 52.0, p.size.y / 42.0)
-	sprite.position = p.pos + Vector3(0, 1.45 if p.kind == "painting" else p.size.y * 0.5, 0)
+	sprite.position = p.pos + Vector3(0, p.size.y * 0.5, 0)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST

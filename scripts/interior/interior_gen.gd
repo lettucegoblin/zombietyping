@@ -5,6 +5,12 @@ class_name InteriorGen
 ## door quad is. Every door gets a typeable word, unique per floor and prefix-free.
 
 const CELL_M := 2.0
+const DOOR_CLEAR_WIDTH := 1.65
+const DOOR_CLEAR_DEPTH := 1.8
+const FURNITURE_GAP := 0.10
+## About one source-art pixel at the prop sprite scale: enough to prevent z-fighting
+## without making a wall hanging visibly float in front of its wall.
+const WALL_ART_OFFSET := 0.025
 const RESERVED := ["up", "down", "exit"]
 const WORDS := [
 	"attic","basin","bench","blade","bolt","bucket","cabin","candle","cellar","chain","chalk","chest",
@@ -481,6 +487,157 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 			"hall":
 				if rng.randf() < 0.55:
 					_add_prop(fp, room.index, "bench", 0.50, 0.18, 1.25, 0.42, 0.48, Color("#5a3d28"))
+	_settle_furnishings(fp)
+
+
+## Semantic room templates deliberately remain simple and readable, but their normalized
+## anchors are only wishes. This deterministic finishing pass protects every doorway lane,
+## spreads solid furniture when space permits, and turns paintings into real wall mounts.
+static func _settle_furnishings(fp: FloorPlan) -> void:
+	var kept: Array[FloorPlan.Prop] = []
+	var occupied_by_room: Dictionary = {}
+	for prop in fp.props:
+		if prop.kind == "painting":
+			if _mount_painting(fp, prop):
+				kept.append(prop)
+			continue
+		var occupied: Array = occupied_by_room.get(prop.room, [])
+		var is_floor_layer := prop.kind == "rug"
+		if _place_floor_prop(fp, prop, [] if is_floor_layer else occupied):
+			kept.append(prop)
+			if not is_floor_layer:
+				occupied.append(_prop_footprint(prop).grow(FURNITURE_GAP))
+				occupied_by_room[prop.room] = occupied
+	fp.props = kept
+
+
+static func _place_floor_prop(fp: FloorPlan, prop: FloorPlan.Prop, occupied: Array) -> bool:
+	var room := fp.rooms[prop.room]
+	var p0 := fp.cell_to_world(Vector2(room.rect.position))
+	var p1 := fp.cell_to_world(Vector2(room.rect.end))
+	var footprint_size := _rotated_footprint_size(prop)
+	var lo := Vector2(p0.x, p0.z) + footprint_size * 0.5 + Vector2.ONE * FURNITURE_GAP
+	var hi := Vector2(p1.x, p1.z) - footprint_size * 0.5 - Vector2.ONE * FURNITURE_GAP
+	if lo.x > hi.x or lo.y > hi.y:
+		return false
+	var wanted := Vector2(clampf(prop.pos.x, lo.x, hi.x), clampf(prop.pos.z, lo.y, hi.y))
+	var candidates: Array[Vector2] = [wanted]
+	var nx := maxi(1, ceili((hi.x - lo.x) / 0.30))
+	var nz := maxi(1, ceili((hi.y - lo.y) / 0.30))
+	for iz in range(nz + 1):
+		for ix in range(nx + 1):
+			candidates.append(Vector2(lerpf(lo.x, hi.x, float(ix) / nx), lerpf(lo.y, hi.y, float(iz) / nz)))
+	candidates.sort_custom(func(a: Vector2, b: Vector2):
+		var da := a.distance_squared_to(wanted)
+		var db := b.distance_squared_to(wanted)
+		if not is_equal_approx(da, db):
+			return da < db
+		return a.y < b.y if not is_equal_approx(a.y, b.y) else a.x < b.x)
+	# Furniture-to-furniture separation is best effort in very small procedural rooms;
+	# preserving the door lane is not. A cramped bathroom may overlap fixtures visually,
+	# but it may never put one across its only way in or out.
+	for require_separation in [true, false]:
+		for candidate in candidates:
+			prop.pos.x = candidate.x
+			prop.pos.z = candidate.y
+			var footprint := _prop_footprint(prop)
+			if prop_overlaps_door_clearance(fp, prop):
+				continue
+			if require_separation and _overlaps_any(footprint.grow(FURNITURE_GAP), occupied):
+				continue
+			return true
+	return false
+
+
+static func _mount_painting(fp: FloorPlan, prop: FloorPlan.Prop) -> bool:
+	var room := fp.rooms[prop.room]
+	var p0 := fp.cell_to_world(Vector2(room.rect.position))
+	var p1 := fp.cell_to_world(Vector2(room.rect.end))
+	var wanted := Vector2(prop.pos.x, prop.pos.z)
+	# side: 0 north, 1 east, 2 south, 3 west. The normal points into the room.
+	var sides: Array[Dictionary] = [
+		{"side": 0, "distance": absf(wanted.y - p0.z), "lo": p0.x, "hi": p1.x, "wanted": wanted.x},
+		{"side": 1, "distance": absf(wanted.x - p1.x), "lo": p0.z, "hi": p1.z, "wanted": wanted.y},
+		{"side": 2, "distance": absf(wanted.y - p1.z), "lo": p0.x, "hi": p1.x, "wanted": wanted.x},
+		{"side": 3, "distance": absf(wanted.x - p0.x), "lo": p0.z, "hi": p1.z, "wanted": wanted.y},
+	]
+	sides.sort_custom(func(a: Dictionary, b: Dictionary):
+		return float(a.distance) < float(b.distance) if not is_equal_approx(float(a.distance), float(b.distance)) else int(a.side) < int(b.side))
+	for side_data in sides:
+		var half_width := prop.size.x * 0.5 + FURNITURE_GAP
+		var lo: float = side_data.lo + half_width
+		var hi: float = side_data.hi - half_width
+		if lo > hi:
+			continue
+		var desired := clampf(float(side_data.wanted), lo, hi)
+		var along_candidates: Array[float] = [desired]
+		var count := maxi(1, ceili((hi - lo) / 0.20))
+		for i in range(count + 1):
+			along_candidates.append(lerpf(lo, hi, float(i) / count))
+		along_candidates.sort_custom(func(a: float, b: float):
+			return absf(a - desired) < absf(b - desired) if not is_equal_approx(absf(a - desired), absf(b - desired)) else a < b)
+		for along in along_candidates:
+			_place_on_wall(prop, int(side_data.side), along, p0, p1)
+			if not prop_overlaps_door_clearance(fp, prop):
+				return true
+	return false
+
+
+static func _place_on_wall(prop: FloorPlan.Prop, side: int, along: float, p0: Vector3, p1: Vector3) -> void:
+	match side:
+		0:
+			prop.pos = Vector3(along, prop.pos.y, p0.z + WALL_ART_OFFSET)
+			prop.yaw = 0.0
+		1:
+			prop.pos = Vector3(p1.x - WALL_ART_OFFSET, prop.pos.y, along)
+			prop.yaw = -PI * 0.5
+		2:
+			prop.pos = Vector3(along, prop.pos.y, p1.z - WALL_ART_OFFSET)
+			prop.yaw = PI
+		3:
+			prop.pos = Vector3(p0.x + WALL_ART_OFFSET, prop.pos.y, along)
+			prop.yaw = PI * 0.5
+
+
+static func _rotated_footprint_size(prop: FloorPlan.Prop) -> Vector2:
+	var c := absf(cos(prop.yaw))
+	var s := absf(sin(prop.yaw))
+	return Vector2(c * prop.size.x + s * prop.size.z, s * prop.size.x + c * prop.size.z)
+
+
+static func _prop_footprint(prop: FloorPlan.Prop) -> Rect2:
+	var size := _rotated_footprint_size(prop)
+	return Rect2(Vector2(prop.pos.x, prop.pos.z) - size * 0.5, size)
+
+
+static func doorway_clearances(fp: FloorPlan, ri: int) -> Array[Rect2]:
+	var clearances: Array[Rect2] = []
+	for di in fp.rooms[ri].doors:
+		var door := fp.doors[di]
+		var inward := Vector2(-door.dir) if door.a == ri else Vector2(door.dir)
+		var centre := Vector2(door.pos.x, door.pos.z) + inward * (DOOR_CLEAR_DEPTH * 0.5)
+		if absf(inward.x) > 0.5:
+			clearances.append(Rect2(centre - Vector2(DOOR_CLEAR_DEPTH, DOOR_CLEAR_WIDTH) * 0.5,
+				Vector2(DOOR_CLEAR_DEPTH, DOOR_CLEAR_WIDTH)))
+		else:
+			clearances.append(Rect2(centre - Vector2(DOOR_CLEAR_WIDTH, DOOR_CLEAR_DEPTH) * 0.5,
+				Vector2(DOOR_CLEAR_WIDTH, DOOR_CLEAR_DEPTH)))
+	return clearances
+
+
+static func prop_overlaps_door_clearance(fp: FloorPlan, prop: FloorPlan.Prop) -> bool:
+	var footprint := _prop_footprint(prop)
+	for clearance in doorway_clearances(fp, prop.room):
+		if footprint.intersects(clearance):
+			return true
+	return false
+
+
+static func _overlaps_any(rect: Rect2, others: Array) -> bool:
+	for other in others:
+		if rect.intersects(other):
+			return true
+	return false
 
 
 static func _add_prop(fp: FloorPlan, ri: int, kind: String, u: float, v: float,
