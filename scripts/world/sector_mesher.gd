@@ -213,7 +213,7 @@ static func _building(st: SurfaceTool, b: BuildingData) -> void:
 	var win := Color("#1d1f2a")
 	# door on the face that looks at the road tile; windows skip that slot on the ground floor
 	var d := b.road_tile - b.door_tile
-	var dc := Vector3((b.door_tile.x + 0.5) * T, 0, (b.door_tile.y + 0.5) * T)
+	var dc := InteriorGen.entrance_position(b, fpr)
 	var dw := DOOR_W * 0.5
 	var door_wall := -1          # 0 north(-z) 1 south(+z) 2 east(+x) 3 west(-x)
 	var door_along := 0.0        # distance of the door centre along that wall (from its `a` corner)
@@ -389,7 +389,7 @@ static func door_leaf_transform(b: BuildingData, y: float = DOOR_H * 0.5) -> Tra
 	var d := b.road_tile - b.door_tile
 	var out := Vector3(d.x, 0, d.y)                          # facade normal (towards the street)
 	var fpr := InteriorGen.footprint(b)
-	var dc := Vector3((b.door_tile.x + 0.5) * T, 0, (b.door_tile.y + 0.5) * T)
+	var dc := InteriorGen.entrance_position(b, fpr)
 	var pos: Vector3
 	if d.x == 0:
 		pos = Vector3(dc.x, y, fpr.position.y if d.y < 0 else fpr.end.y)

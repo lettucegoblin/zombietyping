@@ -1138,7 +1138,8 @@ func _footprints_overlap(a: Dictionary, b: Dictionary) -> bool:
 
 
 func _entry_clearance(b: BuildingData) -> Dictionary:
-	var door := Vector2((b.door_tile.x + 0.5) * TILE_M, (b.door_tile.y + 0.5) * TILE_M)
+	var entrance := InteriorGen.entrance_position(b, InteriorGen.footprint(b))
+	var door := Vector2(entrance.x, entrance.z)
 	var road := Vector2((b.road_tile.x + 0.5) * TILE_M, (b.road_tile.y + 0.5) * TILE_M)
 	var lo := Vector2(minf(door.x, road.x), minf(door.y, road.y)) - Vector2(1.15, 1.15)
 	var hi := Vector2(maxf(door.x, road.x), maxf(door.y, road.y)) + Vector2(1.15, 1.15)

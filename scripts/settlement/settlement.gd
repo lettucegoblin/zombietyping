@@ -255,12 +255,13 @@ func _add_car(b: BuildingData) -> void:
 func _add_perimeter(b: BuildingData) -> void:
 	var r := World.safe_rect_world(b)
 	var gate_dir := b.road_tile - b.door_tile
+	var entrance := InteriorGen.entrance_position(b, InteriorGen.footprint(b))
 	var lo := Vector2i(roundi(r.position.x / World.WARD_GRID), roundi(r.position.y / World.WARD_GRID))
 	var hi := Vector2i(roundi(r.end.x / World.WARD_GRID), roundi(r.end.y / World.WARD_GRID))
 	var ward: Dictionary = World.ward_cells(b.id())
 	for gx in range(lo.x, hi.x):
 		var x := (gx + 0.5) * World.WARD_GRID
-		var at_gate := absf(x - (b.door_tile.x + 0.5) * World.TILE_M) < 2.1
+		var at_gate := absf(x - entrance.x) < 2.1
 		var top_internal := ward.has(Vector2i(gx, lo.y - 1)) and ward.has(Vector2i(gx, lo.y))
 		var bottom_internal := ward.has(Vector2i(gx, hi.y - 1)) and ward.has(Vector2i(gx, hi.y))
 		if not top_internal and not (gate_dir.y < 0 and at_gate):
@@ -269,7 +270,7 @@ func _add_perimeter(b: BuildingData) -> void:
 			_add_wall(Vector3(x, 0.8, hi.y * World.WARD_GRID), Vector3(2.55, 1.6, 0.35))
 	for gy in range(lo.y, hi.y):
 		var z := (gy + 0.5) * World.WARD_GRID
-		var at_gate := absf(z - (b.door_tile.y + 0.5) * World.TILE_M) < 2.1
+		var at_gate := absf(z - entrance.z) < 2.1
 		var left_internal := ward.has(Vector2i(lo.x - 1, gy)) and ward.has(Vector2i(lo.x, gy))
 		var right_internal := ward.has(Vector2i(hi.x - 1, gy)) and ward.has(Vector2i(hi.x, gy))
 		if not left_internal and not (gate_dir.x < 0 and at_gate):

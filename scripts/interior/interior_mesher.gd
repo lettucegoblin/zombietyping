@@ -55,9 +55,9 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 	var z0 := fpr.position.y
 	var x1 := fpr.end.x
 	var z1 := fpr.end.y
-	var T := World.TILE_M
 	var dvec := b.road_tile - b.door_tile
-	var dc := Vector2((b.door_tile.x + 0.5) * T, (b.door_tile.y + 0.5) * T)
+	var entrance := InteriorGen.entrance_position(b, fpr)
+	var dc := Vector2(entrance.x, entrance.z)
 	var door_wall := 0
 	var door_along := 0.0
 	if dvec == Vector2i(0, -1): door_wall = 0; door_along = dc.x - x0

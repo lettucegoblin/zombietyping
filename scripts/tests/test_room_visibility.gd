@@ -8,6 +8,7 @@ var _failed := false
 func _ready() -> void:
 	World.persistence_enabled = false
 	World.state.clear()
+	_check_entrance_lanes()
 	var b: BuildingData = World.get_sector(0, 0).buildings[2]
 	var interior = load("res://scripts/interior/interior.gd").new()
 	add_child(interior)
@@ -47,8 +48,40 @@ func _ready() -> void:
 		_check(not image.is_empty() and image.get_pixel(0, 0).a < 0.01, "%s has an opaque background" % path)
 
 	if not _failed:
-		print("ROOM VISIBILITY OK  structural occlusion + hidden encounters + transparent props")
+		print("ROOM VISIBILITY OK  safe entrance lanes + structural occlusion + hidden encounters + transparent props")
 	get_tree().quit(1 if _failed else 0)
+
+
+## A facade door must lead through the middle of one interior cell. If its along-wall
+## coordinate lands on a cell boundary, the entry rail runs coplanar with a partition and
+## an infinitely thin wall can divide the camera while exposing both adjacent rooms.
+func _check_entrance_lanes() -> void:
+	var checked := 0
+	for sy in range(-1, 2):
+		for sx in range(-1, 2):
+			for b in World.get_sector(sx, sy).buildings:
+				var fp := InteriorGen.generate(World.seed, b, 0)
+				if fp.entrance_door < 0:
+					continue
+				var door: FloorPlan.Door = fp.doors[fp.entrance_door]
+				var centre := fp.cell_to_world(Vector2(door.cell) + Vector2(0.5, 0.5))
+				var along_delta := absf(door.pos.z - centre.z) if door.dir.x != 0 else absf(door.pos.x - centre.x)
+				_check(along_delta < 0.001, "%s entrance was not centred in its facade cell" % b.id())
+				var inward := Vector3(-door.dir.x, 0, -door.dir.y)
+				_check(fp.room_at_cell(door.cell) == door.a, "%s entrance cell belongs to another room" % b.id())
+				var inside := door.pos + inward * 1.3
+				_check(_room_at(fp, inside) == door.a, "%s entry rail crossed a partition before its stopping point" % b.id())
+				var leaf := SectorMesher.door_leaf_transform(b, 0.0).origin
+				var leaf_delta := absf(leaf.z - door.pos.z) if door.dir.x != 0 else absf(leaf.x - door.pos.x)
+				_check(leaf_delta < 0.001, "%s facade leaf and interior opening disagree" % b.id())
+				checked += 1
+				if checked >= 96:
+					return
+
+
+func _room_at(fp: FloorPlan, p: Vector3) -> int:
+	var c := Vector2i(floori((p.x - fp.origin.x) / fp.cell_size.x), floori((p.z - fp.origin.z) / fp.cell_size.y))
+	return fp.room_at_cell(c)
 
 
 func _check(ok: bool, message: String) -> void:

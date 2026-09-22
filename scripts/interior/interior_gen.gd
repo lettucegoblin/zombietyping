@@ -32,6 +32,24 @@ static func footprint(b: BuildingData) -> Rect2:
 		b.rect.size.x * T - 2.0 * inset, b.rect.size.y * T - 2.0 * inset)
 
 
+## The facade door's shared world position. City doors begin at the centre of their door
+## tile, but the interior uses a separate ~2 m grid. Snap the along-wall coordinate to the
+## centre of its entrance cell so the inward path can never run exactly along a partition.
+## Facade holes/leaves and interior openings all use this same point.
+static func entrance_position(b: BuildingData, fpr: Rect2) -> Vector3:
+	var outside := b.road_tile - b.door_tile
+	var cells := Vector2i(maxi(2, floori(fpr.size.x / CELL_M)), maxi(2, floori(fpr.size.y / CELL_M)))
+	var cell_size := Vector2(fpr.size.x / cells.x, fpr.size.y / cells.y)
+	var tile_center := Vector2((b.door_tile.x + 0.5) * World.TILE_M, (b.door_tile.y + 0.5) * World.TILE_M)
+	if outside.x == 0:
+		var cx := clampi(floori((tile_center.x - fpr.position.x) / cell_size.x), 0, cells.x - 1)
+		return Vector3(fpr.position.x + (cx + 0.5) * cell_size.x, 0.0,
+			fpr.position.y if outside.y < 0 else fpr.end.y)
+	var cy := clampi(floori((tile_center.y - fpr.position.y) / cell_size.y), 0, cells.y - 1)
+	return Vector3(fpr.position.x if outside.x < 0 else fpr.end.x, 0.0,
+		fpr.position.y + (cy + 0.5) * cell_size.y)
+
+
 static func _room_limits(district: int) -> Vector2i:
 	## (min, max) room side in cells
 	match district:
@@ -195,8 +213,6 @@ static func _plan_bsp(fp: FloorPlan, b: BuildingData, fpr: Rect2, rng: RandomNum
 ## The street door on the ground floor, exactly where the facade's door quad is.
 static func _add_entrance(fp: FloorPlan, b: BuildingData, fpr: Rect2) -> void:
 	var d := b.road_tile - b.door_tile
-	var T := World.TILE_M
-	var dc := Vector2((b.door_tile.x + 0.5) * T, (b.door_tile.y + 0.5) * T)
 	var cell := _entrance_cell(b, fp, fpr)
 	var ra := fp.room_at_cell(cell)
 	var door := FloorPlan.Door.new()
@@ -206,11 +222,8 @@ static func _add_entrance(fp: FloorPlan, b: BuildingData, fpr: Rect2) -> void:
 	door.cell = cell
 	door.dir = d
 	door.word = "exit"
-	# exact facade position, on the wall plane
-	if d.x == 0:
-		door.pos = Vector3(dc.x, fp.origin.y, fpr.position.y if d.y < 0 else fpr.end.y)
-	else:
-		door.pos = Vector3(fpr.position.x if d.x < 0 else fpr.end.x, fp.origin.y, dc.y)
+	# Exact shared facade position, on the wall plane and safely inside one entrance cell.
+	door.pos = entrance_position(b, fpr) + Vector3(0, fp.origin.y, 0)
 	fp.doors.append(door)
 	fp.rooms[ra].doors.append(door.index)
 	fp.rooms[ra].is_entrance = true
@@ -507,8 +520,8 @@ static func _add_prop(fp: FloorPlan, ri: int, kind: String, u: float, v: float,
 ## The footprint cell the street door opens into.
 static func _entrance_cell(b: BuildingData, fp: FloorPlan, fpr: Rect2) -> Vector2i:
 	var d := b.road_tile - b.door_tile
-	var T := World.TILE_M
-	var dc := Vector2((b.door_tile.x + 0.5) * T, (b.door_tile.y + 0.5) * T)
+	var entrance := entrance_position(b, fpr)
+	var dc := Vector2(entrance.x, entrance.z)
 	if d == Vector2i(0, -1):
 		return Vector2i(clampi(int((dc.x - fpr.position.x) / fp.cell_size.x), 0, fp.cells.x - 1), 0)
 	elif d == Vector2i(0, 1):
