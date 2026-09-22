@@ -9,6 +9,7 @@ const DOOR_H := 2.2
 const WIN_LO := 1.2
 const WIN_HI := 2.2
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
+const PropVisuals = preload("res://scripts/interior/prop_visuals.gd")
 
 const FLOOR_COL := {
 	District.Kind.DOWNTOWN: Color("#94a3b8"), District.Kind.STRIP: Color("#fdba74"),
@@ -283,25 +284,7 @@ static func _searched_label(prop: FloorPlan.Prop) -> Label3D:
 	return label
 
 
-const PROP_SPRITES := {
-	"rug": "res://assets/sprites/props/rug.png",
-	"painting": "res://assets/sprites/props/painting.png",
-	"fridge": "res://assets/sprites/props/fridge.png",
-	"tv": "res://assets/sprites/props/tv.png",
-	"bed": "res://assets/sprites/props/bed.png",
-	"sofa": "res://assets/sprites/props/sofa.png",
-	"dresser": "res://assets/sprites/props/dresser.png",
-	"toilet": "res://assets/sprites/props/toilet.png",
-	"sink": "res://assets/sprites/props/sink.png",
-	"tub": "res://assets/sprites/props/tub.png",
-	"counter": "res://assets/sprites/props/counter.png",
-	"stove": "res://assets/sprites/props/stove.png",
-	"shelf": "res://assets/sprites/props/shelf.png",
-	"desk": "res://assets/sprites/props/desk.png",
-	"workbench": "res://assets/sprites/props/desk.png",
-	"chair": "res://assets/sprites/props/chair.png",
-	"crate": "res://assets/sprites/props/crate.png",
-}
+const PROP_SPRITES := PropVisuals.SPRITES
 
 
 static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
@@ -343,7 +326,8 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 	var sprite := Sprite3D.new()
 	sprite.name = "Prop_" + p.id.replace(":", "_")
 	sprite.texture = load(PROP_SPRITES[p.kind])
-	sprite.pixel_size = maxf(p.size.x / 52.0, p.size.y / 42.0)
+	sprite.pixel_size = PropVisuals.pixel_size(p.size)
+	sprite.offset.x = PropVisuals.horizontal_offset(p.kind)
 	sprite.position = p.pos + Vector3(0, p.size.y * 0.5, 0)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD

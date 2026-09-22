@@ -94,6 +94,12 @@ func _check_ceiling_palette() -> void:
 
 func _check_furnishing_clearance_and_wall_art() -> void:
 	var paintings := 0
+	var target := InteriorGen.generate(World.seed, World.get_sector(0, 0).buildings[2], 0)
+	var target_kinds: Dictionary = {}
+	for target_prop in target.props:
+		target_kinds[target_prop.kind] = true
+	_check(target_kinds.has("tv") and target_kinds.has("shelf") and target_kinds.has("painting"),
+		"0,0:2 fixed its doorway by deleting the reported furnishings")
 	for sy in range(-1, 2):
 		for sx in range(-1, 2):
 			for b in World.get_sector(sx, sy).buildings:
@@ -102,6 +108,11 @@ func _check_furnishing_clearance_and_wall_art() -> void:
 					for prop in fp.props:
 						_check(not InteriorGen.prop_overlaps_door_clearance(fp, prop),
 							"%s floor %d %s occupied a doorway lane" % [b.id(), floor, prop.kind])
+						if InteriorMesher.PropVisuals.is_billboard(prop.kind):
+							var visible_width := InteriorMesher.PropVisuals.visible_size(prop.kind, prop.size).x
+							var footprint := InteriorGen._rotated_footprint_size(prop)
+							_check(footprint.x + 0.001 >= visible_width and footprint.y + 0.001 >= visible_width,
+								"%s placement ignored its %.2fm rendered width" % [prop.kind, visible_width])
 						if prop.kind != "painting":
 							continue
 						paintings += 1

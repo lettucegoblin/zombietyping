@@ -266,6 +266,9 @@ PixelLab sprites cover the recognizable household props; any unmapped utility sh
 the procedural mesh treatment. Each room-use template first proposes normalized anchors,
 then a deterministic settlement pass clamps footprints to the room, keeps a 1.65 m × 1.8 m
 lane clear behind every door, and separates solid props where the available area permits.
+Camera-facing props measure their opaque PNG bounds at their actual render scale and reserve
+that visible width in both horizontal axes, so transparent canvas padding and differently
+sized chairs, shelves, televisions, and appliances do not lie to the placement pass.
 Rugs may sit beneath furniture; a prop that cannot fit without occupying a door lane is
 omitted. Paintings choose the closest usable wall, slide along it around doors, and render as
 fixed textured planes with a one-pixel-scale wall offset rather than camera-facing sprites.

@@ -4,6 +4,8 @@ class_name InteriorGen
 ## line up across storeys, and the street entrance on floor 0 exactly where the facade's
 ## door quad is. Every door gets a typeable word, unique per floor and prefix-free.
 
+const PropVisuals = preload("res://scripts/interior/prop_visuals.gd")
+
 const CELL_M := 2.0
 const DOOR_CLEAR_WIDTH := 1.65
 const DOOR_CLEAR_DEPTH := 1.8
@@ -600,6 +602,18 @@ static func _place_on_wall(prop: FloorPlan.Prop, side: int, along: float, p0: Ve
 
 
 static func _rotated_footprint_size(prop: FloorPlan.Prop) -> Vector2:
+	if PropVisuals.is_billboard(prop.kind):
+		# A camera-facing sprite may present its width along any horizontal world axis.
+		# Reserve that actual opaque-pixel width in both axes, as well as its physical
+		# footprint, so turning the camera cannot swing artwork into a clear door lane.
+		var visual_width := PropVisuals.visible_size(prop.kind, prop.size).x
+		var diameter := maxf(visual_width, maxf(prop.size.x, prop.size.z))
+		return Vector2(diameter, diameter)
+	if prop.kind == "rug":
+		var rug_size := Vector2(prop.size.x, prop.size.z) / 0.74
+		var rc := absf(cos(prop.yaw))
+		var rs := absf(sin(prop.yaw))
+		return Vector2(rc * rug_size.x + rs * rug_size.y, rs * rug_size.x + rc * rug_size.y)
 	var c := absf(cos(prop.yaw))
 	var s := absf(sin(prop.yaw))
 	return Vector2(c * prop.size.x + s * prop.size.z, s * prop.size.x + c * prop.size.z)
