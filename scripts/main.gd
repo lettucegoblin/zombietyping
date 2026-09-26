@@ -46,6 +46,7 @@ var _rescue_cue: SurvivorCue
 @onready var typist: Node = $Typist
 @onready var map: Control = $UI/TabMap
 @onready var minimap: Control = $UI/Minimap
+@onready var building_reticle: Control = $UI/BuildingReticle
 @onready var sfx: Node = $Sfx
 @onready var ash: GPUParticles3D = $View/Viewport/World/Player/Ash
 @onready var sky: Node3D = $View/Viewport/World/SkyLife
@@ -69,6 +70,10 @@ func _ready() -> void:
 	_rescue_cue.resolve()
 	minimap.player = player
 	minimap.tab_map = map
+	building_reticle.game = self
+	building_reticle.player = player
+	building_reticle.camera = player.cam
+	building_reticle.minimap = minimap
 	typist.dest_labels = func(): return minimap.labels
 	typist.destination_typed.connect(_on_hud_destination)
 	map.destinations_typed.connect(_on_destinations)

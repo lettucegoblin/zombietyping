@@ -19,7 +19,6 @@ var _room_kind := ""
 var _step_t := 0.0
 var _step_alt := false
 var _next_event := 6.0
-var _siren_t := 40.0
 var _rng := RandomNumberGenerator.new()
 ## Random ambience events: [name, min gap, max gap, db, pitch var]
 const OUTSIDE_EVENTS := [
@@ -179,11 +178,6 @@ func atmosphere(dt: float) -> void:
 		else:
 			play_near(e[0], e[1], e[2], 8.0, 22.0)
 		_next_event = _rng.randf_range(7.0, 16.0) if _inside else _rng.randf_range(6.0, 16.0)
-	_siren_t -= dt
-	if _siren_t <= 0.0:
-		_siren_t = _rng.randf_range(70.0, 160.0)
-		if not _inside:
-			play("siren", -30.0, 0.05)
 
 
 ## Birds flapping off a roof nearby (called by the sky life when a flock takes off).

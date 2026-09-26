@@ -1,8 +1,8 @@
 extends Control
 ## Always-on minimap (top right): the Tab map's textures around the survivor, north up,
-## with the same "1a" labels — type one and the rail goes there, no Tab needed.
-## Labels are assigned for a window around where you last STOPPED (or drifted 10+ tiles
-## from), so they do not reshuffle under your fingers while the rail is moving.
+## with the same stable digit-first labels — type one and the rail goes there, no Tab needed.
+## The address registry covers the whole rendered neighbourhood, including buildings under
+## fog; drawing remains clipped to this small view.
 
 const S := SectorData.SIZE
 const PPT := 5.0                  # pixels per tile
@@ -10,13 +10,14 @@ const RELABEL_DRIFT := 10.0       # tiles of travel before labels move with you
 const COL_ROUTE := Color("#ffd166")
 const COL_PLAYER := Color("#ff5a36")
 const COL_QUEUED := Color("#ffd166")
+const LABEL_NUDGE_STEP := 5.0
+const LABEL_NUDGE_RINGS := 8
 
 var player: Node3D
 var tab_map: Control              # texture cache + fog dirty tracking live there
 var labels: Dictionary = {}       # label -> building id (current window)
 var _placed: Array = []
 var _label_center := Vector2(INF, INF)
-var _explored_n := -1
 var _was_moving := false
 var _font: Font
 var typing := ""                  # destination being typed (shown under the map)
@@ -42,19 +43,36 @@ func _process(_dt: float) -> void:
 	var moving: bool = player.is_moving() and not player.halt
 	var c := Vector2(player.tile) + Vector2(0.5, 0.5)
 	var drift := c.distance_to(_label_center) if _label_center.x != INF else INF
-	if (_was_moving and not moving) or drift > RELABEL_DRIFT or _explored_n != World.explored.size():
+	if (_was_moving and not moving) or drift > RELABEL_DRIFT:
 		relabel()
 	_was_moving = moving
 	queue_redraw()
 
 
-## Labels for the window around the survivor's current tile.
+## Typeable labels cover the same broad range as visible streamed buildings. This means a
+## first-person reticle label is always a valid destination even when it lies off the small
+## minimap or under unrevealed fog.
 func relabel() -> void:
 	_label_center = Vector2(player.tile) + Vector2(0.5, 0.5)
-	_explored_n = World.explored.size()
-	var res := MapLabels.assign(_window_tiles(_label_center))
+	var radius := MapLabels.WORLD_LABEL_RANGE_TILES
+	var lo := Vector2i(floori(_label_center.x - radius), floori(_label_center.y - radius))
+	var hi := Vector2i(ceili(_label_center.x + radius), ceili(_label_center.y + radius))
+	var res := MapLabels.assign(Rect2i(lo, hi - lo + Vector2i.ONE), _label_center, radius, true)
 	labels = res["labels"]
 	_placed = res["placed"]
+
+
+func ensure_building_label(b: BuildingData) -> String:
+	var label := MapLabels.ensure_label(b)
+	labels[label] = b.id()
+	var found := false
+	for entry in _placed:
+		if (entry["b"] as BuildingData).id() == b.id():
+			found = true
+			break
+	if not found:
+		_placed.append({ "label": label, "b": b })
+	return label
 
 
 func _window_tiles(center: Vector2) -> Rect2i:
@@ -73,6 +91,30 @@ func has_label_prefix(prefix: String) -> bool:
 
 func _tile_to_screen(t: Vector2, center: Vector2) -> Vector2:
 	return (t - center) * PPT + size * 0.5
+
+
+## Keep addresses legible in dense blocks. The search order is deterministic, so labels
+## settle into the same nearby slot instead of vibrating between positions as the map scrolls.
+## An address that cannot fit is only hidden visually; it remains in `labels` and typeable.
+func _nudged_label_rect(anchor: Vector2, box_size: Vector2,
+		occupied: Array[Rect2], bounds: Rect2) -> Rect2:
+	for ring in range(LABEL_NUDGE_RINGS + 1):
+		for gy in range(-ring, ring + 1):
+			for gx in range(-ring, ring + 1):
+				if ring > 0 and absi(gx) != ring and absi(gy) != ring:
+					continue
+				var offset := Vector2(gx, gy) * LABEL_NUDGE_STEP
+				var rect := Rect2(anchor + offset - box_size * 0.5, box_size)
+				if not bounds.encloses(rect):
+					continue
+				var blocked := false
+				for used in occupied:
+					if used.intersects(rect.grow(1.0)):
+						blocked = true
+						break
+				if not blocked:
+					return rect
+	return Rect2()
 
 
 func _draw() -> void:
@@ -114,28 +156,50 @@ func _draw() -> void:
 				pts.append(_tile_to_screen(Vector2(t) + Vector2(0.5, 0.5), center))
 			draw_polyline(pts, COL_ROUTE if li == 0 else COL_ROUTE.darkened(0.3), 2.0)
 		li += 1
-	# labels
+	# Labels: important destinations claim space first, then the stable spatial order fills
+	# remaining slots. Every address stays typeable even if this tiny view cannot draw it.
 	var queued: Array = player.queued_ids()
 	var fs := 11
+	var visible_entries: Array = []
+	var priority_entries: Array = []
 	for e in _placed:
 		var b: BuildingData = e["b"]
 		var p := _tile_to_screen(b.center_tile(), center)
 		if p.x < -20 or p.y < -10 or p.x > size.x + 20 or p.y > size.y + 10:
 			continue
 		var label: String = e["label"]
+		if queued.has(b.id()) or (typing != "" and label.begins_with(typing)):
+			priority_entries.append(e)
+		else:
+			visible_entries.append(e)
+	priority_entries.append_array(visible_entries)
+	var occupied: Array[Rect2] = [Rect2(size * 0.5 - Vector2(8, 8), Vector2(16, 16))]
+	var bounds := Rect2(Vector2(3, 3), size - Vector2(6, 27))
+	for e in priority_entries:
+		var b: BuildingData = e["b"]
+		var p := _tile_to_screen(b.center_tile(), center)
+		var label: String = e["label"]
 		var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var qi := queued.find(b.id())
 		var typed_match := typing != "" and label.begins_with(typing)
+		var lr := _nudged_label_rect(p, Vector2(w + 6, fs * 1.25), occupied, bounds)
+		if lr.size == Vector2.ZERO:
+			continue
+		occupied.append(lr)
 		var bg := Color(0, 0, 0, 0.6)
 		var fg := Color.WHITE
 		if qi >= 0:
 			bg = COL_QUEUED; fg = Color.BLACK
 		elif typed_match:
 			bg = Color("#facc15", 0.85); fg = Color.BLACK
-		draw_rect(Rect2(p - Vector2(w * 0.5 + 2, fs * 0.6), Vector2(w + 4, fs * 1.1)), bg)
-		draw_string(_font, p + Vector2(-w * 0.5, fs * 0.35), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
+		if lr.get_center().distance_squared_to(p) > 9.0:
+			draw_line(p, lr.get_center(), Color(1, 1, 1, 0.28), 1.0)
+		draw_rect(lr, bg)
+		var baseline := Vector2(lr.position.x + 3.0, lr.position.y + fs)
+		draw_string(_font, baseline, label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
 		if building_visited(b.id()):
-			draw_line(p + Vector2(-w * 0.5, 0), p + Vector2(w * 0.5, 0), fg, 1.5)
+			draw_line(Vector2(lr.position.x + 2.0, lr.get_center().y),
+				Vector2(lr.end.x - 2.0, lr.get_center().y), fg, 1.5)
 	# player
 	var pp := _tile_to_screen(center, center)
 	var f: Vector3 = player.facing

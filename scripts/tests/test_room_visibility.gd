@@ -49,8 +49,17 @@ func _ready() -> void:
 		var image := Image.load_from_file(ProjectSettings.globalize_path(str(path)))
 		_check(not image.is_empty() and image.get_pixel(0, 0).a < 0.01, "%s has an opaque background" % path)
 
+	# 0,0:2 is also the fixed TV fixture. Leaving a building must stop its directional
+	# static synchronously, before deferred room deletion can leak a tail outdoors.
+	interior.reveal_all()
+	var tv_audio: Array[Node] = interior.find_children("*", "AudioStreamPlayer3D", true, false)
+	_check(not tv_audio.is_empty(), "fixture generated no television audio source")
+	interior.unload()
+	for audio in tv_audio:
+		_check(not (audio as AudioStreamPlayer3D).playing, "television static survived interior unload")
+
 	if not _failed:
-		print("ROOM VISIBILITY OK  clear furnished doorways + fixed wall art + room-tinted ceilings + structural occlusion + hidden encounters + transparent props")
+		print("ROOM VISIBILITY OK  clear furnished doorways + fixed wall art + room-tinted ceilings + structural occlusion + hidden encounters + transparent props + TV audio teardown")
 	get_tree().quit(1 if _failed else 0)
 
 

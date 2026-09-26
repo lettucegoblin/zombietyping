@@ -5,6 +5,7 @@ var _failed := false
 
 
 func _ready() -> void:
+	MapLabels.reset_cache()
 	World.persistence_enabled = false
 	World.state.clear()
 	World.explored.clear()
@@ -16,6 +17,8 @@ func _ready() -> void:
 	var map: Control = main.get_node("UI/TabMap")
 	map.size = Vector2(1280, 720)
 	var player: Node3D = main.get_node("View/Viewport/World/Player")
+	var minimap: Control = main.get_node("UI/Minimap")
+	var reticle: Control = main.get_node("UI/BuildingReticle")
 	_check(main._gameplay_mouse_look, "gameplay did not enable always-on mouse look")
 	var gameplay_facing: Vector3 = player.facing
 	var look_motion := InputEventMouseMotion.new()
@@ -38,6 +41,37 @@ func _ready() -> void:
 		return
 	var a: BuildingData = pair[0]
 	var b: BuildingData = pair[1]
+	# The first-person centre ray names the nearest visible building collider and registers
+	# the same stable address with HUD typing. A close probe isolates the ray contract from
+	# whichever procedural facades happen to be facing the spawn in this seed.
+	var probe := StaticBody3D.new()
+	probe.collision_layer = 1
+	probe.collision_mask = 0
+	probe.set_meta("bid", a.id())
+	var probe_shape := CollisionShape3D.new()
+	var probe_box := BoxShape3D.new()
+	probe_box.size = Vector3(1.0, 1.0, 0.2)
+	probe_shape.shape = probe_box
+	probe.add_child(probe_shape)
+	main.get_node("View/Viewport/World").add_child(probe)
+	probe.global_position = player.cam.global_position - player.cam.global_transform.basis.z * 2.0
+	await get_tree().physics_frame
+	reticle._physics_process(0.0)
+	var aimed_id := str(reticle.get("target_id"))
+	_check(aimed_id != "" and World.building_by_id(aimed_id) != null, "centre reticle did not resolve building collision metadata")
+	var reticle_label := str(reticle.get("target_label"))
+	_check(reticle_label != "" and minimap.labels.get(reticle_label, "") == aimed_id, "reticle address was not registered for HUD typing")
+	probe.queue_free()
+	await get_tree().physics_frame
+
+	# Dense map labels nudge into non-overlapping slots instead of painting over one another.
+	var bounds := Rect2(Vector2.ZERO, Vector2(160, 100))
+	var none: Array[Rect2] = []
+	var occupied: Array[Rect2] = []
+	var first: Rect2 = minimap._nudged_label_rect(Vector2(80, 50), Vector2(28, 14), none, bounds)
+	occupied.append(first)
+	var second: Rect2 = minimap._nudged_label_rect(Vector2(80, 50), Vector2(28, 14), occupied, bounds)
+	_check(first.size != Vector2.ZERO and second.size != Vector2.ZERO and not first.intersects(second), "minimap label nudging allowed overlap")
 	_check(map.building_name(a) == map.building_name(a), "building name is not deterministic")
 	_check(map.building_name(a).contains(" "), "building name is not human-readable")
 	World.state[a.id()] = { "cleared": true, "claimed": true }
@@ -58,6 +92,26 @@ func _ready() -> void:
 	map.recompute_labels()
 	var all_count: int = map._placed.size()
 	var all_labels: Dictionary = map._labels.duplicate()
+	_check(all_count > 0, "large-range map produced no building addresses")
+	var explored_snapshot: Dictionary = World.explored.duplicate(true)
+	World.explored.clear()
+	map._invalidate()
+	map.recompute_labels()
+	_check(not map._labels.is_empty(), "fogged buildings were not addressable")
+	World.explored.merge(explored_snapshot, true)
+	map._invalidate()
+	map.recompute_labels()
+	var stable_id: String = map._labels[map._labels.keys()[0]]
+	var stable_label: String = map._label_for_id(stable_id)
+	map._center += Vector2(3.0, 2.0)
+	map._invalidate()
+	map.recompute_labels()
+	_check(map._label_for_id(stable_id) == stable_label, "small view movement changed a building address")
+	map._center = a.center_tile()
+	map._invalidate()
+	map.recompute_labels()
+	all_labels = map._labels.duplicate()
+	all_count = map._placed.size()
 	var crew_label: String = map._label_for_id(a.id())
 	var crew_id := "tab:test:resident"
 	World.survivors[crew_id] = { "id": crew_id, "name": "Bea", "trait": "medic", "job": "scavenger", "base_id": a.id(), "status": "assigned" }
@@ -66,6 +120,7 @@ func _ready() -> void:
 	_check(World.survivors[crew_id]["job"] == "medic", "typed building-menu job command did not assign the resident")
 	World.state.erase(a.id())
 	World.survivors.clear()
+	map._show_all_buildings = false
 	var focused: Array = map._displayed_placed()
 	_check(all_count > map.FOCUS_EXPLORATION_SITES, "test view did not expose enough buildings for focus mode")
 	_check(focused.size() <= map.FOCUS_EXPLORATION_SITES, "focus mode did not reduce label overload")
@@ -86,7 +141,8 @@ func _ready() -> void:
 	_check((capture["ids"] as Array).has(hidden_id), "focus-hidden label stopped typed navigation")
 	_check(map._labels == all_labels, "typing or focus mode mutated label addresses")
 	map._show_all_buildings = true
-	_check(map._displayed_placed().size() == all_count, "all-sites toggle omitted known buildings")
+	_check(map._displayed_placed().size() == mini(map.ALL_SITE_DRAW_LIMIT, all_count), "all-sites draw budget was not applied")
+	_check(map._labels.size() == all_count, "all-sites draw budget removed typeable addresses")
 	map._show_all_buildings = false
 	map.visible = true
 	var f3 := InputEventKey.new()

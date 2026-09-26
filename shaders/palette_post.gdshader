@@ -5,6 +5,7 @@ shader_type canvas_item;
 
 uniform sampler2D screen_tex : hint_screen_texture, filter_nearest;
 uniform float dither_strength : hint_range(0.0, 0.25) = 0.06;
+uniform float transition_width : hint_range(0.0, 0.1) = 0.018;
 uniform float enabled = 1.0;
 
 const int N = 21;
@@ -48,12 +49,22 @@ void fragment() {
 		c += bayer4(FRAGCOORD.xy) * dither_strength;
 		vec3 w = vec3(0.30, 0.59, 0.11) * 2.0 + 0.5;  // luma-weighted distance
 		vec3 best = PALETTE[0];
+		vec3 second = PALETTE[1];
 		float bd = 1e9;
+		float sd = 1e9;
 		for (int i = 0; i < N; i++) {
 			vec3 d = (c - PALETTE[i]);
 			float dist = dot(d * d, w);
-			if (dist < bd) { bd = dist; best = PALETTE[i]; }
+			if (dist < bd) {
+				sd = bd; second = best;
+				bd = dist; best = PALETTE[i];
+			} else if (dist < sd) {
+				sd = dist; second = PALETTE[i];
+			}
 		}
-		COLOR = vec4(best, 1.0);
+		// Around a palette boundary, softly hand the pixel from one swatch to the next.
+		// Exact palette colours remain exact; only pixels about to flip receive a short blend.
+		float handoff = 0.5 * (1.0 - smoothstep(0.0, transition_width, sd - bd));
+		COLOR = vec4(mix(best, second, handoff), 1.0);
 	}
 }

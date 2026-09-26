@@ -1,8 +1,8 @@
 extends Control
-## The Tab map. Opening it pauses the game. Buildings you have SEEN get short labels
-## relative to the current view (left-to-right = number, row band = letter, see MapLabels);
-## type labels separated by spaces and press Enter to queue destinations. Labels are a view
-## concern: the queue stores stable building ids, so scrolling never changes what you asked for.
+## The Tab map. Opening it pauses the game. Generated buildings get stable addresses
+## using the same stable addresses as the minimap and first-person reticle; type labels
+## separated by spaces and press Enter to queue destinations. Labels remain available under
+## fog, out to the rendered city's large selection radius.
 ## The minimap in the corner uses the same scheme, so labels can also be typed without Tab.
 
 signal destinations_typed(ids: Array[String])
@@ -13,8 +13,9 @@ const S := SectorData.SIZE
 const BAND_TILES := 6
 const MIN_PPT := 4.0
 const MAX_PPT := 28.0
-const LABEL_MIN_PPT := 6.0
+const LABEL_MIN_PPT := 4.0
 const FOCUS_EXPLORATION_SITES := 8
+const ALL_SITE_DRAW_LIMIT := 96
 const FacilityUpgradeRules = preload("res://scripts/settlement/facility_upgrade.gd")
 
 const NAME_ROOTS := [
@@ -299,10 +300,7 @@ func facility_panel_lines(b: BuildingData) -> Array[String]:
 
 
 func _label_for_id(id: String) -> String:
-	for label in _labels:
-		if _labels[label] == id:
-			return label
-	return ""
+	return MapLabels.label_for_id(id)
 
 
 func _endpoint_text(id: String) -> String:
@@ -332,7 +330,20 @@ func _supply_lines_for(id: String) -> Array[String]:
 
 func _displayed_placed() -> Array:
 	if _show_all_buildings:
-		return _placed
+		# The complete `_labels` dictionary remains typeable. Drawing is intentionally bounded:
+		# a low-zoom 508-site view cannot be made legible, and trying hundreds of nudge slots
+		# every caret frame would turn the management map into a performance spike. Panning
+		# changes the nearest slice, so the broad layer is still inspectable spatially.
+		var nearby := _placed.duplicate()
+		var focus := _center
+		nearby.sort_custom(func(a, b):
+			var ab: BuildingData = a["b"]
+			var bb: BuildingData = b["b"]
+			var ad := ab.center_tile().distance_squared_to(focus)
+			var bd := bb.center_tile().distance_squared_to(focus)
+			return ab.id() < bb.id() if is_equal_approx(ad, bd) else ad < bd
+		)
+		return nearby.slice(0, mini(ALL_SITE_DRAW_LIMIT, nearby.size()))
 	var required := {}
 	if _selected_id != "":
 		required[_selected_id] = true
@@ -567,11 +578,12 @@ func _visible_tiles() -> Rect2i:
 	return Rect2i(t0, t1 - t0)
 
 
-## Labels for the buildings visible in the current view (see MapLabels). Only recomputed
-## when the view or the explored area changes.
+## Register the complete selection radius, not merely the current screen. Panning only
+## changes which addresses are drawn; it never makes an off-screen destination untypeable.
+## Fog deliberately does not participate.
 func recompute_labels() -> void:
-	var r := _visible_tiles()
-	var key := "%s|%.2f|%d" % [r, _ppt, World.explored.size()]
+	var player_center := Vector2(player.tile) + Vector2(0.5, 0.5) if player != null else _center
+	var key := "%.2f|%s" % [_ppt, player_center]
 	if key == _view_key:
 		return
 	_view_key = key
@@ -579,9 +591,32 @@ func recompute_labels() -> void:
 	_placed.clear()
 	if _ppt < LABEL_MIN_PPT:
 		return
-	var res := MapLabels.assign(r)
+	var radius := MapLabels.WORLD_LABEL_RANGE_TILES
+	var lo := Vector2i(floori(player_center.x - radius), floori(player_center.y - radius))
+	var hi := Vector2i(ceili(player_center.x + radius), ceili(player_center.y + radius))
+	var res := MapLabels.assign(Rect2i(lo, hi - lo + Vector2i.ONE), player_center, radius)
 	_labels = res["labels"]
 	_placed = res["placed"]
+
+
+func _nudged_label_rect(anchor: Vector2, box_size: Vector2,
+		occupied: Array[Rect2], bounds: Rect2) -> Rect2:
+	for ring in range(9):
+		for gy in range(-ring, ring + 1):
+			for gx in range(-ring, ring + 1):
+				if ring > 0 and absi(gx) != ring and absi(gy) != ring:
+					continue
+				var rect := Rect2(anchor + Vector2(gx, gy) * 6.0 - box_size * 0.5, box_size)
+				if not bounds.encloses(rect):
+					continue
+				var blocked := false
+				for used in occupied:
+					if used.intersects(rect.grow(1.0)):
+						blocked = true
+						break
+				if not blocked:
+					return rect
+	return Rect2()
 
 
 # ------------------------------------------------------------------ drawing
@@ -636,23 +671,44 @@ func _draw() -> void:
 	# labels
 	if _ppt >= LABEL_MIN_PPT:
 		var queued: Array = player.queued_ids() if player != null else []
+		var important: Array = []
+		var ordinary: Array = []
 		for e in displayed:
+			var eb: BuildingData = e["b"]
+			if eb.id() == _selected_id or queued.has(eb.id()):
+				important.append(e)
+			else:
+				ordinary.append(e)
+		important.append_array(ordinary)
+		var panel_left := _panel_rect().position.x - 6.0
+		var label_bounds := Rect2(Vector2(5.0, 66.0), Vector2(panel_left - 10.0, size.y - 134.0))
+		var occupied: Array[Rect2] = []
+		for e in important:
 			var b: BuildingData = e["b"]
 			var p := _tile_to_screen(b.center_tile())
+			if not label_bounds.grow(36.0).has_point(p):
+				continue
 			var label: String = e["label"]
 			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 			var qi := queued.find(b.id())
 			var selected: bool = b.id() == _selected_id
 			var bg := Color("#5b3f8c") if selected else (Color(0, 0, 0, 0.55) if qi < 0 else COL_ROUTE)
 			var fg := Color.WHITE if qi < 0 else Color.BLACK
-			var lr := Rect2(p - Vector2(w * 0.5 + 4, fs * 0.7), Vector2(w + 8, fs * 1.35))
+			var lr := _nudged_label_rect(p, Vector2(w + 8, fs * 1.35), occupied, label_bounds)
+			if lr.size == Vector2.ZERO:
+				continue
+			occupied.append(lr)
+			if lr.get_center().distance_squared_to(p) > 16.0:
+				draw_line(p, lr.get_center(), Color(1, 1, 1, 0.30), 1.0)
 			draw_rect(lr, bg)
 			_building_hitboxes.append({ "rect": lr, "id": b.id() })
-			draw_string(font, p + Vector2(-w * 0.5, fs * 0.38), label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
+			var baseline := Vector2(lr.position.x + 4.0, lr.position.y + fs)
+			draw_string(font, baseline, label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, fg)
 			if World.building_state(b.id()).get("visited", false):
-				draw_line(p + Vector2(-w * 0.5, 0), p + Vector2(w * 0.5, 0), fg, 1.5)
+				draw_line(Vector2(lr.position.x + 3.0, lr.get_center().y),
+					Vector2(lr.end.x - 3.0, lr.get_center().y), fg, 1.5)
 			if qi >= 0:
-				draw_string(font, p + Vector2(w * 0.5 + 4, fs * 0.38), str(qi + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COL_ROUTE)
+				draw_string(font, Vector2(lr.end.x + 4.0, baseline.y), str(qi + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, fs, COL_ROUTE)
 	# player
 	if player != null:
 		var pp := _tile_to_screen(Vector2(player.tile) + Vector2(0.5, 0.5))
@@ -671,7 +727,7 @@ func _draw() -> void:
 	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "F3 focus/all  ·  click to manage  ·  type labels + Enter to travel  ·  info/action <label>  ·  Tab close"
 	var sec := World.sector_of_tile(Vector2i(_center))
 	var sd_here := World.get_sector(sec.x, sec.y)
-	var count_text := "%d/%d priority labels" % [displayed.size(), _placed.size()] if not _show_all_buildings else "%d known buildings" % _placed.size()
+	var count_text := "%d/%d priority labels" % [displayed.size(), _placed.size()] if not _show_all_buildings else "%d addressable buildings" % _placed.size()
 	draw_string(font, Vector2(12, 24), "%s   sector %d,%d   %s" % [District.NAME[sd_here.district], sec.x, sec.y, count_text], HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Color("#dddddd"))
 
 
@@ -718,7 +774,7 @@ func _draw_building_panel(font: Font) -> void:
 	if _selected_id == "":
 		y += 18.0
 		draw_string(font, Vector2(x, y), "Click a priority label to inspect it.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
-		draw_string(font, Vector2(x, y + 20), "F3 reveals every known building.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
+		draw_string(font, Vector2(x, y + 20), "F3 reveals the broad address layer.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
 		return
 	var b := World.building_by_id(_selected_id)
 	if b == null:

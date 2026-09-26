@@ -329,6 +329,10 @@ func unload() -> void:
 	_set_own_collider(true)
 	if building != null:
 		SectorMesher.set_doorway_open(building.id(), false)
+	# Stop television emitters synchronously before their room nodes are deferred for free.
+	# This prevents even a one-frame tail from following the player back onto the street.
+	for child in find_children("*", "AudioStreamPlayer3D", true, false):
+		(child as AudioStreamPlayer3D).stop()
 	_drop_old_floor()
 	for n in _room_nodes.values():
 		n.queue_free()

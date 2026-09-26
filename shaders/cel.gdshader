@@ -63,14 +63,14 @@ void fragment() {
 	vec2 cell_min = (v_cell * cell_size + vec2(inset_px)) / atlas_size;
 	vec2 cell_max = ((v_cell + vec2(1.0)) * cell_size - vec2(inset_px)) / atlas_size;
 	vec2 uv = clamp((f + v_cell) / atlas_cells, cell_min, cell_max);
-	vec4 t;
-	if (footprint <= 1.05) {
-		// Preserve true pixel-art edges at close range instead of blurring every surface.
-		ivec2 texel = ivec2(clamp(floor(uv * atlas_size), vec2(0.0), atlas_size - vec2(1.0)));
-		t = texelFetch(atlas, texel, 0);
-	} else {
-		t = textureLod(atlas, uv, lod);
-	}
+	// Crossfade rather than branch at the one-texel boundary. The previous hard switch was
+	// stable at distance but could still make individual facade pixels pop as the footprint
+	// crossed the threshold during movement.
+	ivec2 texel = ivec2(clamp(floor(uv * atlas_size), vec2(0.0), atlas_size - vec2(1.0)));
+	vec4 crisp = texelFetch(atlas, texel, 0);
+	vec4 filtered = textureLod(atlas, uv, lod);
+	float mip_mix = smoothstep(0.72, 1.55, footprint);
+	vec4 t = mix(crisp, filtered, mip_mix);
 	vec3 col = COLOR.rgb * t.rgb;
 	if (tiling) {
 		float n = vnoise(v_world.xz * grime_scale + v_world.y * 0.31);

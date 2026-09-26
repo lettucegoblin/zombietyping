@@ -1,4 +1,4 @@
-[gd_scene load_steps=20 format=3]
+[gd_scene load_steps=21 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/streamer.gd" id="2_streamer"]
@@ -14,10 +14,12 @@
 [ext_resource type="Script" path="res://scripts/world/ash.gd" id="12_ash"]
 [ext_resource type="Script" path="res://scripts/world/sky_life.gd" id="13_sky"]
 [ext_resource type="Script" path="res://scripts/settlement/settlement.gd" id="14_settlement"]
+[ext_resource type="Script" path="res://scripts/ui/building_reticle.gd" id="15_reticle"]
 
 [sub_resource type="ShaderMaterial" id="post_mat"]
 shader = ExtResource("7_post")
 shader_parameter/dither_strength = 0.0
+shader_parameter/transition_width = 0.018
 shader_parameter/enabled = 1.0
 
 [sub_resource type="ProceduralSkyMaterial" id="sky_mat"]
@@ -151,6 +153,15 @@ offset_bottom = 220.0
 grow_horizontal = 0
 mouse_filter = 2
 script = ExtResource("10_minimap")
+
+[node name="BuildingReticle" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("15_reticle")
 
 [node name="Words" type="Control" parent="UI" node_paths=PackedStringArray("view_container", "viewport")]
 anchors_preset = 15

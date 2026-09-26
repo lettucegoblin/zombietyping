@@ -30,9 +30,9 @@ up. `NEXT_STEPS.md` holds the backlog and the open design questions.
 - Rails in the unsafe city; WASD is only enabled inside a claimed perimeter. Tab pauses and
   opens the map. Mouse movement looks around without a button; opening a menu releases the
   pointer, and closing it recaptures it. Scripted doorway beats briefly retain priority so
-  their action remains readable. Buildings are labelled
-  relative to the map view (`1a`, `3b`, `10e` …), digit first so labels can be typed from
-  the HUD without opening the map.
+  their action remains readable. Buildings use stable, fixed-width digit-first addresses
+  (`1aa` … `9zz`) across the minimap, Tab map, and first-person reticle, so they can be
+  typed from the HUD without opening the map.
 
 ## 2. Running things
 
@@ -58,7 +58,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |
 | `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
-| `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, menu/gameplay pointer handoff, and panel input capture |
+| `scenes/tests/test_tab_map.tscn` | stable fog-independent addresses, center-reticle building picking, collision-free map label nudging, supply-route caching/invalidation, menu/gameplay pointer handoff, and panel input capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_room_visibility.tscn` | partition-safe entrances, room-tinted ceilings, unrevealed structural occlusion, hidden encounters, and furniture sprite alpha |
 | `scenes/tests/test_word_overlay_layout.tscn` | typed-prefix priority, collision-free label nudging, and edge-hint sliding constraints |
@@ -98,7 +98,8 @@ scripts/
                          word_overlay.gd (draws words on the UI layer), words.gd (pool)
   zombies/               zombie.gd (state machine), director.gd (spawns, LOS, targeting),
                          zombie_type.gd (runner/shambler stats), zombie_frames.gd (SpriteFrames)
-  map/                   map_labels.gd (shared "1a" labelling), tab_map.gd, minimap.gd
+  map/                   map_labels.gd (stable shared addresses), tab_map.gd, minimap.gd
+  ui/building_reticle.gd outdoor center dot + visible-facade address ray
   audio/sfx.gd           local + true-3D one-shots, semantic-room ambience layers/events
   tests/                 the scenes above + parse_check.gd
 shaders/                 cel.gdshader (city), flat.gdshader (interiors), palette_post.gdshader
@@ -113,15 +114,16 @@ design/                  contact sheets and reference screenshots from the art d
 `Main` → `View` (SubViewportContainer, stretch, shrink 2) → `Viewport` (SubViewport 640×360,
 nearest filter: the pixel look) → `World` (Env, Sun, Streamer, Interior, Director, SkyLife,
 Player+Camera3D+Ash) and a `Post` CanvasLayer with `PaletteQuantize` (palette_post shader:
-nearest-palette snap; F1 toggles it, F2 toggles dither). Beside the view: `Typist`, `Sfx`,
-and the `UI` CanvasLayer at full 1280×720: `HUD` (RichTextLabel with ink outline), `Minimap`
-(top right), `Words` (WordOverlay), `Flash`, `GameOver`, `TabMap`. UI node ORDER matters:
-Words must come after HUD/Minimap (draws above them) and before TabMap.
+nearest-palette selection with a narrow two-swatch handoff; F1 toggles it, F2 toggles
+dither). Beside the view: `Typist`, `Sfx`, and the `UI` CanvasLayer at full 1280×720: `HUD`
+(RichTextLabel with ink outline), `Minimap` (top right), `BuildingReticle`, `Words`
+(WordOverlay), `Flash`, `GameOver`, `TabMap`. UI node ORDER matters: Words must come after
+HUD/Minimap/BuildingReticle (draws above them) and before TabMap.
 
 - Sky: ProceduralSkyMaterial purple→hot pink (quantizes into comic bands). Depth fog
   30–150 m lilac. Clouds have fog disabled.
 - City meshes use `cel.gdshader` (atlas cells via UV2, stochastic tile flips + noise
-  weathering to hide repetition). Interiors use unlit `flat.gdshader` with baked shading
+  weathering to hide repetition, and a smooth close-pixel→mip-filter handoff). Interiors use unlit `flat.gdshader` with baked shading
   (lit interiors + palette snap produced light-falloff blobs).
 - Godot front faces are CLOCKWISE; `SectorMesher._quad4` fixes winding from the normal.
 
@@ -313,6 +315,15 @@ Otherwise a letter goes, in order, to: the word you are already typing → the l
 next letter → any targetable zombie whose next letter it is → the start of a prompt word →
 miss/mistype. Zombies never take the keyboard away from you.
 
+**Exterior addresses** (`map_labels.gd`, `minimap.gd`, `tab_map.gd`): every building within
+the 400 m camera/map range receives one fixed-width address independent of fog. It remains
+attached through ordinary movement and is recycled only after the building is roughly
+1.2 km behind the player. The minimap and Tab map use deterministic nudge slots and never
+draw address boxes over one another; addresses hidden for lack of space remain typeable.
+Tab opens in an eight-site focus view and F3 reveals a pan-relative nearest slice of the
+broad layer (all addresses in range remain typeable). A translucent center dot ray-picks
+the nearest visible facade outdoors and shows that same address beside the dot.
+
 **Rail rules**: it HALTS for any targetable zombie within 14 m (indoor ones always; street
 ones seen from inside are ignored once you have typed where to go — `_moving_on`) and rolls
 again 0.7 s after the last one drops. Idle or held, the camera faces: the locked zombie →
@@ -396,8 +407,8 @@ Rules of the road:
   (`assets/sprites/sky`: clouds, crow flying ×2, crow perched ×3) all via `create_image_pixflux`
   with the palette. ~265 of 2000 monthly generations used (resets 2026-10-20).
 - Sounds are all procedural placeholders: `python3 tools/make_sounds.py` regenerates
-  `assets/audio/*.wav` (pure Python, no numpy on this Mac). Outdoors crossfades wind and
-  spatial city-life events. Indoors uses a quiet, hiss-free structural pressure bed plus
+  `assets/audio/*.wav` (pure Python, no numpy on this Mac). Outdoors crossfades broadband
+  wind and spatial city-life events, with no pitched whistle or periodic siren tone. Indoors uses a quiet, hiss-free structural pressure bed plus
   semantic layers—electrical resonance in powered rooms and pipes in kitchens/bathrooms—
   with room-specific 3D drips, creaks, knocks, clanks, thumps, and distant groans. Zombie,
   impact, door, bird, and ambience events use a pool inside the 3D SubViewport for actual
@@ -411,8 +422,10 @@ Rules of the road:
   readable; option words off screen pin to the edge with an arrow (behind you = bottom
   edge ▼), zombie words clamp onto the screen when the zombie is in your face.
 - The old runner sprite set (`assets/sprites/zombie/runner/`) is kept only as reference.
-- Labels are a VIEW concern; the queue stores building ids, so panning never changes what
-  you asked for. The minimap relabels when you stop, drift 10+ tiles, or explore more.
+- Addresses are a stable neighbourhood registry; the queue stores building ids, so panning,
+  fog changes, and ordinary travel never change what you asked for. The minimap refreshes
+  its 400 m selection pool when you stop or drift 10+ tiles, with conservative recycling
+  only far outside that pool.
 - Rooms count as cleared when no zombie assigned to them is alive — including ones that
   were shot after wandering out through an open door.
 - `Interior._rebuild` must build every room (an early return for unrevealed rooms once made

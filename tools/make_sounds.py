@@ -125,10 +125,9 @@ def brown_noise(n, leak=0.995, step=0.02):
 n = secs(14.0)
 gusts = [0.5 + 0.3 * math.sin(2 * math.pi * 0.09 * i / SR) * math.sin(2 * math.pi * 0.053 * i / SR + 1.3) + 0.2 * math.sin(2 * math.pi * 0.21 * i / SR + 0.4) for i in range(n)]
 wind = [b * g for b, g in zip(lowpass(brown_noise(n), 420), gusts)]
-# a whistle that rides the gusts (wind through the streets)
-whistle = tone(lambda t: 620 + 90 * math.sin(2 * math.pi * 0.17 * t), n, lambda t: 0.0)
-whistle = [w * 0.05 * max(0.0, gusts[i] - 0.55) * 4 for i, w in enumerate(tone(lambda t: 620 + 90 * math.sin(2 * math.pi * 0.17 * t), n, lambda t: 1.0))]
-save("wind", loopify(mix(wind, whistle)))
+# Keep the exterior bed broadband. A previous 620 Hz oscillating street-whistle layer read
+# as a repeating synthetic siren even after the actual siren event had been removed.
+save("wind", loopify(wind))
 
 # This was the original blanket indoor ambience. Its rumble, broadband hiss, and distant
 # wind read as an untuned television, so preserve that exact sound as TV static instead.
@@ -193,11 +192,6 @@ for i in range(n):
     flut.append(beat ** 3 * env(t, 0.05, 0.8))
 flut = [f * v for f, v in zip(flut, lowpass(noise(n), 1400))]
 save("flutter", flut)
-
-# distant siren (rare): slow two-tone wail, far away (lowpassed, quiet)
-n = secs(6.0)
-siren = tone(lambda t: 520 + 180 * math.sin(2 * math.pi * 0.45 * t), n, lambda t: 0.3 * env(t, 1.5, 4.0), tri)
-save("siren", lowpass(siren, 900))
 
 # far-off groan (a zombie somewhere): low, muffled
 n = secs(1.1)
