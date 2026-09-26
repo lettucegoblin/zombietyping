@@ -31,6 +31,7 @@ var _moving_on := false               # you typed a door/stairs/exit: zombies in
 const ENGAGE_FAR := 40.0              # facing on arrival: anything in your sights at all
 const APPROACH_RANGE := 10.0          # closer than this and a zombie's word is live; walk in until then
 var _approach_beat := 0.0
+var _mouse_looking := false
 const HALT_RANGE := 14.0              # a zombie you can fire at (in sight, in range) stops the rail
 const AIM_RANGE := 14.0               # ...and turns you to face it whenever you are not walking
 var _rescue_cue: SurvivorCue
@@ -179,6 +180,19 @@ func _process(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
+		_mouse_looking = event.pressed and not map.visible
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if _mouse_looking else Input.MOUSE_MODE_VISIBLE
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventMouseMotion and _mouse_looking:
+		player.mouse_look(event.relative)
+		get_viewport().set_input_as_handled()
+		return
+	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and _mouse_looking:
+		_release_mouse_look()
+		get_viewport().set_input_as_handled()
+		return
 	if dead and event is InputEventKey and event.pressed and event.keycode == KEY_R:
 		Engine.time_scale = 1.0
 		get_tree().paused = false
@@ -249,11 +263,18 @@ func _unhandled_input(event: InputEvent) -> void:
 		var d: float = post_mat.get_shader_parameter("dither_strength")
 		post_mat.set_shader_parameter("dither_strength", 0.0 if d > 0.0 else 0.04)
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
+		_release_mouse_look()
 		if not map.visible:
 			typist.enabled = false
 			get_tree().paused = true
 			map.open()
-		get_viewport().set_input_as_handled()
+			get_viewport().set_input_as_handled()
+
+
+func _release_mouse_look() -> void:
+	_mouse_looking = false
+	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
+		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 
 
 func _toggle_map() -> void:
@@ -516,7 +537,7 @@ func _enter_building() -> void:
 	interior.add_child(InteriorMesher.kicked_leaf(d))
 	sfx.play_at("door", d.pos, 0.0, 0.08, 1.0, 24.0)
 	player.shake(0.25)
-	player.face_toward(d.pos)
+	player.lock_look_toward(d.pos)
 	_seed_floor()
 	_startle_near(d.pos, ri)
 	if not rescue.is_empty():
@@ -524,6 +545,7 @@ func _enter_building() -> void:
 	_refresh_hud()
 	# a beat to watch the door tumble in (and see what is standing behind it), then walk
 	await get_tree().create_timer(0.55).timeout
+	player.unlock_look()
 	if mode != Mode.INSIDE or interior.building != b:
 		return
 	player.push_local(PackedVector3Array([d.pos, interior.threshold_world(fp.entrance_door, ri)]), "room:%d" % ri, 2.6)
@@ -850,7 +872,7 @@ func _refresh_hud() -> void:
 	match mode:
 		Mode.STREET:
 			if q.is_empty():
-				lines.append("[color=#9aa]Idle — Tab: map, type a destination[/color]")
+				lines.append("[color=#9aa]Idle — Tab: map, type a destination · hold right mouse: look[/color]")
 			else:
 				lines.append("Heading to [b]%s[/b]   (%d queued)" % [q[0], q.size()])
 		Mode.DOOR:
@@ -870,7 +892,7 @@ func _refresh_hud() -> void:
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
 			var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  %s  ·  Tab manage/travel" % floor_text)
+			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  hold right mouse look  ·  %s  ·  Tab manage/travel" % floor_text)
 			if settlement.build_mode:
 				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()

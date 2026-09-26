@@ -28,7 +28,8 @@ up. `NEXT_STEPS.md` holds the backlog and the open design questions.
 - **Fair jumpscares are not jumpscares:** a zombie may only hurt you while its word is on
   screen and has been readable for a beat.
 - Rails in the unsafe city; WASD is only enabled inside a claimed perimeter. Tab pauses and
-  opens the map. Buildings are labelled
+  opens the map. Hold the right mouse button and drag to look around; scripted doorway beats
+  briefly retain priority so their action remains readable. Buildings are labelled
   relative to the map view (`1a`, `3b`, `10e` …), digit first so labels can be typed from
   the HUD without opening the map.
 
@@ -51,6 +52,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | Scene | Covers |
 |---|---|
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
+| `scenes/tests/test_camera_control.tscn` | kicked-door camera lock plus right-drag mouse-look priority over ambient auto-aim |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
 | `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |

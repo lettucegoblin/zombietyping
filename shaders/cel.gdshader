@@ -6,7 +6,10 @@ render_mode cull_back, depth_draw_opaque, specular_disabled;
 // low-frequency value-noise mask darkens patches (weathering). After the palette snap the
 // patches read as discrete stains rather than a visible grid.
 
-uniform sampler2D atlas : source_color, filter_nearest, hint_default_white;
+// Keep the authored texels crisp when they are near, but use a stable mip level when a
+// facade shrinks below one screen pixel per texel. Nearest-only minification makes detail
+// crawl and flicker as the camera moves.
+uniform sampler2D atlas : source_color, filter_linear_mipmap_anisotropic, hint_default_white;
 uniform float atlas_cells = 4.0;
 uniform float band_hi = 0.55;
 uniform float band_lo = 0.18;
@@ -48,8 +51,26 @@ void fragment() {
 		else if (h < 0.5) { f.y = 1.0 - f.y; }
 		else if (h < 0.75) { f = 1.0 - f; }
 	}
-	vec2 uv = (f + v_cell) / atlas_cells;
-	vec4 t = texture(atlas, uv);
+	vec2 atlas_size = vec2(textureSize(atlas, 0));
+	vec2 cell_size = atlas_size / atlas_cells;
+	vec2 repeat_dx = dFdx(UV);
+	vec2 repeat_dy = dFdy(UV);
+	float footprint = max(length(repeat_dx * cell_size), length(repeat_dy * cell_size));
+	float lod = max(log2(max(footprint, 1.0)), 0.0);
+	// At coarser levels the filter footprint grows. Pull samples into their atlas cell so
+	// neighbouring materials cannot bleed into one another.
+	float inset_px = clamp(0.75 * exp2(lod), 0.5, min(cell_size.x, cell_size.y) * 0.42);
+	vec2 cell_min = (v_cell * cell_size + vec2(inset_px)) / atlas_size;
+	vec2 cell_max = ((v_cell + vec2(1.0)) * cell_size - vec2(inset_px)) / atlas_size;
+	vec2 uv = clamp((f + v_cell) / atlas_cells, cell_min, cell_max);
+	vec4 t;
+	if (footprint <= 1.05) {
+		// Preserve true pixel-art edges at close range instead of blurring every surface.
+		ivec2 texel = ivec2(clamp(floor(uv * atlas_size), vec2(0.0), atlas_size - vec2(1.0)));
+		t = texelFetch(atlas, texel, 0);
+	} else {
+		t = textureLod(atlas, uv, lod);
+	}
 	vec3 col = COLOR.rgb * t.rgb;
 	if (tiling) {
 		float n = vnoise(v_world.xz * grime_scale + v_world.y * 0.31);

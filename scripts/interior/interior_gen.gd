@@ -485,7 +485,7 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "toilet", 0.26, 0.30, 0.56, 0.72, 0.72, Color("#fdf6e3"))
 				_add_prop(fp, room.index, "sink", 0.72, 0.25, 0.66, 0.48, 0.86, Color("#99f6e4"))
 				if room.rect.size.x * room.rect.size.y > 1:
-					_add_prop(fp, room.index, "tub", 0.70, 0.73, 0.76, 1.45, 0.55, Color("#b9a4e0"))
+					_add_prop(fp, room.index, "tub", 0.70, 0.73, 1.75, 0.82, 0.72, Color("#b9a4e0"))
 			"kitchen":
 				_add_prop(fp, room.index, "counter", 0.50, 0.18, 1.75, 0.58, 0.92, Color("#fdba74"))
 				_add_prop(fp, room.index, "stove", 0.22, 0.22, 0.62, 0.62, 0.92, Color("#6c6c72"))

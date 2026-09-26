@@ -28,7 +28,14 @@ var _cur: Dictionary = {}             # {id, points, tiles (or []), speed}
 var _seg_i := 0
 var _seg_t := 0.0
 var _yaw := 0.0
+var _pitch := 0.0
 var _shake := 0.0
+var _look_locked := false
+var _manual_look_time := 0.0
+
+const MOUSE_LOOK_SENSITIVITY := 0.0025
+const MOUSE_LOOK_HOLD := 1.25
+const MAX_LOOK_PITCH := deg_to_rad(38.0)
 
 @onready var cam: Camera3D = $Camera3D
 
@@ -185,7 +192,7 @@ func _manual_move_vector(v: Vector2, dt: float) -> void:
 			global_position = slide_x
 		elif _manual_position_clear(slide_z):
 			global_position = slide_z
-	if d.length() > 0.01:
+	if d.length() > 0.01 and not is_manual_looking() and not _look_locked:
 		facing = Vector3(d.x, 0, d.y)
 	var next_tile := World.world_to_tile(global_position)
 	if next_tile != tile:
@@ -206,13 +213,52 @@ func _manual_position_clear(pos: Vector3) -> bool:
 	return get_world_3d().direct_space_state.intersect_shape(query, 1).is_empty()
 
 
-## Turn (smoothly) to look at a world point; used when arriving in a room so the door
-## words are in view.
+## Turn (smoothly) to look at a world point. A deliberate mouse glance briefly wins over
+## ambient auto-aim, while a scripted look lock wins over both.
 func face_toward(p: Vector3) -> void:
+	if _look_locked or is_manual_looking():
+		return
+	_set_facing_toward(p)
+
+
+func _set_facing_toward(p: Vector3) -> void:
 	var d := p - global_position
 	d.y = 0.0
 	if d.length() > 0.01:
 		facing = d.normalized()
+
+
+## Cinematic beats such as a kicked-in entrance use this so combat auto-aim cannot pull
+## the camera away before the animation has finished.
+func lock_look_toward(p: Vector3) -> void:
+	_look_locked = true
+	_manual_look_time = 0.0
+	_pitch = 0.0
+	_set_facing_toward(p)
+
+
+func unlock_look() -> void:
+	_look_locked = false
+
+
+func is_look_locked() -> bool:
+	return _look_locked
+
+
+func is_manual_looking() -> bool:
+	return _manual_look_time > 0.0
+
+
+## Right-drag look. Horizontal motion changes the actual gaze direction, so targeting,
+## the minimap arrow, and safe-zone WASD all agree with what the camera shows.
+func mouse_look(relative: Vector2) -> void:
+	if _look_locked:
+		return
+	_manual_look_time = MOUSE_LOOK_HOLD
+	var yaw := atan2(-facing.x, -facing.z) - relative.x * MOUSE_LOOK_SENSITIVITY
+	facing = Vector3(-sin(yaw), 0.0, -cos(yaw))
+	_yaw = yaw
+	_pitch = clampf(_pitch - relative.y * MOUSE_LOOK_SENSITIVITY, -MAX_LOOK_PITCH, MAX_LOOK_PITCH)
 
 
 func all_paths() -> Array:
@@ -246,6 +292,7 @@ func _start_next() -> bool:
 
 
 func _process(dt: float) -> void:
+	_manual_look_time = maxf(_manual_look_time - dt, 0.0)
 	if manual_control:
 		_manual_move(dt)
 		_update_cam(dt)
@@ -267,7 +314,7 @@ func _process(dt: float) -> void:
 		var a := pts[_seg_i]
 		var b := pts[_seg_i + 1]
 		var seg_len := a.distance_to(b)
-		if seg_len > 0.001:
+		if seg_len > 0.001 and not is_manual_looking() and not _look_locked:
 			facing = (b - a) / seg_len
 		var left := (1.0 - _seg_t) * seg_len
 		if remaining < left:
@@ -318,8 +365,10 @@ func shake(amount: float) -> void:
 func _update_cam(dt: float) -> void:
 	var target_yaw := atan2(-facing.x, -facing.z)
 	_yaw = lerp_angle(_yaw, target_yaw, clampf(dt * turn_speed, 0.0, 1.0))
+	if not is_manual_looking():
+		_pitch = lerpf(_pitch, 0.0, clampf(dt * 4.0, 0.0, 1.0))
 	_shake = maxf(_shake - dt * 2.2, 0.0)
 	var jx := randf_range(-1.0, 1.0) * _shake * 0.14
 	var jy := randf_range(-1.0, 1.0) * _shake * 0.09
-	cam.rotation = Vector3(0.0, _yaw, randf_range(-1.0, 1.0) * _shake * 0.03)
+	cam.rotation = Vector3(_pitch, _yaw, randf_range(-1.0, 1.0) * _shake * 0.03)
 	cam.position = Vector3(jx, 1.65 + jy, 0)
