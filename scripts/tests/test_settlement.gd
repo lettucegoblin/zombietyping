@@ -1,7 +1,22 @@
 extends Node
 ## Headless progression check for the procedural settlement economy.
 
+const CAR_SPRITES := [
+	preload("res://assets/sprites/vehicles/car_salvage_0.png"),
+	preload("res://assets/sprites/vehicles/car_salvage_1.png"),
+	preload("res://assets/sprites/vehicles/car_salvage_2.png"),
+	preload("res://assets/sprites/vehicles/car_salvage_3.png"),
+	preload("res://assets/sprites/vehicles/car_salvage_4.png"),
+]
+
 func _ready() -> void:
+	# Settlement positions the sprite origin 1.15 m above the road. Keep the tire/frame
+	# baseline registered near pixel 160 on the shared 214 px canvas so no stage floats.
+	for i in CAR_SPRITES.size():
+		var used: Rect2i = CAR_SPRITES[i].get_image().get_used_rect()
+		if used.end.y < 154 or used.end.y > 170:
+			_fail("car stage %d has a floating baseline at pixel %d" % [i, used.end.y])
+			return
 	World.persistence_enabled = false
 	World.state.clear()
 	World.supply_links.clear()
