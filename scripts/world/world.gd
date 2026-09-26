@@ -32,6 +32,10 @@ const SURVIVOR_TRAITS := ["medic", "mechanic", "grower", "scout", "builder", "te
 
 var seed: int = 1337
 var _sectors: Dictionary = {}       ## Vector2i -> SectorData
+var _sector_tasks: Dictionary = {}  ## Vector2i -> {id, seed}; generation runs off the main thread
+var _sector_task_results: Dictionary = {} ## request token -> SectorData, guarded below
+var _sector_task_mutex := Mutex.new()
+var _sector_task_token := 0
 var state: Dictionary = {}          ## building id -> Dictionary (cleared floors, barricades, ...)
 var explored: Dictionary = {}       ## Vector2i sector -> PackedByteArray (fog of war, 1 = seen)
 var safezone_blocks: Dictionary = {} ## "sx,sy:block" -> true
@@ -62,6 +66,10 @@ var _ward_cache: Dictionary = {}    ## building id -> enclosed Vector2i cells
 
 func _ready() -> void:
 	_sectors.clear()
+	_sector_tasks.clear()
+	_sector_task_mutex.lock()
+	_sector_task_results.clear()
+	_sector_task_mutex.unlock()
 	persistence_enabled = DisplayServer.get_name() != "headless"
 	state_changed.connect(func(_id): _queue_save())
 	materials_changed.connect(_queue_save)
@@ -73,6 +81,14 @@ func _ready() -> void:
 
 
 func _exit_tree() -> void:
+	# Worker callables capture this autoload. Drain them before the object is released so a
+	# late sector result can never write into a freed World during shutdown.
+	for request in _sector_tasks.values():
+		WorkerThreadPool.wait_for_task_completion(int(request["id"]))
+	_sector_tasks.clear()
+	_sector_task_mutex.lock()
+	_sector_task_results.clear()
+	_sector_task_mutex.unlock()
 	# The work-cycle clock advances without writing every frame. Always flush on a clean
 	# shutdown so partial progress toward the next cycle is not discarded.
 	if persistence_enabled:
@@ -118,6 +134,10 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	settlement_cycle = int(snapshot.get("settlement_cycle", 0))
 	settlement_work_seconds = clampf(float(snapshot.get("settlement_work_seconds", 0.0)), 0.0, WORK_CYCLE_SECONDS)
 	_sectors.clear()
+	_sector_tasks.clear()
+	_sector_task_mutex.lock()
+	_sector_task_results.clear()
+	_sector_task_mutex.unlock()
 	materials_changed.emit()
 	backpack_changed.emit()
 	settlement_changed.emit()
@@ -155,10 +175,70 @@ func get_sector(sx: int, sy: int) -> SectorData:
 	var k := Vector2i(sx, sy)
 	var sd: SectorData = _sectors.get(k)
 	if sd == null:
-		sd = CityGen.generate(seed, sx, sy)
-		_sectors[k] = sd
-		sector_generated.emit(sd)
+		if _sector_tasks.has(k):
+			sd = _finish_sector_task(k)
+		if sd == null:
+			sd = CityGen.generate(seed, sx, sy)
+			_store_sector(k, sd)
 	return sd
+
+
+## Start deterministic sector data generation without blocking the render thread. Scene
+## nodes/resources are still constructed on the main thread by Streamer/SectorMesher.
+func request_sector(sx: int, sy: int) -> void:
+	var k := Vector2i(sx, sy)
+	if _sectors.has(k) or _sector_tasks.has(k):
+		return
+	var requested_seed := seed
+	_sector_task_token += 1
+	var token := _sector_task_token
+	var task_id := WorkerThreadPool.add_task(
+		func():
+			var generated := CityGen.generate(requested_seed, sx, sy)
+			_sector_task_mutex.lock()
+			_sector_task_results[token] = generated
+			_sector_task_mutex.unlock(),
+		false,
+		"generate city sector %d,%d" % [sx, sy]
+	)
+	_sector_tasks[k] = {"id": task_id, "seed": requested_seed, "token": token}
+
+
+## Non-blocking counterpart to get_sector(), used by the streamer once a worker finishes.
+func take_requested_sector(sx: int, sy: int) -> SectorData:
+	var k := Vector2i(sx, sy)
+	var cached: SectorData = _sectors.get(k)
+	if cached != null:
+		return cached
+	if not _sector_tasks.has(k):
+		request_sector(sx, sy)
+		return null
+	var request: Dictionary = _sector_tasks[k]
+	if not WorkerThreadPool.is_task_completed(int(request["id"])):
+		return null
+	return _finish_sector_task(k)
+
+
+func _finish_sector_task(k: Vector2i) -> SectorData:
+	var request: Dictionary = _sector_tasks.get(k, {})
+	if request.is_empty():
+		return null
+	WorkerThreadPool.wait_for_task_completion(int(request["id"]))
+	_sector_tasks.erase(k)
+	_sector_task_mutex.lock()
+	var generated = _sector_task_results.get(int(request["token"]))
+	_sector_task_results.erase(int(request["token"]))
+	_sector_task_mutex.unlock()
+	if int(request["seed"]) != seed or not generated is SectorData:
+		return null
+	var sd := generated as SectorData
+	_store_sector(k, sd)
+	return sd
+
+
+func _store_sector(k: Vector2i, sd: SectorData) -> void:
+	_sectors[k] = sd
+	sector_generated.emit(sd)
 
 
 func sector_of_tile(t: Vector2i) -> Vector2i:

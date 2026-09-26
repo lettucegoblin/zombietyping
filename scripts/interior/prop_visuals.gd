@@ -24,9 +24,27 @@ const SPRITES := {
 
 const DESIGN_WIDTH_PX := 52.0
 const DESIGN_HEIGHT_PX := 42.0
-const ALPHA_THRESHOLD := 0.03
-
-static var _metrics: Dictionary = {}
+const CANVAS_SIZE := Vector2i(67, 67)
+## Opaque extents measured from the source PNG alpha once at authoring time. Scanning
+## texture pixels the first time each kind spawned caused avoidable room-entry stalls.
+const OPAQUE_BOUNDS := {
+	"bed": Rect2i(0, 7, 58, 50),
+	"chair": Rect2i(22, 15, 29, 49),
+	"counter": Rect2i(5, 20, 61, 33),
+	"crate": Rect2i(14, 16, 52, 49),
+	"desk": Rect2i(2, 25, 62, 34),
+	"dresser": Rect2i(13, 8, 44, 46),
+	"fridge": Rect2i(20, 0, 33, 52),
+	"painting": Rect2i(6, 6, 51, 41),
+	"rug": Rect2i(0, 12, 57, 29),
+	"shelf": Rect2i(7, 14, 38, 53),
+	"sink": Rect2i(12, 10, 31, 52),
+	"sofa": Rect2i(2, 12, 59, 39),
+	"stove": Rect2i(22, 11, 36, 48),
+	"toilet": Rect2i(20, 8, 35, 52),
+	"tub": Rect2i(0, 26, 60, 32),
+	"tv": Rect2i(18, 1, 44, 47),
+}
 
 
 static func has_sprite(kind: String) -> bool:
@@ -56,28 +74,5 @@ static func horizontal_offset(kind: String) -> float:
 
 
 static func _metric(kind: String) -> Dictionary:
-	if _metrics.has(kind):
-		return _metrics[kind]
-	var texture := load(str(SPRITES.get(kind, ""))) as Texture2D
-	if texture == null:
-		var fallback := {"canvas": Vector2i(1, 1), "bounds": Rect2i(0, 0, 1, 1)}
-		_metrics[kind] = fallback
-		return fallback
-	var image := texture.get_image()
-	var canvas := image.get_size()
-	var min_x := canvas.x
-	var min_y := canvas.y
-	var max_x := -1
-	var max_y := -1
-	for y in canvas.y:
-		for x in canvas.x:
-			if image.get_pixel(x, y).a <= ALPHA_THRESHOLD:
-				continue
-			min_x = mini(min_x, x)
-			min_y = mini(min_y, y)
-			max_x = maxi(max_x, x)
-			max_y = maxi(max_y, y)
-	var bounds := Rect2i(0, 0, canvas.x, canvas.y) if max_x < 0 else Rect2i(min_x, min_y, max_x - min_x + 1, max_y - min_y + 1)
-	var metric := {"canvas": canvas, "bounds": bounds}
-	_metrics[kind] = metric
-	return metric
+	var bounds: Rect2i = OPAQUE_BOUNDS.get(kind, Rect2i(Vector2i.ZERO, CANVAS_SIZE))
+	return {"canvas": CANVAS_SIZE, "bounds": bounds}

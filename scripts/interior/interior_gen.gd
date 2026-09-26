@@ -14,6 +14,14 @@ const FURNITURE_GAP := 0.10
 ## without making a wall hanging visibly float in front of its wall.
 const WALL_ART_OFFSET := 0.025
 const RESERVED := ["up", "down", "exit"]
+## Floor plans are immutable seed output. Several systems need the same plans when a
+## building is entered (rescue selection, the active interior, progress, facilities), so
+## regenerating them independently causes very visible spikes in tall buildings.
+const PLAN_CACHE_LIMIT := 192
+static var _plan_cache: Dictionary = {}
+static var _plan_cache_order: Array[String] = []
+static var _cache_hits := 0
+static var _cache_misses := 0
 const WORDS := [
 	"attic","basin","bench","blade","bolt","bucket","cabin","candle","cellar","chain","chalk","chest",
 	"cider","clock","cloth","couch","crate","crowbar","curtain","desk","drawer","dust","ember","fence",
@@ -67,6 +75,11 @@ static func _room_limits(district: int) -> Vector2i:
 
 
 static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
+	var cache_key := _cache_key(seed, b, floor)
+	if _plan_cache.has(cache_key):
+		_cache_hits += 1
+		return _plan_cache[cache_key] as FloorPlan
+	_cache_misses += 1
 	var fp := FloorPlan.new()
 	fp.building_id = b.id()
 	fp.floor = floor
@@ -113,7 +126,31 @@ static func generate(seed: int, b: BuildingData, floor: int) -> FloorPlan:
 			tries += 1
 		door.word = w
 		chosen.append(w)
+	_plan_cache[cache_key] = fp
+	_plan_cache_order.append(cache_key)
+	while _plan_cache_order.size() > PLAN_CACHE_LIMIT:
+		_plan_cache.erase(_plan_cache_order.pop_front())
 	return fp
+
+
+static func clear_cache() -> void:
+	_plan_cache.clear()
+	_plan_cache_order.clear()
+	_cache_hits = 0
+	_cache_misses = 0
+
+
+static func cache_stats() -> Dictionary:
+	return {"size": _plan_cache.size(), "hits": _cache_hits, "misses": _cache_misses}
+
+
+static func _cache_key(seed: int, b: BuildingData, floor: int) -> String:
+	# Include the semantic/shape inputs as well as the stable id. Tests and workshop mods
+	# may construct alternate BuildingData at the same sector/index.
+	return "%d|%s|%d|%d|%s|%d|%d,%d,%d,%d|%d" % [
+		seed, b.id(), b.seed_hash, b.floors, b.kind, b.district,
+		b.rect.position.x, b.rect.position.y, b.rect.size.x, b.rect.size.y, floor,
+	]
 
 
 ## Houses, shops, offices: BSP rooms, a stairwell strip carved out, doors as a spanning

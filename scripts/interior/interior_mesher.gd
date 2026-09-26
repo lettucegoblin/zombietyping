@@ -34,7 +34,7 @@ static func ceiling_color(wall_col: Color) -> Color:
 	return wall_col
 
 
-static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictionary) -> Node3D:
+static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictionary, include_furnishings := true) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Room_%d" % ri
 	var room := fp.rooms[ri]
@@ -220,15 +220,16 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 		if fp.floor > 0 and lps.has("down"):
 			labels.add_child(_label("down", lps["down"], "down", -1))
 	root.add_child(labels)
-	var furnishings := _build_furnishings(fp, ri)
-	if furnishings != null:
-		root.add_child(furnishings)
+	if include_furnishings:
+		var furnishings := build_furnishings(fp, ri)
+		if furnishings != null:
+			root.add_child(furnishings)
 	return root
 
 
 ## Furniture is batched per room and deliberately has no collision. It gives each
 ## generated room a readable use without changing the rail, zombie paths, or LOS fairness.
-static func _build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
+static func build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Furnishings"
 	var st := SurfaceTool.new()
@@ -334,6 +335,7 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	if p.kind == "tv":
 		sprite.set_script(load("res://scripts/interior/tv_static.gd"))
+		sprite.set_meta("animated_tv", true)
 		var audio := AudioStreamPlayer3D.new()
 		audio.name = "DirectionalStatic"
 		var static_stream: AudioStream = load("res://assets/audio/tv_static.wav")

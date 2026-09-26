@@ -13,6 +13,8 @@ var _room_nodes: Dictionary = {}    # ri -> Node3D
 var _revealed: Dictionary = {}      # ri -> true
 var _door_nodes: Dictionary = {}    # di -> Node3D (leaf on its hinge)
 var _old_floor: Node3D              # previous storey kept alive during a stair climb
+var _floor_plans: Dictionary = {}   # floor -> immutable FloorPlan while this building is active
+var _total_rooms := -1
 
 
 func is_inside() -> bool:
@@ -22,7 +24,7 @@ func is_inside() -> bool:
 func enter(b: BuildingData, floor: int) -> void:
 	unload()
 	building = b
-	plan = InteriorGen.generate(World.seed, b, floor)
+	plan = _plan_for_floor(floor)
 	current_room = -1
 	_set_own_collider(false)
 	SectorMesher.set_doorway_open(b.id(), true)
@@ -115,7 +117,9 @@ func loot_here(world_pos: Vector3) -> String:
 ## rooms you have not seen yet are simply invisible until revealed.
 func _build_all() -> void:
 	for ri in plan.rooms.size():
-		_rebuild(ri)
+		# Unrevealed rooms need their opaque shell and collision immediately, but their
+		# sprites are invisible. Materialize furniture only when exploration reveals it.
+		_rebuild(ri, false)
 		_set_room_visible(ri, _revealed.has(ri))
 
 
@@ -129,6 +133,8 @@ func _set_room_visible(ri: int, v: bool) -> void:
 		# (and any pre-seeded encounter actors) through a building-shaped hole.
 		var structure := bool(c.get_meta("room_structure", false))
 		(c as VisualInstance3D).visible = (v or structure) and not c.get_meta("hidden", false)
+		if bool(c.get_meta("animated_tv", false)):
+			c.set_process(v)
 	for c in n.find_children("*", "AudioStreamPlayer3D", true, false):
 		var audio := c as AudioStreamPlayer3D
 		if v and not audio.playing:
@@ -174,7 +180,7 @@ func begin_floor_change(delta: int) -> void:
 	_room_nodes.clear()
 	_door_nodes.clear()
 	_revealed.clear()
-	plan = InteriorGen.generate(World.seed, building, plan.floor + delta)
+	plan = _plan_for_floor(plan.floor + delta)
 	current_room = -1
 	_build_all()
 	_set_part_hidden(_room_nodes.get(plan.stair_room), "DownFlights" if delta > 0 else "ShaftCap", true)
@@ -331,6 +337,8 @@ func unload() -> void:
 	_room_nodes.clear()
 	_door_nodes.clear()
 	_revealed.clear()
+	_floor_plans.clear()
+	_total_rooms = -1
 	plan = null
 	building = null
 	current_room = -1
@@ -366,17 +374,27 @@ func open_door(di: int) -> void:
 	door_kicked.emit(di)
 
 
-## Rooms cleared / total across all storeys (generates the other plans; cheap).
+func _plan_for_floor(floor: int) -> FloorPlan:
+	if _floor_plans.has(floor):
+		return _floor_plans[floor] as FloorPlan
+	var fp := InteriorGen.generate(World.seed, building, floor)
+	_floor_plans[floor] = fp
+	return fp
+
+
+## Rooms cleared / total across all storeys. Room totals are immutable for this building,
+## so the HUD's six refreshes per second should only count saved room state.
 func progress() -> Vector2i:
 	var bs := World.building_state(building.id())
 	var cleared := 0
-	var total := 0
+	if _total_rooms < 0:
+		_total_rooms = 0
+		for f in building.floors:
+			_total_rooms += _plan_for_floor(f).rooms.size()
 	for f in building.floors:
-		var fp := plan if f == plan.floor else InteriorGen.generate(World.seed, building, f)
-		total += fp.rooms.size()
 		var fs: Dictionary = bs.get("floors", {}).get(str(f), {})
 		cleared += (fs.get("rooms", {}) as Dictionary).size()
-	return Vector2i(cleared, total)
+	return Vector2i(cleared, _total_rooms)
 
 
 func set_room(ri: int) -> void:
@@ -443,6 +461,10 @@ func _reveal(ri: int, hop := true) -> void:
 		_revealed[ri] = true
 		if not _room_nodes.has(ri):
 			_rebuild(ri)
+		elif not _room_nodes[ri].has_node("Furnishings"):
+			var furnishings := InteriorMesher.build_furnishings(plan, ri)
+			if furnishings != null:
+				_room_nodes[ri].add_child(furnishings)
 		_set_room_visible(ri, true)
 	if hop:
 		# whatever you can see through this room's open doors and archways
@@ -452,10 +474,10 @@ func _reveal(ri: int, hop := true) -> void:
 				_reveal(plan.other_room(di, ri), false)
 
 
-func _rebuild(ri: int) -> void:
+func _rebuild(ri: int, include_furnishings := true) -> void:
 	if _room_nodes.has(ri):
 		_room_nodes[ri].queue_free()
-	var node := InteriorMesher.build_room(plan, ri, building, floor_state()["opened"])
+	var node := InteriorMesher.build_room(plan, ri, building, floor_state()["opened"], include_furnishings)
 	add_child(node)
 	_room_nodes[ri] = node
 	var l: Node3D = node.get_node_or_null("Labels")
@@ -553,7 +575,7 @@ func floor_uncleared(floor: int) -> bool:
 	if floor_has_pending_rescue(floor):
 		return true
 	var bs := World.building_state(building.id())
-	var fp := plan if floor == plan.floor else InteriorGen.generate(World.seed, building, floor)
+	var fp := _plan_for_floor(floor)
 	var fs: Dictionary = bs.get("floors", {}).get(str(floor), {})
 	return (fs.get("rooms", {}) as Dictionary).size() < fp.rooms.size()
 
@@ -688,7 +710,7 @@ func rescue_world_pos() -> Vector3:
 		return Vector3.INF
 	var target_plan: FloorPlan = plan
 	if int(mission["floor"]) != plan.floor:
-		target_plan = InteriorGen.generate(World.seed, building, int(mission["floor"]))
+		target_plan = _plan_for_floor(int(mission["floor"]))
 	var ri := int(mission["room"])
 	if ri < 0 or ri >= target_plan.rooms.size():
 		return Vector3.INF
@@ -827,7 +849,7 @@ func other_floors_uncleared() -> bool:
 			continue
 		if floor_has_pending_rescue(f):
 			return true
-		var fp := InteriorGen.generate(World.seed, building, f)
+		var fp := _plan_for_floor(f)
 		var fs: Dictionary = bs.get("floors", {}).get(str(f), {})
 		if (fs.get("rooms", {}) as Dictionary).size() < fp.rooms.size():
 			return true

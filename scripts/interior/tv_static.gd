@@ -3,6 +3,7 @@ extends Sprite3D
 ## cabinet art remains untouched. Room visibility pauses this automatically.
 
 var _base: Image
+var _texture: ImageTexture
 var _frame := 0.0
 var _rng := RandomNumberGenerator.new()
 const SCREEN := Rect2i(24, 22, 20, 18)
@@ -13,6 +14,8 @@ func _ready() -> void:
 	_rng.seed = hash(name)
 	if texture != null:
 		_base = texture.get_image()
+		_texture = ImageTexture.create_from_image(_base)
+		texture = _texture
 
 
 func _process(dt: float) -> void:
@@ -28,4 +31,4 @@ func _process(dt: float) -> void:
 			# Preserve the rounded cabinet mask and dark screen edge.
 			if _base.get_pixel(x, y).a > 0.5 and _base.get_pixel(x, y).get_luminance() > 0.10:
 				img.set_pixel(x, y, SNOW[_rng.randi_range(0, SNOW.size() - 1)])
-	texture = ImageTexture.create_from_image(img)
+	_texture.update(img)

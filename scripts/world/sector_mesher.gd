@@ -19,6 +19,7 @@ const DOORWAY := Color("#120a1f")
 const DOOR_W := 1.2      ## must match InteriorMesher.DOOR_W / DOOR_H (the leaf flies through both holes)
 const DOOR_H := 2.2
 const VESTIBULE_D := 0.7
+const GROUND_ROWS_PER_STEP := 4
 
 ## Atlas cells (4x4 grid of 64px, see assets/textures/atlas.png). (0,0) is plain white.
 const CELL_PLAIN := Vector2(0, 0)
@@ -83,109 +84,176 @@ static func building_wall_cell(b: BuildingData) -> Vector2:
 
 
 static func build(sd: SectorData) -> Node3D:
+	var job := begin_build(sd)
+	while not continue_build(job, maxi(1, sd.buildings.size())):
+		pass
+	return job["root"]
+
+
+## Runtime streaming uses this two-stage builder so a dense/tall sector does not consume
+## an entire frame. Ground appears first; facade geometry and colliders are added in small
+## batches while the sector is still on the outer edge of the streaming radius.
+static func begin_build(sd: SectorData) -> Dictionary:
 	var root := Node3D.new()
 	root.name = "Sector_%d_%d" % [sd.coord.x, sd.coord.y]
 	var org := sd.origin_tile()
 	var ox := org.x * T
 	var oz := org.y * T
 
-	# ---- ground + roads + sidewalks ----
-	var st := SurfaceTool.new()
-	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	# A single base quad prevents a visible hole while road and sidewalk detail is emitted
+	# over several frames. It is deliberately separate from the detail mesh.
+	var base_st := SurfaceTool.new()
+	base_st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var gcell := CELL_GRASS if sd.district in [District.Kind.RESIDENTIAL, District.Kind.SUBURB, District.Kind.PARK] else CELL_CONCRETE
-	_quad_y(st, ox, oz, ox + S * T, oz + S * T, -0.02, GROUND[sd.district], gcell)
-	for ly in S:
-		for lx in S:
-			var r := sd.road[ly * S + lx]
-			var x0 := ox + lx * T
-			var z0 := oz + ly * T
-			if r != 0:
-				_quad_y(st, x0, z0, x0 + T, z0 + T, 0.0, ROAD_ARTERIAL if r == 2 else ROAD_LOCAL, CELL_ASPHALT)
-				if r == 2:
-					# Centre dashes follow the same continuous tensor as the road trace.
-					var flow := CityGen.road_direction_at(World.seed, Vector2(org + Vector2i(lx, ly)) + Vector2(0.5, 0.5))
-					var horiz := absf(flow.x) >= absf(flow.y)
-					if horiz:
-						_quad_y(st, x0 + 1.0, z0 + T * 0.5 - 0.12, x0 + 3.0, z0 + T * 0.5 + 0.12, 0.01, LANE)
-					else:
-						_quad_y(st, x0 + T * 0.5 - 0.12, z0 + 1.0, x0 + T * 0.5 + 0.12, z0 + 3.0, 0.01, LANE)
-			else:
-				# sidewalk strip on every edge that touches a road
-				var w := 0.9
-				if _road_n(sd, lx, ly - 1): _quad_y(st, x0, z0, x0 + T, z0 + w, 0.03, SIDEWALK, CELL_SIDEWALK)
-				if _road_n(sd, lx, ly + 1): _quad_y(st, x0, z0 + T - w, x0 + T, z0 + T, 0.03, SIDEWALK, CELL_SIDEWALK)
-				if _road_n(sd, lx - 1, ly): _quad_y(st, x0, z0, x0 + w, z0 + T, 0.03, SIDEWALK, CELL_SIDEWALK)
-				if _road_n(sd, lx + 1, ly): _quad_y(st, x0 + T - w, z0, x0 + T, z0 + T, 0.03, SIDEWALK, CELL_SIDEWALK)
-	var ground := MeshInstance3D.new()
-	ground.name = "Ground"
-	ground.mesh = st.commit()
-	ground.material_override = material()
-	root.add_child(ground)
+	_quad_y(base_st, ox, oz, ox + S * T, oz + S * T, -0.02, GROUND[sd.district], gcell)
+	var base := MeshInstance3D.new()
+	base.name = "GroundBase"
+	base.mesh = base_st.commit()
+	base.material_override = material()
+	root.add_child(base)
+	var ground_st := SurfaceTool.new()
+	ground_st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_quad_y(ground_st, ox, oz, ox + S * T, oz + S * T, -0.02, GROUND[sd.district], gcell)
+	var bt := SurfaceTool.new()
+	bt.begin(Mesh.PRIMITIVE_TRIANGLES)
+	return {"sd": sd, "root": root, "ground": ground_st, "ground_y": 0,
+		"buildings": bt, "next": 0, "finished": false}
 
-	# ---- buildings ----
+
+## Returns true once the sector is complete. `building_budget` bounds facade and collider
+## work, which is the part that scales with dense and tall procedural sectors.
+static func continue_build(job: Dictionary, building_budget: int = 6) -> bool:
+	if bool(job["finished"]):
+		return true
+	var sd: SectorData = job["sd"]
+	var root: Node3D = job["root"]
+	if int(job["ground_y"]) < S:
+		var ground_st: SurfaceTool = job["ground"]
+		var first_y: int = job["ground_y"]
+		var stop_y := mini(first_y + GROUND_ROWS_PER_STEP, S)
+		for ly in range(first_y, stop_y):
+			_add_ground_row(ground_st, sd, ly)
+		job["ground_y"] = stop_y
+		if stop_y == S:
+			var ground := MeshInstance3D.new()
+			ground.name = "Ground"
+			ground.mesh = ground_st.commit()
+			ground.material_override = material()
+			root.add_child(ground)
+			var base: Node = root.get_node_or_null("GroundBase")
+			if base != null:
+				root.remove_child(base)
+				base.free()
+		return false
+	var bt: SurfaceTool = job["buildings"]
+	var next: int = job["next"]
+	var stop := mini(next + maxi(1, building_budget), sd.buildings.size())
+	while next < stop:
+		var b: BuildingData = sd.buildings[next]
+		_building(bt, b)
+		_add_building_collider(root, b)
+		next += 1
+	job["next"] = next
+	if next < sd.buildings.size():
+		return false
 	if not sd.buildings.is_empty():
-		var bt := SurfaceTool.new()
-		bt.begin(Mesh.PRIMITIVE_TRIANGLES)
-		for b in sd.buildings:
-			_building(bt, b)
-		var bm := MeshInstance3D.new()
-		bm.name = "Buildings"
-		bm.mesh = bt.commit()
-		bm.material_override = material()
-		root.add_child(bm)
-		# facade door leaves: one MultiMesh per sector; a kicked door's instance is collapsed
-		var mm := MultiMesh.new()
-		mm.transform_format = MultiMesh.TRANSFORM_3D
-		var qm := QuadMesh.new()
-		qm.size = Vector2(DOOR_W, DOOR_H)
-		mm.mesh = qm
-		mm.instance_count = sd.buildings.size()
-		var mmi := MultiMeshInstance3D.new()
-		mmi.name = "DoorLeaves"
-		mmi.multimesh = mm
-		mmi.material_override = door_leaf_material()
-		mmi.custom_aabb = AABB(Vector3(ox - 2.0, -1.0, oz - 2.0), Vector3(S * T + 4.0, 6.0, S * T + 4.0))
-		root.add_child(mmi)
-		# dark vestibules behind the door openings (the facade wall has a real hole there)
-		var vm := MultiMesh.new()
-		vm.transform_format = MultiMesh.TRANSFORM_3D
-		vm.mesh = vestibule_mesh()
-		vm.instance_count = sd.buildings.size()
-		var vmi := MultiMeshInstance3D.new()
-		vmi.name = "Doorways"
-		vmi.multimesh = vm
-		vmi.material_override = material()
-		vmi.custom_aabb = mmi.custom_aabb
-		root.add_child(vmi)
-		for i in sd.buildings.size():
-			var b := sd.buildings[i]
-			door_instances[b.id()] = { "mmi": mmi, "idx": i }
-			doorway_instances[b.id()] = { "mmi": vmi, "idx": i }
-			var kicked: bool = World.state.get(b.id(), {}).get("door_kicked", false)
-			mm.set_instance_transform(i, Transform3D().scaled(Vector3.ZERO) if kicked else door_leaf_transform(b))
-			vm.set_instance_transform(i, door_leaf_transform(b, 0.0))
-		# one box collider per building: blocks line-of-sight rays (layer 1) around corners
-		for b in sd.buildings:
-			var body := StaticBody3D.new()
-			body.name = "Col_" + b.id().replace(",", "_").replace(":", "_")
-			body.set_meta("bid", b.id())
-			body.add_to_group("building_colliders")
-			var shape := CollisionShape3D.new()
-			var box := BoxShape3D.new()
-			var fpr := InteriorGen.footprint(b)
-			var h := b.floors * FLOOR_H
-			box.size = Vector3(fpr.size.x, h, fpr.size.y)
-			shape.shape = box
-			shape.position = Vector3(fpr.position.x + fpr.size.x * 0.5, h * 0.5, fpr.position.y + fpr.size.y * 0.5)
-			body.add_child(shape)
-			root.add_child(body)
-	return root
+		_finish_buildings(root, sd, bt)
+	job["finished"] = true
+	return true
+
+
+static func _add_ground_row(st: SurfaceTool, sd: SectorData, ly: int) -> void:
+	var org := sd.origin_tile()
+	var ox := org.x * T
+	var oz := org.y * T
+	for lx in S:
+		var r := sd.road[ly * S + lx]
+		var x0 := ox + lx * T
+		var z0 := oz + ly * T
+		if r != 0:
+			_quad_y(st, x0, z0, x0 + T, z0 + T, 0.0, ROAD_ARTERIAL if r == 2 else ROAD_LOCAL, CELL_ASPHALT)
+			if r == 2:
+				# Centre dashes follow the same continuous tensor as the road trace.
+				var flow := CityGen.road_direction_at(World.seed, Vector2(org + Vector2i(lx, ly)) + Vector2(0.5, 0.5))
+				var horiz := absf(flow.x) >= absf(flow.y)
+				if horiz:
+					_quad_y(st, x0 + 1.0, z0 + T * 0.5 - 0.12, x0 + 3.0, z0 + T * 0.5 + 0.12, 0.01, LANE)
+				else:
+					_quad_y(st, x0 + T * 0.5 - 0.12, z0 + 1.0, x0 + T * 0.5 + 0.12, z0 + 3.0, 0.01, LANE)
+		else:
+			# sidewalk strip on every edge that touches a road
+			var w := 0.9
+			if _road_n(sd, lx, ly - 1): _quad_y(st, x0, z0, x0 + T, z0 + w, 0.03, SIDEWALK, CELL_SIDEWALK)
+			if _road_n(sd, lx, ly + 1): _quad_y(st, x0, z0 + T - w, x0 + T, z0 + T, 0.03, SIDEWALK, CELL_SIDEWALK)
+			if _road_n(sd, lx - 1, ly): _quad_y(st, x0, z0, x0 + w, z0 + T, 0.03, SIDEWALK, CELL_SIDEWALK)
+			if _road_n(sd, lx + 1, ly): _quad_y(st, x0 + T - w, z0, x0 + T, z0 + T, 0.03, SIDEWALK, CELL_SIDEWALK)
+
+
+static func _add_building_collider(root: Node3D, b: BuildingData) -> void:
+	var body := StaticBody3D.new()
+	body.name = "Col_" + b.id().replace(",", "_").replace(":", "_")
+	body.set_meta("bid", b.id())
+	body.add_to_group("building_colliders")
+	var shape := CollisionShape3D.new()
+	var box := BoxShape3D.new()
+	var fpr := InteriorGen.footprint(b)
+	var h := b.floors * FLOOR_H
+	box.size = Vector3(fpr.size.x, h, fpr.size.y)
+	shape.shape = box
+	shape.position = Vector3(fpr.position.x + fpr.size.x * 0.5, h * 0.5, fpr.position.y + fpr.size.y * 0.5)
+	body.add_child(shape)
+	root.add_child(body)
+
+
+static func _finish_buildings(root: Node3D, sd: SectorData, bt: SurfaceTool) -> void:
+	var bm := MeshInstance3D.new()
+	bm.name = "Buildings"
+	bm.mesh = bt.commit()
+	bm.material_override = material()
+	root.add_child(bm)
+	# facade door leaves: one MultiMesh per sector; a kicked door's instance is collapsed
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	var qm := QuadMesh.new()
+	qm.size = Vector2(DOOR_W, DOOR_H)
+	mm.mesh = qm
+	mm.instance_count = sd.buildings.size()
+	var mmi := MultiMeshInstance3D.new()
+	mmi.name = "DoorLeaves"
+	mmi.multimesh = mm
+	mmi.material_override = door_leaf_material()
+	var org := sd.origin_tile()
+	var ox := org.x * T
+	var oz := org.y * T
+	mmi.custom_aabb = AABB(Vector3(ox - 2.0, -1.0, oz - 2.0), Vector3(S * T + 4.0, 6.0, S * T + 4.0))
+	root.add_child(mmi)
+	# dark vestibules behind the door openings (the facade wall has a real hole there)
+	var vm := MultiMesh.new()
+	vm.transform_format = MultiMesh.TRANSFORM_3D
+	vm.mesh = vestibule_mesh()
+	vm.instance_count = sd.buildings.size()
+	var vmi := MultiMeshInstance3D.new()
+	vmi.name = "Doorways"
+	vmi.multimesh = vm
+	vmi.material_override = material()
+	vmi.custom_aabb = mmi.custom_aabb
+	root.add_child(vmi)
+	for i in sd.buildings.size():
+		var b: BuildingData = sd.buildings[i]
+		door_instances[b.id()] = {"mmi": mmi, "idx": i}
+		doorway_instances[b.id()] = {"mmi": vmi, "idx": i}
+		var kicked: bool = World.state.get(b.id(), {}).get("door_kicked", false)
+		mm.set_instance_transform(i, Transform3D().scaled(Vector3.ZERO) if kicked else door_leaf_transform(b))
+		vm.set_instance_transform(i, door_leaf_transform(b, 0.0))
 
 
 static func _road_n(sd: SectorData, lx: int, ly: int) -> bool:
 	if lx >= 0 and ly >= 0 and lx < S and ly < S:
 		return sd.road[ly * S + lx] != 0
-	return World.road_at(sd.origin_tile() + Vector2i(lx, ly)) != 0
+	# This query is only for a cosmetic sidewalk strip. Asking World for an outer cell can
+	# procedurally generate an otherwise unloaded neighbour sector mid-frame (20ms+ in a
+	# dense region). The neighbour draws its own edge when it streams in.
+	return false
 
 
 static func building_color(b: BuildingData) -> Color:
