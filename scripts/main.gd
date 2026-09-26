@@ -31,7 +31,7 @@ var _moving_on := false               # you typed a door/stairs/exit: zombies in
 const ENGAGE_FAR := 40.0              # facing on arrival: anything in your sights at all
 const APPROACH_RANGE := 10.0          # closer than this and a zombie's word is live; walk in until then
 var _approach_beat := 0.0
-var _mouse_looking := false
+var _gameplay_mouse_look := false
 const HALT_RANGE := 14.0              # a zombie you can fire at (in sight, in range) stops the rail
 const AIM_RANGE := 14.0               # ...and turns you to face it whenever you are not walking
 var _rescue_cue: SurvivorCue
@@ -73,7 +73,7 @@ func _ready() -> void:
 	typist.destination_typed.connect(_on_hud_destination)
 	map.destinations_typed.connect(_on_destinations)
 	map.clear_requested.connect(func(): player.clear_queue(); map.queue_redraw())
-	map.closed.connect(func(): get_tree().paused = false; typist.enabled = mode != Mode.SAFEZONE)
+	map.closed.connect(_on_map_closed)
 	player.queue_changed.connect(_on_queue_changed)
 	player.arrived.connect(_on_arrived)
 	player.tile_changed.connect(func(t): map.mark_fog_dirty_around(World.sector_of_tile(t)))
@@ -90,6 +90,7 @@ func _ready() -> void:
 	director.zombie_spawned.connect(func(z): z.hit_player.connect(_on_player_hit))
 	_spark_tex = _make_spark()
 	game_over.visible = false
+	_capture_mouse_look()
 	_refresh_hud()
 
 
@@ -180,17 +181,8 @@ func _process(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_RIGHT:
-		_mouse_looking = event.pressed and not map.visible
-		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if _mouse_looking else Input.MOUSE_MODE_VISIBLE
-		get_viewport().set_input_as_handled()
-		return
-	if event is InputEventMouseMotion and _mouse_looking:
+	if event is InputEventMouseMotion and _gameplay_mouse_look and not map.visible:
 		player.mouse_look(event.relative)
-		get_viewport().set_input_as_handled()
-		return
-	if event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE and _mouse_looking:
-		_release_mouse_look()
 		get_viewport().set_input_as_handled()
 		return
 	if dead and event is InputEventKey and event.pressed and event.keycode == KEY_R:
@@ -263,27 +255,41 @@ func _unhandled_input(event: InputEvent) -> void:
 		var d: float = post_mat.get_shader_parameter("dither_strength")
 		post_mat.set_shader_parameter("dither_strength", 0.0 if d > 0.0 else 0.04)
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
-		_release_mouse_look()
 		if not map.visible:
-			typist.enabled = false
-			get_tree().paused = true
-			map.open()
+			_open_map()
 			get_viewport().set_input_as_handled()
 
 
 func _release_mouse_look() -> void:
-	_mouse_looking = false
+	_gameplay_mouse_look = false
 	if Input.mouse_mode == Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+
+
+func _capture_mouse_look() -> void:
+	if not dead and not map.visible:
+		_gameplay_mouse_look = true
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+func _open_map() -> void:
+	_release_mouse_look()
+	typist.enabled = false
+	get_tree().paused = true
+	map.open()
+
+
+func _on_map_closed() -> void:
+	get_tree().paused = false
+	typist.enabled = mode != Mode.SAFEZONE
+	_capture_mouse_look()
 
 
 func _toggle_map() -> void:
 	if map.visible:
 		map.close()
 	else:
-		typist.enabled = false
-		get_tree().paused = true
-		map.open()
+		_open_map()
 
 
 # ------------------------------------------------------------------ street
@@ -821,6 +827,7 @@ func _on_player_hit(z: Zombie, damage: int) -> void:
 func _die() -> void:
 	dead = true
 	typist.enabled = false
+	_release_mouse_look()
 	game_over.visible = true
 	Engine.time_scale = 0.35
 
@@ -872,7 +879,7 @@ func _refresh_hud() -> void:
 	match mode:
 		Mode.STREET:
 			if q.is_empty():
-				lines.append("[color=#9aa]Idle — Tab: map, type a destination · hold right mouse: look[/color]")
+				lines.append("[color=#9aa]Idle — Tab: map, type a destination · move mouse: look[/color]")
 			else:
 				lines.append("Heading to [b]%s[/b]   (%d queued)" % [q[0], q.size()])
 		Mode.DOOR:
@@ -892,7 +899,7 @@ func _refresh_hud() -> void:
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
 			var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  hold right mouse look  ·  %s  ·  Tab manage/travel" % floor_text)
+			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  %s  ·  Tab manage/travel" % floor_text)
 			if settlement.build_mode:
 				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()

@@ -28,8 +28,9 @@ up. `NEXT_STEPS.md` holds the backlog and the open design questions.
 - **Fair jumpscares are not jumpscares:** a zombie may only hurt you while its word is on
   screen and has been readable for a beat.
 - Rails in the unsafe city; WASD is only enabled inside a claimed perimeter. Tab pauses and
-  opens the map. Hold the right mouse button and drag to look around; scripted doorway beats
-  briefly retain priority so their action remains readable. Buildings are labelled
+  opens the map. Mouse movement looks around without a button; opening a menu releases the
+  pointer, and closing it recaptures it. Scripted doorway beats briefly retain priority so
+  their action remains readable. Buildings are labelled
   relative to the map view (`1a`, `3b`, `10e` …), digit first so labels can be typed from
   the HUD without opening the map.
 
@@ -52,12 +53,12 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | Scene | Covers |
 |---|---|
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
-| `scenes/tests/test_camera_control.tscn` | kicked-door camera lock plus right-drag mouse-look priority over ambient auto-aim |
+| `scenes/tests/test_camera_control.tscn` | kicked-door camera lock plus mouse-look priority over ambient auto-aim |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
 | `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |
 | `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
-| `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, and panel pointer capture |
+| `scenes/tests/test_tab_map.tscn` | supply-route caching/invalidation, degenerate-route rendering, menu/gameplay pointer handoff, and panel input capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_room_visibility.tscn` | partition-safe entrances, room-tinted ceilings, unrevealed structural occlusion, hidden encounters, and furniture sprite alpha |
 | `scenes/tests/test_word_overlay_layout.tscn` | typed-prefix priority, collision-free label nudging, and edge-hint sliding constraints |

@@ -249,7 +249,7 @@ func is_manual_looking() -> bool:
 	return _manual_look_time > 0.0
 
 
-## Right-drag look. Horizontal motion changes the actual gaze direction, so targeting,
+## Mouse look. Horizontal motion changes the actual gaze direction, so targeting,
 ## the minimap arrow, and safe-zone WASD all agree with what the camera shows.
 func mouse_look(relative: Vector2) -> void:
 	if _look_locked:

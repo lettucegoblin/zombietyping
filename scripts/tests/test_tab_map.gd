@@ -15,6 +15,22 @@ func _ready() -> void:
 	await get_tree().process_frame
 	var map: Control = main.get_node("UI/TabMap")
 	map.size = Vector2(1280, 720)
+	var player: Node3D = main.get_node("View/Viewport/World/Player")
+	_check(main._gameplay_mouse_look, "gameplay did not enable always-on mouse look")
+	var gameplay_facing: Vector3 = player.facing
+	var look_motion := InputEventMouseMotion.new()
+	look_motion.relative = Vector2(80, 0)
+	main._unhandled_input(look_motion)
+	_check(not player.facing.is_equal_approx(gameplay_facing), "unclicked gameplay mouse motion did not look")
+	main._toggle_map()
+	_check(map.visible and get_tree().paused, "Tab map did not open paused")
+	_check(Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "Tab map did not release its pointer")
+	var menu_facing: Vector3 = player.facing
+	main._unhandled_input(look_motion)
+	_check(player.facing.is_equal_approx(menu_facing), "menu mouse motion leaked into camera look")
+	map.close()
+	_check(not get_tree().paused, "closing Tab map left gameplay paused")
+	_check(main._gameplay_mouse_look, "closing Tab map did not restore mouse look")
 
 	var pair := _connected_pair()
 	if pair.is_empty():

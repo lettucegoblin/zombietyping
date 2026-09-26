@@ -1,6 +1,6 @@
 extends Node
 ## Fast regression for the two gaze priorities: a kicked door owns the camera for its
-## animation, and mouse look owns it briefly after the player drags.
+## animation, and mouse look owns it briefly after the player moves the mouse.
 
 const RailPlayerScript := preload("res://scripts/player/rail_player.gd")
 
@@ -27,10 +27,10 @@ func _ready() -> void:
 	player.mouse_look(Vector2(120, -30))
 	player._update_cam(0.0)
 	var mouse_facing: Vector3 = player.facing
-	_check(player.is_manual_looking(), "mouse drag starts manual-look priority")
+	_check(player.is_manual_looking(), "mouse movement starts manual-look priority")
 	player.face_toward(Vector3(0, 0, -5))
 	_check(player.facing.is_equal_approx(mouse_facing), "auto-aim cannot immediately erase mouse look")
-	_check(absf(camera.rotation.x) > 0.01, "mouse drag applies camera pitch")
+	_check(absf(camera.rotation.x) > 0.01, "mouse movement applies camera pitch")
 
 	print("CAMERA CONTROL PASS")
 	get_tree().quit(0)

@@ -81,6 +81,9 @@ func _process(_dt: float) -> void:
 
 
 func open() -> void:
+	# Gameplay owns a captured pointer for always-on mouse look. Menus must explicitly
+	# release it before accepting map dragging, wheel zoom, or building-panel clicks.
+	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	visible = true
 	if player != null:
 		_center = Vector2(player.tile) + Vector2(0.5, 0.5)
