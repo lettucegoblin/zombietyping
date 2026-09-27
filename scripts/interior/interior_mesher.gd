@@ -10,6 +10,7 @@ const WIN_LO := 1.2
 const WIN_HI := 2.2
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
 const PropVisuals = preload("res://scripts/interior/prop_visuals.gd")
+const LootableProp = preload("res://scripts/interior/lootable_prop.gd")
 
 const FLOOR_COL := {
 	District.Kind.DOWNTOWN: Color("#94a3b8"), District.Kind.STRIP: Color("#fdba74"),
@@ -246,6 +247,10 @@ static func build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
 			var visual := _sprite_prop(prop)
 			if searched:
 				_dim_sprites(visual)
+			elif prop.loot_table != "":
+				visual.set_script(LootableProp)
+				visual.call("configure", prop.id, prop.size, prop.yaw)
+				visual.add_child(_loot_label(prop))
 			root.add_child(visual)
 			sprite_count += 1
 		else:
@@ -282,6 +287,18 @@ static func _searched_label(prop: FloorPlan.Prop) -> Label3D:
 	label.outline_modulate = Color("#17131f")
 	label.outline_size = 7
 	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	return label
+
+
+static func _loot_label(prop: FloorPlan.Prop) -> WordLabel:
+	var label := WordLabel.new("loot", 24)
+	label.name = "Loot_" + prop.id.replace(":", "_")
+	label.position = Vector3(0, maxf(prop.size.y + 0.34, 0.72), 0)
+	label.option_kind = "loot"
+	label.option_door = -1
+	label.option_target = prop.id
+	label.edge_hint = false
+	label.visible = false
 	return label
 
 
@@ -324,12 +341,15 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		rug.material_override = mat
 		return rug
+	var holder := Node3D.new()
+	holder.name = "Prop_" + p.id.replace(":", "_")
+	holder.position = p.pos
 	var sprite := Sprite3D.new()
-	sprite.name = "Prop_" + p.id.replace(":", "_")
+	sprite.name = "Artwork"
 	sprite.texture = load(PROP_SPRITES[p.kind])
 	sprite.pixel_size = PropVisuals.pixel_size(p.size)
 	sprite.offset.x = PropVisuals.horizontal_offset(p.kind)
-	sprite.position = p.pos + Vector3(0, p.size.y * 0.5, 0)
+	sprite.position = Vector3(0, PropVisuals.grounded_center_y(p.kind, p.size), 0)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
@@ -351,14 +371,14 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 		audio.emission_angle_enabled = true
 		audio.emission_angle_degrees = 85.0
 		audio.emission_angle_filter_attenuation_db = -10.0
-		audio.position = p.pos + Vector3(0, p.size.y * 0.55, 0)
+		audio.position = Vector3(0, maxf(p.size.y * 0.55, 0.42), 0)
 		audio.set_meta("room_audio", true)
-		var holder := Node3D.new()
 		holder.name = "Television"
 		holder.add_child(sprite)
 		holder.add_child(audio)
 		return holder
-	return sprite
+	holder.add_child(sprite)
+	return holder
 
 
 static func _emit_prop(st: SurfaceTool, p: FloorPlan.Prop) -> void:
@@ -602,7 +622,10 @@ static func _wall_with_holes(st: SurfaceTool, p0: Vector3, p1: Vector3, n: Vecto
 		if h[2] > 0.0:
 			_wq(st, p0, dir, t0, t1, 0.0, h[2], n, col)
 		if h[3] < H:
-			_wq(st, p0, dir, t0, t1, h[3], H, n, col)
+			# Both adjoining rooms author their own inward-facing partition surface. Give
+			# the cap over an opening a tiny room-side bias so its wall swatch cannot lose
+			# a coplanar depth tie and reveal the other room/ceiling colour instead.
+			_wq(st, p0 + n * 0.012, dir, t0, t1, h[3], H, n, col)
 		cursor = maxf(cursor, t1)
 	if cursor < len - 0.001:
 		_wq(st, p0, dir, cursor, len, 0.0, H, n, col)

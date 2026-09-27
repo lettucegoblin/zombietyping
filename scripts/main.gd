@@ -613,9 +613,9 @@ func _face_room() -> void:
 	var opt: Dictionary = interior.recommended_option()
 	if opt.is_empty():
 		return
-	var p: Vector3 = interior.option_pos(opt)
+	var p: Vector3 = interior.option_look_pos(opt, player.global_position)
 	if p != Vector3.INF:
-		player.face_toward(p)
+		player.guide_toward(p)
 
 
 ## The room is done. If it still has a closed door worth opening we wait here for you to

@@ -190,7 +190,9 @@ object for a 50% rounded-up refund. It never silently removes the newest object 
 
 Searchable dressers, cabinets, shelves, fridges, crates, televisions, stoves, and workbenches
 roll contents from their procedural loot-table tag and stable prop ID. Once a room is safe,
-`loot` searches the nearest unsearched container; the search rail waits while a fitting item
+each unsearched container gets a subtle proportion-weighted hop, six gold collectible motes,
+and an on-object `loot` word. Loot guidance outranks doors but still yields to zombies;
+`loot` searches the nearest unsearched container and the search rail waits while a fitting item
 bundle remains. The twelve-slot backpack persists between sessions. Searched containers are
 dimmed and marked `EMPTY` on return. At a safe zone, `G` stashes carried items for residents,
 `V` sorts them into existing construction material classes, `H` uses bandages, and `J` eats
@@ -275,8 +277,10 @@ Camera-facing props measure their opaque PNG bounds at their actual render scale
 that visible width in both horizontal axes, so transparent canvas padding and differently
 sized chairs, shelves, televisions, and appliances do not lie to the placement pass.
 Rugs may sit beneath furniture; a prop that cannot fit without occupying a door lane is
-omitted. Paintings choose the closest usable wall, slide along it around doors, and render as
-fixed textured planes with a one-pixel-scale wall offset rather than camera-facing sprites.
+omitted. Paintings choose the closest usable wall, slide along it around the exact procedural
+door and facade-window intervals, and render as fixed textured planes with a one-pixel-scale
+wall offset rather than camera-facing sprites. Their full rendered width—not just their
+anchor point—must fit the uninterrupted wall span.
 Furnishings remain non-colliding, so visual variety cannot change rail navigation or combat
 line-of-sight. Each prop has a stable id plus loot-table and utility metadata (`storage`,
 `water`, `power`, `comfort`, etc.), ready for persisted looting and base upgrades without

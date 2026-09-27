@@ -110,6 +110,7 @@ func loot_here(world_pos: Vector3) -> String:
 	if result.begins_with("searched"):
 		_rebuild(prop.room)
 		_set_room_visible(prop.room, true)
+		_update_labels()
 	return result
 
 
@@ -141,6 +142,10 @@ func _set_room_visible(ri: int, v: bool) -> void:
 			audio.play()
 		elif not v and audio.playing:
 			audio.stop()
+	for c in n.find_children("*", "Node3D", true, false):
+		if bool(c.get_meta("lootable_animation", false)):
+			(c as Node3D).visible = v
+			c.set_process(v)
 
 
 func is_room_revealed(ri: int) -> bool:
@@ -432,10 +437,7 @@ func show_typing(buffer: String) -> void:
 	if current_room < 0 or not _room_nodes.has(current_room):
 		return
 	var n: Node3D = _room_nodes[current_room]
-	var l: Node3D = n.get_node_or_null("Labels")
-	if l == null:
-		return
-	for c in l.get_children():
+	for c in n.find_children("*", "", true, false):
 		if c is WordLabel:
 			(c as WordLabel).match_buffer(buffer)
 
@@ -447,15 +449,21 @@ func _update_labels() -> void:
 		var l: Node3D = n.get_node_or_null("Labels")
 		if l != null:
 			l.visible = (k == current_room)
-			if k == current_room:
-				for c in l.get_children():
-					if not c is WordLabel:
-						continue
-					var w := c as WordLabel
-					w.retired = option_retired(w.option_kind, w.option_door)
-					w.recommended = not w.retired and not rec.is_empty() \
-						and w.option_kind == rec.get("kind", "") and w.option_door == rec.get("door", -2)
-					w.edge_hint = true
+		for c in n.find_children("*", "", true, false):
+			if not c is WordLabel:
+				continue
+			var w := c as WordLabel
+			w.visible = (k == current_room)
+			if k != current_room:
+				continue
+			w.retired = option_retired(w.option_kind, w.option_door)
+			var target_matches := str(rec.get("target", "")) == "" or w.option_target == str(rec.get("target", ""))
+			w.recommended = not w.retired and not rec.is_empty() \
+				and w.option_kind == rec.get("kind", "") and w.option_door == rec.get("door", -2) \
+				and target_matches
+			# Every door remains discoverable at the edge. Loot only pins when it is the
+			# active recommendation, avoiding a ring of duplicate LOOT arrows.
+			w.edge_hint = w.option_kind != "loot" or w.recommended
 
 
 func _reveal(ri: int, hop := true) -> void:
@@ -608,7 +616,8 @@ func recommended_option() -> Dictionary:
 	if not rescue_option.is_empty():
 		return rescue_option
 	if is_room_cleared(current_room) and has_loot_here(plan.room_stand_world(current_room)):
-		return { "word": "loot", "kind": "loot", "door": -1 }
+		var prop := nearest_lootable_prop(plan.room_stand_world(current_room))
+		return { "word": "loot", "kind": "loot", "door": -1, "target": prop.id }
 	var useful := unexplored_doors(current_room)
 	if not useful.is_empty():
 		var di: int = useful[0]
@@ -688,9 +697,35 @@ func option_pos(opt: Dictionary) -> Vector3:
 		"rescue":
 			return rescue_world_pos()
 		"loot":
-			var prop := nearest_lootable_prop(plan.room_stand_world(current_room))
+			var prop := _loot_prop_by_id(str(opt.get("target", "")))
+			if prop == null:
+				prop = nearest_lootable_prop(plan.room_stand_world(current_room))
 			return prop.pos + Vector3(0, prop.size.y * 0.5, 0) if prop != null else Vector3.INF
 	return Vector3.INF
+
+
+## If the player is nearly on a doorway plane, looking at its centre has no stable
+## horizontal direction. Aim a short distance through it so tiny rooms still produce a
+## decisive camera heading toward the yellow route marker.
+func option_look_pos(opt: Dictionary, viewer_pos: Vector3) -> Vector3:
+	var p := option_pos(opt)
+	if p == Vector3.INF or opt.get("kind", "") not in ["door", "exit"]:
+		return p
+	var flat := Vector2(p.x - viewer_pos.x, p.z - viewer_pos.z)
+	if flat.length() >= 0.55:
+		return p
+	var door := plan.doors[int(opt["door"])]
+	var through := Vector2(door.dir) if door.a == current_room else -Vector2(door.dir)
+	return p + Vector3(through.x, 0, through.y) * 0.9
+
+
+func _loot_prop_by_id(id: String) -> FloorPlan.Prop:
+	if id == "":
+		return null
+	for prop in plan.props:
+		if prop.id == id and prop.room == current_room and not PropLootRules.is_looted(building.id(), prop.id):
+			return prop
+	return null
 
 
 # ------------------------------------------------------------------ survivor rescue

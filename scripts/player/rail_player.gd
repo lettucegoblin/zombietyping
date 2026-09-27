@@ -221,6 +221,17 @@ func face_toward(p: Vector3) -> void:
 	_set_facing_toward(p)
 
 
+## Arrival guidance is an intentional camera cue rather than ambient auto-aim. It gets one
+## clean heading even if the mouse moved a moment ago, but never interrupts a door-kick
+## cinematic lock. The player can immediately look elsewhere again afterward.
+func guide_toward(p: Vector3) -> void:
+	if _look_locked:
+		return
+	_manual_look_time = 0.0
+	_pitch = 0.0
+	_set_facing_toward(p)
+
+
 func _set_facing_toward(p: Vector3) -> void:
 	var d := p - global_position
 	d.y = 0.0

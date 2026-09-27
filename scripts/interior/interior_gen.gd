@@ -10,6 +10,8 @@ const CELL_M := 2.0
 const DOOR_CLEAR_WIDTH := 1.65
 const DOOR_CLEAR_DEPTH := 1.8
 const FURNITURE_GAP := 0.10
+const OPENING_MARGIN := 0.16
+const DOOR_WIDTH := 1.2
 ## About one source-art pixel at the prop sprite scale: enough to prevent z-fighting
 ## without making a wall hanging visibly float in front of its wall.
 const WALL_ART_OFFSET := 0.025
@@ -480,7 +482,7 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "dresser", 0.78, 0.78, 1.05, 0.42, 0.95, Color("#fdba74"))
 				_add_prop(fp, room.index, "rug", 0.48, 0.58, 1.45, 1.05, 0.03, Color("#b9a4e0"))
 				if rng.randf() < 0.72:
-					_add_prop(fp, room.index, "painting", 0.20, 0.82, 0.85, 0.08, 0.72, Color("#fdba74"))
+					_add_prop(fp, room.index, "painting", 0.20, 0.82, 1.28, 0.08, 1.02, Color("#fdba74"))
 			"bathroom":
 				_add_prop(fp, room.index, "toilet", 0.26, 0.30, 0.56, 0.72, 0.72, Color("#fdf6e3"))
 				_add_prop(fp, room.index, "sink", 0.72, 0.25, 0.66, 0.48, 0.86, Color("#99f6e4"))
@@ -500,7 +502,7 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				if rng.randf() < 0.78:
 					_add_prop(fp, room.index, "tv", 0.20 if rng.randf() < 0.5 else 0.80, 0.78, 0.92, 0.46, 1.05, Color("#272338"))
 				if rng.randf() < 0.60:
-					_add_prop(fp, room.index, "painting", 0.18, 0.72, 0.92, 0.08, 0.76, Color("#fdba74"))
+					_add_prop(fp, room.index, "painting", 0.18, 0.72, 1.38, 0.08, 1.06, Color("#fdba74"))
 			"studio":
 				_add_prop(fp, room.index, "bed", 0.25, 0.32, 1.20, 1.80, 0.50, Color("#c39bd3"))
 				_add_prop(fp, room.index, "counter", 0.72, 0.20, 1.25, 0.52, 0.90, Color("#fdba74"))
@@ -510,7 +512,7 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "chair", 0.50, 0.62, 0.52, 0.52, 0.92, Color("#6c6c72"))
 				_add_prop(fp, room.index, "cabinet", 0.82, 0.78, 0.82, 0.42, 1.35, Color("#b9a4e0"))
 				if rng.randf() < 0.55:
-					_add_prop(fp, room.index, "painting", 0.18, 0.80, 0.90, 0.08, 0.74, Color("#99f6e4"))
+					_add_prop(fp, room.index, "painting", 0.18, 0.80, 1.34, 0.08, 1.04, Color("#99f6e4"))
 			"sales":
 				_add_prop(fp, room.index, "counter", 0.52, 0.28, 1.85, 0.62, 0.92, Color("#fdba74"))
 				_add_prop(fp, room.index, "shelf", 0.18, 0.72, 0.75, 1.45, 1.55, Color("#c39bd3"))
@@ -617,9 +619,101 @@ static func _mount_painting(fp: FloorPlan, prop: FloorPlan.Prop) -> bool:
 			return absf(a - desired) < absf(b - desired) if not is_equal_approx(absf(a - desired), absf(b - desired)) else a < b)
 		for along in along_candidates:
 			_place_on_wall(prop, int(side_data.side), along, p0, p1)
-			if not prop_overlaps_door_clearance(fp, prop):
+			var stored_along := prop.pos.x if int(side_data.side) in [0, 2] else prop.pos.z
+			if not wall_art_overlaps_opening(fp, prop, int(side_data.side), stored_along):
 				return true
 	return false
+
+
+## Wall decorations reserve their full rendered width against both generated doors and
+## the same deterministic facade-window slots used by InteriorMesher. Checking the wall
+## interval (rather than a floor footprint) prevents pictures from hanging in openings.
+static func wall_art_overlaps_opening(fp: FloorPlan, prop: FloorPlan.Prop, side: int, along: float) -> bool:
+	var room := fp.rooms[prop.room]
+	var p0 := fp.cell_to_world(Vector2(room.rect.position))
+	var p1 := fp.cell_to_world(Vector2(room.rect.end))
+	var wall_coord: float = [p0.z, p1.x, p1.z, p0.x][side]
+	var art_lo := along - prop.size.x * 0.5 - OPENING_MARGIN
+	var art_hi := along + prop.size.x * 0.5 + OPENING_MARGIN
+	for di in room.doors:
+		var door := fp.doors[di]
+		var door_coord := door.pos.z if side in [0, 2] else door.pos.x
+		if absf(door_coord - wall_coord) > 0.04:
+			continue
+		var door_along := door.pos.x if side in [0, 2] else door.pos.z
+		if _intervals_overlap(art_lo, art_hi, door_along - DOOR_WIDTH * 0.5, door_along + DOOR_WIDTH * 0.5):
+			return true
+
+	# Only footprint perimeter walls receive facade windows. The direction and mirrored
+	# along-coordinate match InteriorMesher's four wall indices exactly.
+	var full_x0 := fp.origin.x
+	var full_z0 := fp.origin.z
+	var full_x1 := fp.origin.x + fp.cells.x * fp.cell_size.x
+	var full_z1 := fp.origin.z + fp.cells.y * fp.cell_size.y
+	var is_outer := (side == 0 and is_equal_approx(p0.z, full_z0)) \
+		or (side == 1 and is_equal_approx(p1.x, full_x1)) \
+		or (side == 2 and is_equal_approx(p1.z, full_z1)) \
+		or (side == 3 and is_equal_approx(p0.x, full_x0))
+	if not is_outer:
+		return false
+	var length := (full_x1 - full_x0) if side in [0, 2] else (full_z1 - full_z0)
+	var entrance_along := -100.0
+	if fp.floor == 0 and fp.entrance_door >= 0:
+		var entrance := fp.doors[fp.entrance_door]
+		var entrance_side := _perimeter_side(fp, entrance.pos)
+		if entrance_side == side:
+			entrance_along = _wall_along(side, entrance.pos, full_x0, full_x1, full_z0, full_z1)
+	for slot in _window_slots(length, entrance_along, 1.05):
+		var slot_lo: float
+		var slot_hi: float
+		if side == 0:
+			slot_lo = full_x0 + slot[0]; slot_hi = full_x0 + slot[1]
+		elif side == 2:
+			slot_lo = full_x1 - slot[1]; slot_hi = full_x1 - slot[0]
+		elif side == 1:
+			slot_lo = full_z0 + slot[0]; slot_hi = full_z0 + slot[1]
+		else:
+			slot_lo = full_z1 - slot[1]; slot_hi = full_z1 - slot[0]
+		# Ignore slots that fall outside this room's portion of the facade.
+		var room_lo := p0.x if side in [0, 2] else p0.z
+		var room_hi := p1.x if side in [0, 2] else p1.z
+		if not _intervals_overlap(slot_lo, slot_hi, room_lo, room_hi):
+			continue
+		if _intervals_overlap(art_lo, art_hi, slot_lo, slot_hi):
+			return true
+	return false
+
+
+static func _perimeter_side(fp: FloorPlan, p: Vector3) -> int:
+	var x1 := fp.origin.x + fp.cells.x * fp.cell_size.x
+	var z1 := fp.origin.z + fp.cells.y * fp.cell_size.y
+	if absf(p.z - fp.origin.z) < 0.04: return 0
+	if absf(p.x - x1) < 0.04: return 1
+	if absf(p.z - z1) < 0.04: return 2
+	return 3
+
+
+static func _wall_along(side: int, p: Vector3, x0: float, x1: float, z0: float, z1: float) -> float:
+	match side:
+		0: return p.x - x0
+		1: return p.z - z0
+		2: return x1 - p.x
+		_: return z1 - p.z
+
+
+static func _window_slots(length: float, skip_center: float, skip_half: float) -> Array:
+	var out := []
+	var t := 0.5
+	while t + 0.8 < length - 0.3:
+		var center := t + 0.4
+		if absf(center - skip_center) > skip_half + 0.4:
+			out.append([t, t + 0.8])
+		t += 2.2
+	return out
+
+
+static func _intervals_overlap(a0: float, a1: float, b0: float, b1: float) -> bool:
+	return a0 < b1 - 0.001 and a1 > b0 + 0.001
 
 
 static func _place_on_wall(prop: FloorPlan.Prop, side: int, along: float, p0: Vector3, p1: Vector3) -> void:
@@ -677,6 +771,14 @@ static func doorway_clearances(fp: FloorPlan, ri: int) -> Array[Rect2]:
 
 
 static func prop_overlaps_door_clearance(fp: FloorPlan, prop: FloorPlan.Prop) -> bool:
+	if prop.kind == "painting":
+		# Wall mount yaw is an exact side marker and remains unambiguous near corners.
+		var side := 0
+		if is_equal_approx(prop.yaw, -PI * 0.5): side = 1
+		elif is_equal_approx(absf(prop.yaw), PI): side = 2
+		elif is_equal_approx(prop.yaw, PI * 0.5): side = 3
+		var along := prop.pos.x if side in [0, 2] else prop.pos.z
+		return wall_art_overlaps_opening(fp, prop, side, along)
 	var footprint := _prop_footprint(prop)
 	for clearance in doorway_clearances(fp, prop.room):
 		if footprint.intersects(clearance):

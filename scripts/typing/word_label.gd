@@ -20,6 +20,9 @@ var retired := false
 var recommended := false
 var option_kind := ""
 var option_door := -1
+## Distinguishes several identical action words in one room (for example multiple
+## lootable containers) without changing what the player types.
+var option_target := ""
 
 
 func _init(w := "", size := 28) -> void:

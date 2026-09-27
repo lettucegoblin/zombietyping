@@ -10,6 +10,10 @@ const SPRITES := {
 	"bed": "res://assets/sprites/props/bed.png",
 	"sofa": "res://assets/sprites/props/sofa.png",
 	"dresser": "res://assets/sprites/props/dresser.png",
+	# These compact storage pieces deliberately reuse the dresser sheet at a smaller
+	# procedural size. Falling back to the mesh builder made them read as mystery cubes.
+	"nightstand": "res://assets/sprites/props/dresser.png",
+	"cabinet": "res://assets/sprites/props/dresser.png",
 	"toilet": "res://assets/sprites/props/toilet.png",
 	"sink": "res://assets/sprites/props/sink.png",
 	"tub": "res://assets/sprites/props/tub.png",
@@ -28,13 +32,15 @@ const CANVAS_SIZE := Vector2i(67, 67)
 ## Opaque extents measured from the source PNG alpha once at authoring time. Scanning
 ## texture pixels the first time each kind spawned caused avoidable room-entry stalls.
 const OPAQUE_BOUNDS := {
-	"bed": Rect2i(0, 7, 58, 50),
+	"bed": Rect2i(3, 39, 61, 27),
+	"cabinet": Rect2i(13, 8, 44, 46),
 	"chair": Rect2i(22, 15, 29, 49),
 	"counter": Rect2i(5, 20, 61, 33),
 	"crate": Rect2i(14, 16, 52, 49),
 	"desk": Rect2i(2, 25, 62, 34),
 	"dresser": Rect2i(13, 8, 44, 46),
 	"fridge": Rect2i(20, 0, 33, 52),
+	"nightstand": Rect2i(13, 8, 44, 46),
 	"painting": Rect2i(6, 6, 51, 41),
 	"rug": Rect2i(0, 12, 57, 29),
 	"shelf": Rect2i(7, 14, 38, 53),
@@ -71,6 +77,13 @@ static func visible_size(kind: String, size: Vector3) -> Vector2:
 static func horizontal_offset(kind: String) -> float:
 	var metric := _metric(kind)
 	return float(metric.canvas.x) * 0.5 - (float(metric.bounds.position.x) + float(metric.bounds.size.x) * 0.5)
+
+
+## World-space height for the centre of a billboard whose opaque bottom sits exactly on
+## the floor. This avoids treating transparent padding as part of the furniture's legs.
+static func grounded_center_y(kind: String, size: Vector3) -> float:
+	var metric := _metric(kind)
+	return (float(metric.bounds.end.y) - float(metric.canvas.y) * 0.5) * pixel_size(size)
 
 
 static func _metric(kind: String) -> Dictionary:

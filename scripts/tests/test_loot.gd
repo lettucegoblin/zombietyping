@@ -30,6 +30,15 @@ func _ready() -> void:
 	interior.enter(b, 0)
 	interior.set_room(prop.room)
 	interior.mark_room_cleared(prop.room)
+	var room: Node3D = interior._room_nodes[prop.room]
+	var animated := room.find_children("*", "Node3D", true, false).filter(
+		func(node: Node): return bool(node.get_meta("lootable_animation", false)))
+	_check(not animated.is_empty(), "unsearched containers had no collectible motion")
+	var loot_labels := room.find_children("Loot_*", "", true, false).filter(
+		func(node: Node): return node is WordLabel and (node as WordLabel).option_kind == "loot")
+	_check(not loot_labels.is_empty(), "unsearched containers had no on-object LOOT word")
+	_check((animated[0] as Node3D).get_node_or_null("LootMotes") is GPUParticles3D,
+		"unsearched containers had no collectible motes")
 	var words: Array = interior.options().map(func(o): return o["word"])
 	_check(words.has("loot"), "cleared room did not expose the typed loot action")
 	var message: String = interior.loot_here(prop.pos)

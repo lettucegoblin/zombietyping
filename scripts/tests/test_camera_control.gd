@@ -32,6 +32,10 @@ func _ready() -> void:
 	_check(player.facing.is_equal_approx(mouse_facing), "auto-aim cannot immediately erase mouse look")
 	_check(absf(camera.rotation.x) > 0.01, "mouse movement applies camera pitch")
 
+	player.guide_toward(Vector3(0, 0, -5))
+	_check(not player.is_manual_looking(), "arrival guidance consumes the stale mouse-look grace period")
+	_check(player.facing.is_equal_approx(Vector3.FORWARD), "arrival guidance gets one decisive doorway heading")
+
 	print("CAMERA CONTROL PASS")
 	get_tree().quit(0)
 

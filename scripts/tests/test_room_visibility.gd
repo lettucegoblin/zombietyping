@@ -48,6 +48,10 @@ func _ready() -> void:
 	for path in InteriorMesher.PROP_SPRITES.values():
 		var image := Image.load_from_file(ProjectSettings.globalize_path(str(path)))
 		_check(not image.is_empty() and image.get_pixel(0, 0).a < 0.01, "%s has an opaque background" % path)
+	var bed := Image.load_from_file(ProjectSettings.globalize_path("res://assets/sprites/props/bed.png"))
+	var bed_bounds := bed.get_used_rect()
+	_check(float(bed_bounds.size.x) / maxf(float(bed_bounds.size.y), 1.0) > 1.8,
+		"bed art was not a grounded side profile")
 
 	# 0,0:2 is also the fixed TV fixture. Leaving a building must stop its directional
 	# static synchronously, before deferred room deletion can leak a tail outdoors.
@@ -116,7 +120,7 @@ func _check_furnishing_clearance_and_wall_art() -> void:
 					var fp := InteriorGen.generate(World.seed, b, floor)
 					for prop in fp.props:
 						_check(not InteriorGen.prop_overlaps_door_clearance(fp, prop),
-							"%s floor %d %s occupied a doorway lane" % [b.id(), floor, prop.kind])
+							"%s floor %d %s occupied a door/window opening" % [b.id(), floor, prop.kind])
 						if InteriorMesher.PropVisuals.is_billboard(prop.kind):
 							var visible_width := InteriorMesher.PropVisuals.visible_size(prop.kind, prop.size).x
 							var footprint := InteriorGen._rotated_footprint_size(prop)

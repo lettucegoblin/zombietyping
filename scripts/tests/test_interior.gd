@@ -70,7 +70,21 @@ func _queue() -> void:
 		if b.floors > best_floors:
 			best_floors = b.floors
 			best = l
-	_map._on_submit("%s %s" % [best, labels[0] if labels[0] != best else labels[1]])
+	# Address ordering is intentionally unrelated to geography. Queue the closest second
+	# site so this interior regression measures resume-after-exit rather than spending its
+	# remaining frame budget crossing an arbitrary distant edge of the broad map range.
+	var first: BuildingData = World.building_by_id(_map._labels[best])
+	var second := ""
+	var second_distance := INF
+	for l in labels:
+		if l == best:
+			continue
+		var candidate: BuildingData = World.building_by_id(_map._labels[l])
+		var distance := Vector2(candidate.road_tile - first.road_tile).length_squared()
+		if distance < second_distance:
+			second_distance = distance
+			second = l
+	_map._on_submit("%s %s" % [best, second])
 	_queued = _player.queued_ids()
 	print("queued: ", _queued, "  first has ", best_floors, " floors")
 	_main._toggle_map()
