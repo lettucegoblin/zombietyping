@@ -642,6 +642,31 @@ func _stable_label_rect(id: String, anchor: Vector2, box_size: Vector2,
 	return Rect2()
 
 
+func _layout_label_candidates(candidates: Array, bounds: Rect2) -> Dictionary:
+	var layout := {}
+	var occupied: Array[Rect2] = []
+	var stable_candidates := candidates.duplicate()
+	stable_candidates.sort_custom(func(a, b): return str(a["id"]) < str(b["id"]))
+	# Cached placements are authoritative, regardless of selection/queue draw priority.
+	for candidate in stable_candidates:
+		var id := str(candidate["id"])
+		if not _label_offsets.has(id):
+			continue
+		var rect := _stable_label_rect(id, candidate["anchor"], candidate["size"], occupied, bounds)
+		if rect.size != Vector2.ZERO:
+			layout[id] = rect
+			occupied.append(rect)
+	for candidate in stable_candidates:
+		var id := str(candidate["id"])
+		if _label_offsets.has(id):
+			continue
+		var rect := _stable_label_rect(id, candidate["anchor"], candidate["size"], occupied, bounds)
+		if rect.size != Vector2.ZERO:
+			layout[id] = rect
+			occupied.append(rect)
+	return layout
+
+
 # ------------------------------------------------------------------ drawing
 
 func _draw() -> void:
@@ -705,22 +730,27 @@ func _draw() -> void:
 		important.append_array(ordinary)
 		var panel_left := _panel_rect().position.x - 6.0
 		var label_bounds := Rect2(Vector2(5.0, 66.0), Vector2(panel_left - 10.0, size.y - 134.0))
-		var occupied: Array[Rect2] = []
-		for e in important:
+		var candidates: Array = []
+		for e in displayed:
 			var b: BuildingData = e["b"]
 			var p := _tile_to_screen(b.center_tile())
 			if not label_bounds.grow(36.0).has_point(p):
 				continue
 			var label: String = e["label"]
 			var w := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+			candidates.append({"id": b.id(), "anchor": p, "size": Vector2(w + 8, fs * 1.35)})
+		var layout := _layout_label_candidates(candidates, label_bounds)
+		for e in important:
+			var b: BuildingData = e["b"]
+			if not layout.has(b.id()):
+				continue
+			var p := _tile_to_screen(b.center_tile())
+			var label: String = e["label"]
 			var qi := queued.find(b.id())
 			var selected: bool = b.id() == _selected_id
 			var bg := Color("#5b3f8c") if selected else (Color(0, 0, 0, 0.55) if qi < 0 else COL_ROUTE)
 			var fg := Color.WHITE if qi < 0 else Color.BLACK
-			var lr := _stable_label_rect(b.id(), p, Vector2(w + 8, fs * 1.35), occupied, label_bounds)
-			if lr.size == Vector2.ZERO:
-				continue
-			occupied.append(lr)
+			var lr: Rect2 = layout[b.id()]
 			if lr.get_center().distance_squared_to(p) > 16.0:
 				draw_line(p, lr.get_center(), Color(1, 1, 1, 0.30), 1.0)
 			draw_rect(lr, bg)

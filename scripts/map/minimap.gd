@@ -142,6 +142,35 @@ func _stable_label_rect(id: String, anchor: Vector2, box_size: Vector2,
 	return Rect2()
 
 
+## Reserve remembered rectangles before considering any newcomer. Candidate order may
+## change when typing/queue priority changes, but that must never let a new label steal a
+## settled label's slot for one frame.
+func _layout_label_candidates(candidates: Array, bounds: Rect2,
+		blockers: Array[Rect2]) -> Dictionary:
+	var layout := {}
+	var occupied: Array[Rect2] = []
+	var stable_candidates := candidates.duplicate()
+	stable_candidates.sort_custom(func(a, b): return str(a["id"]) < str(b["id"]))
+	for candidate in stable_candidates:
+		var id := str(candidate["id"])
+		if not _label_offsets.has(id):
+			continue
+		var rect := _stable_label_rect(id, candidate["anchor"], candidate["size"], occupied, bounds)
+		if rect.size != Vector2.ZERO:
+			layout[id] = rect
+			occupied.append(rect)
+	occupied.append_array(blockers)
+	for candidate in stable_candidates:
+		var id := str(candidate["id"])
+		if _label_offsets.has(id):
+			continue
+		var rect := _stable_label_rect(id, candidate["anchor"], candidate["size"], occupied, bounds)
+		if rect.size != Vector2.ZERO:
+			layout[id] = rect
+			occupied.append(rect)
+	return layout
+
+
 func _draw() -> void:
 	if player == null or tab_map == null:
 		return
@@ -181,36 +210,45 @@ func _draw() -> void:
 				pts.append(_tile_to_screen(Vector2(t) + Vector2(0.5, 0.5), center))
 			draw_polyline(pts, COL_ROUTE if li == 0 else COL_ROUTE.darkened(0.3), 2.0)
 		li += 1
-	# Labels: important destinations claim space first, then the stable spatial order fills
-	# remaining slots. Every address stays typeable even if this tiny view cannot draw it.
+	# Labels: settled slots are reserved first; priority only affects draw styling/order.
+	# Every address stays typeable even if this tiny view cannot draw it.
 	var queued: Array = player.queued_ids()
 	var fs := 11
-	var visible_entries: Array = []
+	var layout_entries: Array = []
+	var ordinary_entries: Array = []
 	var priority_entries: Array = []
 	for e in _placed:
 		var b: BuildingData = e["b"]
 		var p := _tile_to_screen(b.center_tile(), center)
 		if p.x < -20 or p.y < -10 or p.x > size.x + 20 or p.y > size.y + 10:
 			continue
+		layout_entries.append(e)
 		var label: String = e["label"]
 		if queued.has(b.id()) or (typing != "" and label.begins_with(typing)):
 			priority_entries.append(e)
 		else:
-			visible_entries.append(e)
-	priority_entries.append_array(visible_entries)
-	var occupied: Array[Rect2] = [Rect2(size * 0.5 - Vector2(8, 8), Vector2(16, 16))]
+			ordinary_entries.append(e)
+	var draw_entries := priority_entries.duplicate()
+	draw_entries.append_array(ordinary_entries)
 	var bounds := Rect2(Vector2(3, 3), size - Vector2(6, 27))
-	for e in priority_entries:
+	var candidates: Array = []
+	for e in layout_entries:
 		var b: BuildingData = e["b"]
-		var p := _tile_to_screen(b.center_tile(), center)
 		var label: String = e["label"]
 		var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
+		candidates.append({"id": b.id(), "anchor": _tile_to_screen(b.center_tile(), center),
+			"size": Vector2(w + 6, fs * 1.25)})
+	var blockers: Array[Rect2] = [Rect2(size * 0.5 - Vector2(8, 8), Vector2(16, 16))]
+	var layout := _layout_label_candidates(candidates, bounds, blockers)
+	for e in draw_entries:
+		var b: BuildingData = e["b"]
+		if not layout.has(b.id()):
+			continue
+		var p := _tile_to_screen(b.center_tile(), center)
+		var label: String = e["label"]
 		var qi := queued.find(b.id())
 		var typed_match := typing != "" and label.begins_with(typing)
-		var lr := _stable_label_rect(b.id(), p, Vector2(w + 6, fs * 1.25), occupied, bounds)
-		if lr.size == Vector2.ZERO:
-			continue
-		occupied.append(lr)
+		var lr: Rect2 = layout[b.id()]
 		var bg := Color(0, 0, 0, 0.6)
 		var fg := Color.WHITE
 		if qi >= 0:

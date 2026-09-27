@@ -90,6 +90,24 @@ func _ready() -> void:
 		"remembered minimap label slots became order-dependent")
 	_check((reverse_a.get_center() - anchor).is_equal_approx(offset_a),
 		"an existing minimap label shifted when another label became visible")
+	# A newcomer can arrive earlier in the draw list (for example after becoming queued).
+	# The two-pass layout must still reserve the existing label before placing it.
+	minimap._label_offsets.clear()
+	var first_candidates := [{"id": "settled", "anchor": anchor, "size": Vector2(28, 14)}]
+	var no_blockers: Array[Rect2] = []
+	var first_layout: Dictionary = minimap._layout_label_candidates(first_candidates, bounds, no_blockers)
+	var settled_rect: Rect2 = first_layout["settled"]
+	var newcomer_first := [
+		{"id": "new", "anchor": anchor, "size": Vector2(28, 14)},
+		{"id": "settled", "anchor": anchor, "size": Vector2(28, 14)},
+	]
+	var retained_layout: Dictionary = minimap._layout_label_candidates(newcomer_first, bounds, no_blockers)
+	var retained_settled: Rect2 = retained_layout["settled"]
+	var retained_new: Rect2 = retained_layout["new"]
+	_check(retained_settled.is_equal_approx(settled_rect),
+		"newly visible priority label stole a settled minimap slot")
+	_check(not retained_new.intersects(retained_settled),
+		"newcomer was not nudged around the settled minimap label")
 	_check(map.building_name(a) == map.building_name(a), "building name is not deterministic")
 	_check(map.building_name(a).contains(" "), "building name is not human-readable")
 	World.state[a.id()] = { "cleared": true, "claimed": true }
