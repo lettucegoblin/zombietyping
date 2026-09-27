@@ -108,7 +108,7 @@ func _arrive(token: Dictionary) -> void:
 		var item := str(token["item"])
 		_displayed_field[item] = int(_displayed_field.get(item, 0)) + 1
 	else:
-		_displayed_units = mini(World.BACKPACK_CAPACITY, _displayed_units + 1)
+		_displayed_units = mini(World.backpack_capacity(), _displayed_units + 1)
 	_combo += 1
 	_pulse = 1.0
 	if sfx != null:
@@ -137,7 +137,7 @@ func _draw() -> void:
 	draw_rect(tray, Color(0.055, 0.035, 0.09, 0.92), true)
 	draw_rect(tray, pulse_color, false, 2.0 + _pulse * 2.0)
 	_draw_token(base_tray.position + Vector2(18, 17), "tool_kit", 0.9 + _pulse * 0.22)
-	var text := "PACK  %d/%d" % [_displayed_units, World.BACKPACK_CAPACITY]
+	var text := "PACK  %d/%d" % [_displayed_units, World.backpack_capacity()]
 	draw_string(ThemeDB.fallback_font, base_tray.position + Vector2(38, 23), text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#fdf6e3"))
 	_draw_token(base_tray.position + Vector2(18, 42), "bandages", 0.82 + _pulse * 0.18)

@@ -471,18 +471,35 @@ static func _assign_bsp_uses(fp: FloorPlan, b: BuildingData, fpr: Rect2, rng: Ra
 			if usable.size() > 3 and rng.randf() < 0.7: fp.rooms[usable[1]].kind = "conference"
 
 
-static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator) -> void:
+static func _furnish(fp: FloorPlan, b: BuildingData, rng: RandomNumberGenerator) -> void:
 	for room in fp.rooms:
 		if room.is_stair:
 			continue
+		# Personality rolls are isolated per room. They can grow without re-rolling legacy
+		# furniture in every room that happens to follow this one in generation order.
+		var room_rng := Det.rng_for(b.seed_hash, fp.floor, room.index, 1511)
 		match room.kind:
 			"bedroom":
-				_add_prop(fp, room.index, "bed", 0.27, 0.34, 1.35, 1.95, 0.52, Color("#c39bd3"))
-				_add_prop(fp, room.index, "nightstand", 0.72, 0.22, 0.48, 0.48, 0.58, Color("#5a3d28"))
-				_add_prop(fp, room.index, "dresser", 0.78, 0.78, 1.05, 0.42, 0.95, Color("#fdba74"))
-				_add_prop(fp, room.index, "rug", 0.48, 0.58, 1.45, 1.05, 0.03, Color("#b9a4e0"))
-				if rng.randf() < 0.72:
-					_add_prop(fp, room.index, "painting", 0.20, 0.82, 1.28, 0.08, 1.02, Color("#fdba74"))
+				var bedroom_variant := room_rng.randi_range(0, 3)
+				var room_w := room.rect.size.x * fp.cell_size.x
+				var room_d := room.rect.size.y * fp.cell_size.y
+				_add_prop(fp, room.index, "bed", 0.27 if bedroom_variant % 2 == 0 else 0.72, 0.34, 1.35, 1.95, 0.52, Color("#c39bd3"))
+				_add_prop(fp, room.index, "nightstand", 0.72 if bedroom_variant % 2 == 0 else 0.28, 0.22, 0.52, 0.50, 0.62, Color("#5a3d28"))
+				# Dressers should read as substantial storage, not a bedside miniature.
+				_add_prop(fp, room.index, "dresser", 0.78, 0.78, 1.48, 0.56, 1.18, Color("#fdba74"))
+				var rug_w := clampf(room_w * room_rng.randf_range(0.30, 0.42), 1.20, 2.45)
+				var rug_d := clampf(room_d * room_rng.randf_range(0.28, 0.40), 0.95, 1.95)
+				_add_prop(fp, room.index, "rug", 0.48, 0.58, rug_w, rug_d, 0.03,
+					[Color("#b9a4e0"), Color("#7dd3fc"), Color("#f9a8d4"), Color("#a7f3d0")][bedroom_variant])
+				var bedroom_art_roll := rng.randf() # preserve the legacy furnishing RNG step
+				if bedroom_art_roll < 0.84:
+					var art_kind := "poster_space" if bedroom_variant % 2 == 0 else "poster_band"
+					_add_prop(fp, room.index, art_kind, 0.20, 0.82, room_rng.randf_range(0.95, 1.28), 0.08,
+						room_rng.randf_range(1.18, 1.52), Color.WHITE)
+				if bedroom_variant in [1, 2] and room.rect.size.x * room.rect.size.y >= 2:
+					_add_prop(fp, room.index, "game_console", 0.70, 0.66, 1.02, 0.50, 0.52, Color("#272338"))
+				if bedroom_variant == 3 and room.rect.size.x * room.rect.size.y >= 3:
+					_add_prop(fp, room.index, "desk", 0.68, 0.64, 1.18, 0.62, 0.76, Color("#5a3d28"))
 			"bathroom":
 				_add_prop(fp, room.index, "toilet", 0.26, 0.30, 0.56, 0.72, 0.72, Color("#fdf6e3"))
 				_add_prop(fp, room.index, "sink", 0.72, 0.25, 0.66, 0.48, 0.86, Color("#99f6e4"))
@@ -498,11 +515,18 @@ static func _furnish(fp: FloorPlan, _b: BuildingData, rng: RandomNumberGenerator
 				_add_prop(fp, room.index, "sofa", 0.50, 0.22, 1.75, 0.72, 0.82, Color("#ea580c"))
 				_add_prop(fp, room.index, "coffee_table", 0.50, 0.56, 1.05, 0.62, 0.42, Color("#5a3d28"))
 				_add_prop(fp, room.index, "shelf", 0.82, 0.78, 0.92, 0.34, 1.45, Color("#b9a4e0"))
-				_add_prop(fp, room.index, "rug", 0.50, 0.50, 1.85, 1.30, 0.03, Color("#c39bd3"))
+				var living_w := room.rect.size.x * fp.cell_size.x
+				var living_d := room.rect.size.y * fp.cell_size.y
+				_add_prop(fp, room.index, "rug", 0.50, 0.50,
+					clampf(living_w * room_rng.randf_range(0.34, 0.46), 1.45, 2.75),
+					clampf(living_d * room_rng.randf_range(0.30, 0.42), 1.05, 2.10), 0.03,
+					[Color("#c39bd3"), Color("#7dd3fc"), Color("#fda4af")][room_rng.randi_range(0, 2)])
 				if rng.randf() < 0.78:
 					_add_prop(fp, room.index, "tv", 0.20 if rng.randf() < 0.5 else 0.80, 0.78, 0.92, 0.46, 1.05, Color("#272338"))
 				if rng.randf() < 0.60:
 					_add_prop(fp, room.index, "painting", 0.18, 0.72, 1.38, 0.08, 1.06, Color("#fdba74"))
+				if room_rng.randf() < 0.38:
+					_add_prop(fp, room.index, "game_console", 0.72, 0.64, 1.04, 0.50, 0.52, Color("#272338"))
 			"studio":
 				_add_prop(fp, room.index, "bed", 0.25, 0.32, 1.20, 1.80, 0.50, Color("#c39bd3"))
 				_add_prop(fp, room.index, "counter", 0.72, 0.20, 1.25, 0.52, 0.90, Color("#fdba74"))
@@ -538,7 +562,7 @@ static func _settle_furnishings(fp: FloorPlan) -> void:
 	var kept: Array[FloorPlan.Prop] = []
 	var occupied_by_room: Dictionary = {}
 	for prop in fp.props:
-		if prop.kind == "painting":
+		if _is_wall_art(prop.kind):
 			if _mount_painting(fp, prop):
 				kept.append(prop)
 			continue
@@ -771,7 +795,7 @@ static func doorway_clearances(fp: FloorPlan, ri: int) -> Array[Rect2]:
 
 
 static func prop_overlaps_door_clearance(fp: FloorPlan, prop: FloorPlan.Prop) -> bool:
-	if prop.kind == "painting":
+	if _is_wall_art(prop.kind):
 		# Wall mount yaw is an exact side marker and remains unambiguous near corners.
 		var side := 0
 		if is_equal_approx(prop.yaw, -PI * 0.5): side = 1
@@ -784,6 +808,10 @@ static func prop_overlaps_door_clearance(fp: FloorPlan, prop: FloorPlan.Prop) ->
 		if footprint.intersects(clearance):
 			return true
 	return false
+
+
+static func _is_wall_art(kind: String) -> bool:
+	return kind in ["painting", "poster_space", "poster_band"]
 
 
 static func _overlaps_any(rect: Rect2, others: Array) -> bool:
@@ -814,12 +842,12 @@ static func _add_prop(fp: FloorPlan, ri: int, kind: String, u: float, v: float,
 		"dresser", "nightstand", "cabinet", "shelf", "fridge", "crate":
 			prop.loot_table = "household"
 			prop.utility = "storage"
-		"bed", "sofa", "chair", "rug", "painting":
+		"bed", "sofa", "chair", "rug", "painting", "poster_space", "poster_band":
 			prop.utility = "comfort"
 		"sink", "toilet", "tub":
 			prop.utility = "water"
-		"tv", "stove":
-			prop.loot_table = "electronics" if kind == "tv" else "kitchen"
+		"tv", "game_console", "stove":
+			prop.loot_table = "electronics" if kind in ["tv", "game_console"] else "kitchen"
 			prop.utility = "power"
 		"workbench":
 			prop.loot_table = "tools"

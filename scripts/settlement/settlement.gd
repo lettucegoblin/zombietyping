@@ -10,6 +10,7 @@ const CAR_TEXTURES := [
 	preload("res://assets/sprites/vehicles/car_salvage_3.png"),
 	preload("res://assets/sprites/vehicles/car_salvage_4.png"),
 ]
+const CART_TEXTURE := preload("res://assets/sprites/settlement/supply_cart.png")
 const ResidentVisuals = preload("res://scripts/settlement/resident_visuals.gd")
 const PROP_TEXTURES := {
 	"crate": preload("res://assets/sprites/props/crate.png"),
@@ -32,6 +33,9 @@ var active_building_id := ""
 var build_mode := false
 var build_index := 0
 var _root: Node3D
+var _party_root: Node3D
+var _party_signature := ""
+var expedition_inside := false
 var _dirty := true
 var _last_sector := Vector2i(999999, 999999)
 var _citizens: Array[Node3D] = []
@@ -55,6 +59,9 @@ func _ready() -> void:
 	_root = Node3D.new()
 	_root.name = "GeneratedSettlement"
 	add_child(_root)
+	_party_root = Node3D.new()
+	_party_root.name = "ExpeditionParty"
+	add_child(_party_root)
 	_ghost_root = Node3D.new()
 	_ghost_root.name = "PlacementGhost"
 	_ghost_root.visible = false
@@ -66,6 +73,10 @@ func _ready() -> void:
 func configure(p: Node3D) -> void:
 	player = p
 	_dirty = true
+
+
+func set_expedition_inside(value: bool) -> void:
+	expedition_inside = value
 
 
 func enter(id: String) -> void:
@@ -260,6 +271,7 @@ func _process(dt: float) -> void:
 		_rebuild(sec)
 	_update_ghost()
 	_move_citizens(dt)
+	_update_expedition_party(dt)
 	World.advance_settlement(dt)
 
 
@@ -292,6 +304,7 @@ func _rebuild(center: Vector2i) -> void:
 		var b := World.building_by_id(item["building"])
 		if b != null and maxi(absi(b.sector.x - center.x), absi(b.sector.y - center.y)) <= 2:
 			_add_placement(item)
+	_rebuild_expedition_party()
 
 
 func _add_car(b: BuildingData) -> void:
@@ -337,6 +350,45 @@ func _add_perimeter(b: BuildingData) -> void:
 			_add_wall(Vector3(lo.x * World.WARD_GRID, 0.8, z), Vector3(0.35, 1.6, 2.55))
 		if not right_internal and not (gate_dir.x > 0 and at_gate):
 			_add_wall(Vector3(hi.x * World.WARD_GRID, 0.8, z), Vector3(0.35, 1.6, 2.55))
+	if World.building_state(b.id()).get("claimed", false):
+		_add_gate_cart(b)
+
+
+func _add_gate_cart(b: BuildingData) -> void:
+	var gate := World.ward_gate_world(b.id())
+	var outward := Vector2(b.road_tile - b.door_tile).normalized()
+	if outward == Vector2.ZERO:
+		outward = Vector2.RIGHT
+	var side := Vector2(-outward.y, outward.x)
+	# The same building may own a deterministic curbside salvage car. Park the cart on
+	# the opposite side of the gate so their large camera-facing sprites never stack.
+	var side_offset := side * (2.6 if posmod(b.seed_hash, 2) == 0 else -2.6)
+	var holder := Node3D.new()
+	holder.name = "GateCart_%s" % b.id().replace(",", "_").replace(":", "_")
+	# Keep the parked cart inside the permanent wall and clear of curbside salvage cars.
+	holder.position = Vector3(gate.x - outward.x * 2.7 + side_offset.x, 0.0,
+		gate.y - outward.y * 2.7 + side_offset.y)
+	_root.add_child(holder)
+	var sprite := Sprite3D.new()
+	sprite.texture = CART_TEXTURE
+	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.pixel_size = 0.026
+	sprite.position.y = 0.78
+	sprite.shaded = false
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	holder.add_child(sprite)
+	if active_building_id == b.id():
+		var label := Label3D.new()
+		label.text = "K  CART · crew %d/%d" % [World.cart_crew(b.id()).size(), World.CART_CREW_MAX]
+		label.position = Vector3(0, 1.8, 0)
+		label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		label.font_size = 22
+		label.pixel_size = 0.007
+		label.outline_size = 8
+		label.modulate = Color("#facc15")
+		label.outline_modulate = Color("#17131f")
+		holder.add_child(label)
 
 
 func _add_wall(pos: Vector3, size: Vector3, yaw: float = 0.0) -> void:
@@ -463,6 +515,10 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 		var survivor_id: String = resident_ids[resident_index]
 		var survivor: Dictionary = World.survivors.get(survivor_id, {})
 		if not survivor.is_empty():
+			if World.expedition_base_id == b.id() and World.cart_crew(b.id()).has(survivor_id) \
+					and active_building_id == "":
+				n.free()
+				return
 			citizen_key = survivor_id
 			n.name = "Survivor_%s" % str(survivor.get("name", "resident")).validate_node_name()
 			n.set_meta("survivor_id", survivor_id)
@@ -509,6 +565,77 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	_root.add_child(n)
 	_citizens.append(n)
 	_assign_citizen_route(n)
+
+
+func _rebuild_expedition_party() -> void:
+	var people: Array[Dictionary] = []
+	if active_building_id == "":
+		people = World.expedition_survivors()
+	var signature := World.expedition_base_id + ":" + ",".join(people.map(func(p): return str(p.get("id", ""))))
+	if signature == _party_signature and _party_root.get_child_count() == people.size() + (1 if not people.is_empty() else 0):
+		return
+	_party_signature = signature
+	for child in _party_root.get_children():
+		child.free()
+	if people.is_empty() or player == null:
+		return
+	for i in people.size():
+		var person: Dictionary = people[i]
+		var follower := Node3D.new()
+		follower.name = "Follower_%s" % str(person.get("name", "resident")).validate_node_name()
+		follower.set_meta("trail_index", i)
+		var sprite := Sprite3D.new()
+		var archetype := str(person.get("archetype", "adult"))
+		sprite.texture = ResidentVisuals.texture(archetype)
+		sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		sprite.pixel_size = ResidentVisuals.pixel_size(archetype)
+		sprite.position.y = ResidentVisuals.rest_y(archetype)
+		sprite.shaded = false
+		sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		follower.add_child(sprite)
+		_party_root.add_child(follower)
+		follower.global_position = player.global_position
+	var cart := Node3D.new()
+	cart.name = "FollowingSupplyCart"
+	cart.set_meta("is_cart", true)
+	var cart_sprite := Sprite3D.new()
+	cart_sprite.texture = CART_TEXTURE
+	cart_sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	cart_sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	cart_sprite.pixel_size = 0.026
+	cart_sprite.position.y = 0.78
+	cart_sprite.shaded = false
+	cart_sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	cart.add_child(cart_sprite)
+	_party_root.add_child(cart)
+	cart.global_position = player.global_position
+
+
+func _update_expedition_party(dt: float) -> void:
+	if _party_root == null or player == null:
+		return
+	var should_show := active_building_id == "" and World.expedition_base_id != ""
+	_party_root.visible = should_show
+	if not should_show:
+		return
+	var expected := World.expedition_survivors().size() + 1
+	if _party_root.get_child_count() != expected:
+		_party_signature = ""
+		_rebuild_expedition_party()
+	var forward := Vector2(player.facing.x, player.facing.z).normalized()
+	if forward == Vector2.ZERO:
+		forward = Vector2.RIGHT
+	var side := Vector2(-forward.y, forward.x)
+	for child in _party_root.get_children():
+		var is_cart := bool(child.get_meta("is_cart", false))
+		child.visible = not is_cart or not expedition_inside
+		var index := int(child.get_meta("trail_index", 0))
+		var distance := 3.2 if is_cart else 1.45 + index * 0.85
+		var lateral := 0.0 if is_cart else (-0.45 if index % 2 == 0 else 0.45)
+		var target2 := Vector2(player.global_position.x, player.global_position.z) - forward * distance + side * lateral
+		var target := Vector3(target2.x, player.global_position.y, target2.y)
+		child.global_position = child.global_position.lerp(target, clampf(dt * (3.2 if is_cart else 4.4), 0.0, 1.0))
 
 
 func _navigation_for(b: BuildingData) -> RefCounted:
@@ -681,6 +808,15 @@ func pet_nearest(world_pos: Vector3, max_distance := 3.5) -> String:
 		pet_tween.tween_property(sprite, "scale", Vector3.ONE, 0.18)
 	last_interaction_world = true
 	return spoken
+
+
+func assign_cart_crew(world_pos: Vector3, max_distance := 5.0) -> String:
+	if active_building_id == "":
+		return "enter a claimed safe zone first"
+	var gate := World.ward_gate_world(active_building_id)
+	if Vector2(world_pos.x, world_pos.z).distance_to(gate) > max_distance:
+		return "move to the gate cart to assign expedition companions"
+	return World.cycle_cart_crew(active_building_id)
 
 
 func _show_speech(citizen: Node3D, text: String) -> void:

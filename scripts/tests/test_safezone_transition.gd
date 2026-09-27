@@ -2,6 +2,8 @@ extends Node
 ## Regression: claiming the site under the player enters SAFEZONE immediately and removes
 ## retained street threats before typing combat is disabled.
 
+const Stairwell = preload("res://scripts/interior/stairwell.gd")
+
 
 func _ready() -> void:
 	call_deferred("_run")
@@ -119,11 +121,13 @@ func _run() -> void:
 	World.set_building_state(tower.id(), "safe", true)
 	World.set_building_state(tower.id(), "stored_items", { "bandages": 2, "packaged_food": 2 })
 	World.field_inventory.clear()
+	World.backpack = { "circuits": 1 }
 	main.player.snap_to_road(tower.road_tile)
 	main._enter_safezone(tower)
 	if World.field_count("bandages") != 2 or World.field_count("packaged_food") != 2 \
-		or not (World.building_state(tower.id()).get("stored_items", {}) as Dictionary).is_empty():
-		_fail("settlement entry did not refill the field kit from base stores")
+			or not World.backpack.is_empty() \
+			or int(World.building_state(tower.id()).get("stored_items", {}).get("circuits", 0)) != 1:
+		_fail("settlement entry did not unload the backpack before refilling the field kit")
 		return
 	var loot_visuals: Array = main.interior.find_children("*", "Node3D", true, false).filter(
 		func(node: Node): return bool(node.get_meta("lootable_animation", false)))
@@ -145,6 +149,16 @@ func _run() -> void:
 	if main.interior.plan.floor != 1 or main.player.global_position.y < World.FLOOR_M or not floor_result.contains("2/"):
 		_fail("claimed multi-storey navigation did not reach floor 2: " + floor_result)
 		return
+	var stair_points: Dictionary = Stairwell.label_points(main.interior.plan, main.interior.plan.stair_layout)
+	if not stair_points.has("down"):
+		_fail("upper safe-zone floor had no down stair trigger")
+		return
+	main.player.global_position = stair_points["down"]
+	main._stair_armed = true
+	main._update_safezone_stairs(main.STAIR_HOLD_SECONDS + 0.05)
+	if main.interior.plan.floor != 0:
+		_fail("standing at the stair landing did not auto-travel after the loading circle")
+		return
 	main.hp = 60
 	World.backpack = { "bandages": 1 }
 	var heal_key := InputEventKey.new()
@@ -154,12 +168,12 @@ func _run() -> void:
 	if main.hp != 90 or not World.backpack.is_empty() or World.field_count("bandages") != 2:
 		_fail("safe-zone bandage control did not consume backpack medicine before the field kit")
 		return
-	World.backpack = { "circuits": 1 }
+	World.backpack = { "batteries": 1 }
 	var stash_key := InputEventKey.new()
 	stash_key.pressed = true
 	stash_key.keycode = KEY_G
 	main._unhandled_input(stash_key)
-	if not World.backpack.is_empty() or int(World.building_state(tower.id()).get("stored_items", {}).get("circuits", 0)) != 1:
+	if not World.backpack.is_empty() or int(World.building_state(tower.id()).get("stored_items", {}).get("batteries", 0)) != 1:
 		_fail("safe-zone stash control did not deposit carried loot")
 		return
 

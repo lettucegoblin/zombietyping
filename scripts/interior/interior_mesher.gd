@@ -311,7 +311,7 @@ const PROP_SPRITES := PropVisuals.SPRITES
 
 
 static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
-	if p.kind == "painting":
+	if p.kind in ["painting", "poster_space", "poster_band"]:
 		var painting := MeshInstance3D.new()
 		painting.name = "Prop_" + p.id.replace(":", "_")
 		painting.set_meta("wall_art", true)

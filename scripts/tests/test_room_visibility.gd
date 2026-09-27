@@ -119,7 +119,8 @@ func _check_furnishing_clearance_and_wall_art() -> void:
 	var target_kinds: Dictionary = {}
 	for target_prop in target.props:
 		target_kinds[target_prop.kind] = true
-	_check(target_kinds.has("tv") and target_kinds.has("shelf") and target_kinds.has("painting"),
+	var target_has_art := target_kinds.has("painting") or target_kinds.has("poster_space") or target_kinds.has("poster_band")
+	_check(target_kinds.has("tv") and target_kinds.has("shelf") and target_has_art,
 		"0,0:2 fixed its doorway by deleting the reported furnishings")
 	for sy in range(-1, 2):
 		for sx in range(-1, 2):
@@ -134,15 +135,15 @@ func _check_furnishing_clearance_and_wall_art() -> void:
 							var footprint := InteriorGen._rotated_footprint_size(prop)
 							_check(footprint.x + 0.001 >= visible_width and footprint.y + 0.001 >= visible_width,
 								"%s placement ignored its %.2fm rendered width" % [prop.kind, visible_width])
-						if prop.kind != "painting":
+						if prop.kind not in ["painting", "poster_space", "poster_band"]:
 							continue
 						paintings += 1
 						var visual := InteriorMesher._sprite_prop(prop)
 						_check(visual is MeshInstance3D and not visual is Sprite3D,
-							"painting was not rendered as a fixed wall plane")
-						_check(bool(visual.get_meta("wall_art", false)), "painting lost its wall-art marker")
+							"wall art was not rendered as a fixed wall plane")
+						_check(bool(visual.get_meta("wall_art", false)), "wall art lost its marker")
 						visual.free()
-	_check(paintings > 0, "fixture generated no paintings")
+	_check(paintings > 0, "fixture generated no paintings or posters")
 
 
 func _check(ok: bool, message: String) -> void:

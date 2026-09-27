@@ -10,6 +10,8 @@ enum Mode { STREET, DOOR, INSIDE, SAFEZONE }
 const DOOR_WORDS := ["breach", "kick", "shove", "pry", "force", "bash", "ram", "smash"]
 const DOOR_WINDOW := 4.0
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
+const Stairwell = preload("res://scripts/interior/stairwell.gd")
+const STAIR_HOLD_SECONDS := 1.15
 
 var mode := Mode.STREET
 var door_building: BuildingData
@@ -40,6 +42,9 @@ var _loot_collecting := false
 var _loot_ticket := 0
 var _safezone_exiting := false
 var _movement_hint_pending := ""
+var _stair_hold := 0.0
+var _stair_armed := true
+var _typing_target_id := ""
 
 @onready var player: Node3D = $View/Viewport/World/Player
 @onready var settings: GameSettings = $Settings
@@ -62,6 +67,7 @@ var _movement_hint_pending := ""
 @onready var pause_menu: PauseMenu = $UI/PauseMenu
 @onready var loot_flyover: LootFlyover = $UI/LootFlyover
 @onready var mode_hint: ModeHint = $UI/ModeHint
+@onready var orientation_cue: OrientationCue = $UI/OrientationCue
 
 
 func _ready() -> void:
@@ -148,6 +154,7 @@ func _position_player_at_base_start(b: BuildingData) -> void:
 func _process(dt: float) -> void:
 	if dead:
 		return
+	settlement.set_expedition_inside(mode == Mode.INSIDE)
 	_invuln = maxf(_invuln - dt, 0.0)
 	# the rail stops the moment a zombie is in your sights (close enough to matter) and
 	# rolls again a beat after; once you have typed where to go next it keeps going
@@ -226,6 +233,9 @@ func _process(dt: float) -> void:
 	ash.emitting = mode != Mode.INSIDE
 	if mode == Mode.SAFEZONE and interior.is_inside():
 		interior.update_safezone_doors(player.global_position, dt)
+		_update_safezone_stairs(dt)
+	else:
+		orientation_cue.set_stair(0.0)
 	if Engine.get_process_frames() % 10 == 0:
 		_refresh_hud()
 
@@ -251,6 +261,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_B: msg = settlement.toggle_build()
 			KEY_T: msg = settlement.talk_nearest(player.global_position) if not settlement.build_mode else ""
 			KEY_P: msg = settlement.pet_nearest(player.global_position) if not settlement.build_mode else ""
+			KEY_K: msg = settlement.assign_cart_crew(player.global_position) if not settlement.build_mode else ""
 			KEY_Q: msg = settlement.cycle_build(-1) if settlement.build_mode else ""
 			KEY_E: msg = settlement.cycle_build(1) if settlement.build_mode else ""
 			KEY_R: msg = settlement.rotate_preview() if settlement.build_mode else ""
@@ -413,6 +424,11 @@ func _on_hud_destination(id: String) -> void:
 	for l in minimap.labels.keys():
 		if minimap.labels[l] == id:
 			label = l
+	var target := _building_focus_point(id)
+	if target != Vector3.INF:
+		player.guide_toward(target)
+	orientation_cue.commit_destination(label)
+	_typing_target_id = ""
 	if not player.enqueue(id):
 		minimap.flash("no route to " + label)
 		return
@@ -544,10 +560,16 @@ func _enter_safezone(b: BuildingData) -> void:
 	settlement.enter(b.id())
 	director.clear_room_zombies()
 	director.clear_street_zombies()
+	var arrival_messages: Array[String] = []
+	if not World.backpack.is_empty():
+		arrival_messages.append(World.deposit_backpack(b.id()))
 	var restock := World.refresh_field_inventory(b.id())
+	if restock != "":
+		arrival_messages.append(restock)
+	World.end_expedition()
 	loot_flyover.sync_backpack()
 	_show_movement_hint("safezone")
-	minimap.flash(restock if restock != "" else "safe zone: WASD move · B build · Tab travel/manage")
+	minimap.flash(" · ".join(arrival_messages) if not arrival_messages.is_empty() else "safe zone: WASD move · B build · Tab travel/manage")
 	_refresh_hud()
 
 
@@ -572,6 +594,8 @@ func _leave_safezone_for_travel() -> void:
 	_safezone_exiting = false
 	_rescue_cue.resolve()
 	var b := World.building_by_id(settlement.active_building_id)
+	if b != null:
+		World.begin_expedition(b.id())
 	interior.unload()
 	settlement.leave()
 	mode = Mode.STREET
@@ -637,6 +661,8 @@ func _finish_safezone_exit() -> void:
 	var b := World.building_by_id(settlement.active_building_id)
 	var final_tile := World.world_to_tile(player.global_position)
 	_rescue_cue.resolve()
+	if b != null:
+		World.begin_expedition(b.id())
 	interior.unload()
 	settlement.leave()
 	mode = Mode.STREET
@@ -672,7 +698,46 @@ func _safezone_floor(delta: int) -> String:
 		player.global_position.y = next_floor * World.FLOOR_M + 0.05
 	if settlement.build_mode:
 		settlement.reset_preview()
+	_stair_hold = 0.0
+	_stair_armed = false
+	orientation_cue.set_stair(0.0)
 	return "safe-zone floor %d/%d" % [next_floor + 1, door_building.floors]
+
+
+func _update_safezone_stairs(dt: float) -> void:
+	if interior.plan == null or interior.plan.stair_layout.is_empty() or door_building == null:
+		_stair_hold = 0.0
+		_stair_armed = true
+		orientation_cue.set_stair(0.0)
+		return
+	var points: Dictionary = Stairwell.label_points(interior.plan, interior.plan.stair_layout)
+	var nearest_direction := ""
+	var nearest_distance := INF
+	for direction in ["up", "down"]:
+		if not points.has(direction):
+			continue
+		var p: Vector3 = points[direction]
+		var distance := Vector2(player.global_position.x, player.global_position.z).distance_to(Vector2(p.x, p.z))
+		if distance < nearest_distance:
+			nearest_distance = distance
+			nearest_direction = direction
+	if nearest_distance > 2.15:
+		_stair_hold = 0.0
+		_stair_armed = true
+		orientation_cue.set_stair(0.0)
+		return
+	if not _stair_armed:
+		orientation_cue.set_stair(0.0)
+		return
+	if player.current_speed() > 0.12 or settlement.build_mode:
+		_stair_hold = maxf(0.0, _stair_hold - dt * 2.0)
+	else:
+		_stair_hold += dt
+	orientation_cue.set_stair(_stair_hold / STAIR_HOLD_SECONDS, nearest_direction)
+	if _stair_hold >= STAIR_HOLD_SECONDS:
+		var result := _safezone_floor(1 if nearest_direction == "up" else -1)
+		minimap.flash(result)
+		_refresh_hud()
 
 
 func _use_carried_supply(item: String, healing: int, success_text: String) -> String:
@@ -1025,6 +1090,11 @@ var _last_typed_len := 0
 
 func _on_typing() -> void:
 	minimap.typing = typist.dest_buffer
+	orientation_cue.set_destination_buffer(typist.dest_buffer)
+	if typist.dest_buffer != "" and mode in [Mode.STREET, Mode.DOOR]:
+		_focus_destination_prefix(typist.dest_buffer)
+	elif typist.dest_buffer == "":
+		_typing_target_id = ""
 	var n: int = typist.buffer.length() + typist.dest_buffer.length()
 	if n > _last_typed_len:
 		sfx.play("key", -10.0, 0.1)
@@ -1042,6 +1112,39 @@ func _on_typing() -> void:
 					if p != Vector3.INF:
 						player.guide_toward(p)
 					break
+
+
+func _focus_destination_prefix(prefix: String) -> void:
+	var candidates: Array[String] = []
+	for label in minimap.labels:
+		if str(label).begins_with(prefix):
+			candidates.append(str(minimap.labels[label]))
+	if candidates.is_empty():
+		_typing_target_id = ""
+		return
+	# Keep the first chosen building while its label still matches. This avoids camera
+	# oscillation as the buffered minimap grows and newly rendered labels join the set.
+	if _typing_target_id == "" or not candidates.has(_typing_target_id):
+		var best_distance := INF
+		for id in candidates:
+			var target := _building_focus_point(id)
+			if target == Vector3.INF:
+				continue
+			var distance := player.global_position.distance_squared_to(target)
+			if distance < best_distance:
+				best_distance = distance
+				_typing_target_id = id
+	var focus := _building_focus_point(_typing_target_id)
+	if focus != Vector3.INF:
+		player.guide_toward(focus)
+
+
+func _building_focus_point(id: String) -> Vector3:
+	var b := World.building_by_id(id)
+	if b == null:
+		return Vector3.INF
+	var centre := World.building_rect_world(b).get_center()
+	return Vector3(centre.x, minf(5.0, b.floors * World.FLOOR_M * 0.45), centre.y)
 
 
 # ------------------------------------------------------------------ combat feedback
@@ -1207,7 +1310,7 @@ func _append_safezone_hud(lines: Array[String]) -> void:
 			settlement.selected_kind(), settlement.preview_rotation * 90, cost, preview_state])
 		lines.append("arrows nudge · C recenter · Q/E item · R rotate · F place · Esc cancel")
 	else:
-		lines.append("B build · G store supplies · V break down loot · H bandage · J eat")
+		lines.append("B build · K assign gate cart · G store supplies · V break down loot · H bandage · J eat")
 	var undo_left := settlement.undo_seconds_remaining()
 	if undo_left > 0.0:
 		lines.append("[color=#ffd166]U undo %.1fs · full refund[/color]" % undo_left)

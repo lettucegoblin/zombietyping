@@ -101,6 +101,14 @@ func _process(_dt: float) -> void:
 		print("typed %s on the HUD -> queue %s  mode %s" % [target, _player.queued_ids(), _main.mode])
 		if _player.queued_ids() != [minimap.labels[target]]: return _fail("HUD-typed label should queue that building")
 		if _main.mode != _main.Mode.STREET: return _fail("a new destination should release the door hold")
+		var cue := _main.get_node("UI/OrientationCue")
+		if cue._destination_text.to_lower() != target or cue._destination_alpha < 0.9:
+			return _fail("HUD-typed label was not mirrored as a centered orientation cue")
+		var focus: Vector3 = _main._building_focus_point(minimap.labels[target])
+		var expected_facing := (focus - _player.global_position)
+		expected_facing.y = 0.0
+		if expected_facing.length() > 0.01 and _player.facing.dot(expected_facing.normalized()) < 0.98:
+			return _fail("HUD-typed destination did not focus the distant building")
 		# Revisited building labels are struck through on the map and at the door, but the
 		# door word remains a valid prompt and visibly tracks typing progress.
 		if not minimap.building_visited(_queued[0]): return _fail("visited building missing minimap state")

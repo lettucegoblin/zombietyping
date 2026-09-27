@@ -21,6 +21,8 @@ func _ready() -> void:
 	World.state.clear()
 	World.supply_links.clear()
 	World.placements.clear()
+	World.survivors.clear()
+	World.expedition_base_id = ""
 	for key in World.materials:
 		World.materials[key] = 0
 	World.add_materials({ "zombie_matter": 100 })
@@ -44,6 +46,27 @@ func _ready() -> void:
 	if not World.building_state(first.id()).get("claimed", false):
 		_fail("first base was not claimed")
 		return
+	var carrier_id := "test:carrier"
+	World.survivors[carrier_id] = {
+		"id": carrier_id, "name": "June", "archetype": "adult", "species": "human",
+		"base_id": first.id(), "status": "assigned",
+	}
+	World.building_state(first.id())["resident_ids"] = [carrier_id]
+	World.building_state(first.id())["citizens"] = 1
+	var crew_message := World.cycle_cart_crew(first.id())
+	if not crew_message.contains("June"):
+		_fail("gate cart did not recruit the rescued resident: " + crew_message)
+		return
+	World.begin_expedition(first.id())
+	if World.backpack_capacity() != World.BACKPACK_CAPACITY + World.FOLLOWER_CAPACITY + World.CART_CAPACITY \
+			or not World.add_to_backpack({ "circuits": World.BACKPACK_CAPACITY + 1 }):
+		_fail("active cart party did not expand real backpack capacity")
+		return
+	var unload_message := World.deposit_backpack(first.id())
+	if not unload_message.begins_with("cart unloaded") or not World.backpack.is_empty():
+		_fail("caravan did not take and unload backpack cargo: " + unload_message)
+		return
+	World.end_expedition()
 	var first_plan := InteriorGen.generate(World.seed, first, 0)
 	if first_plan.props.is_empty():
 		_fail("claimed building had no stable props to dismantle")
@@ -124,6 +147,25 @@ func _ready() -> void:
 		return
 	var settlement := Settlement.new()
 	add_child(settlement)
+	var party_player := Node3D.new()
+	party_player.set_script(load("res://scripts/player/rail_player.gd"))
+	var party_camera := Camera3D.new()
+	party_camera.name = "Camera3D"
+	party_player.add_child(party_camera)
+	add_child(party_player)
+	settlement.configure(party_player)
+	World.begin_expedition(first.id())
+	settlement._rebuild_expedition_party()
+	if settlement._party_root.get_child_count() != 2:
+		_fail("one recruited companion and the supply cart did not render as an expedition party")
+		return
+	settlement.set_expedition_inside(true)
+	settlement._update_expedition_party(0.1)
+	var following_cart := settlement._party_root.get_node_or_null("FollowingSupplyCart")
+	if following_cart == null or following_cart.visible:
+		_fail("the supply cart followed companions through an indoor doorway")
+		return
+	World.end_expedition()
 	settlement._add_placement(farm_item)
 	settlement._add_placement(wall_item)
 	var farm_node: Node3D = settlement._root.get_child(0)
@@ -154,6 +196,7 @@ func _ready() -> void:
 		return
 	var save_path := "user://settlement_test.save"
 	SaveStore.erase(save_path)
+	World.begin_expedition(first.id())
 	var snapshot := World.save_snapshot()
 	if SaveStore.write(snapshot, save_path) != OK:
 		_fail("could not write settlement snapshot")
@@ -170,9 +213,12 @@ func _ready() -> void:
 	if not World.building_state(first.id()).get("claimed", false) or World.supply_links.size() != snapshot["supply_links"].size() \
 			or World.placements.size() != snapshot["placements"].size() \
 			or World.placements[0]["pos"] != snapshot["placements"][0]["pos"] \
-			or not PropSalvage.is_salvaged(first.id(), salvage_prop.id):
+			or not PropSalvage.is_salvaged(first.id(), salvage_prop.id) \
+			or World.expedition_base_id != first.id() \
+			or World.backpack_capacity() <= World.BACKPACK_CAPACITY:
 		_fail("restored snapshot lost typed settlement state")
 		return
+	World.end_expedition()
 	SaveStore.erase(save_path)
 	print("SETTLEMENT OK  materials=", World.material_summary(), "  links=", World.supply_links.size(), "  placements=", World.placements.size())
 	get_tree().quit(0)

@@ -83,6 +83,10 @@ is the technical guide for contributors.
   their action remains readable. Buildings use stable, fixed-width digit-first addresses
   (`1aa` … `9zz`) across the minimap, Tab map, and first-person reticle, so they can be
   typed from the HUD without opening the map.
+- Typing a building address outside now keeps a stable candidate in view and mirrors the
+  yellow address at screen centre; completing it leaves a short confirmation beat before
+  travel begins. This keeps distant destinations spatially legible without making the mouse
+  reticle mandatory.
 - Esc opens a persistent settings menu. Audio is routed through separate combat, interaction,
   footsteps, ambience, television, survivor, and typing/UI buses under an overall volume;
   the menu generates those rows from `GameSettings.AUDIO_BUSES` so future categories remain
@@ -113,8 +117,8 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
 | `scenes/tests/test_loot.tscn` | deterministic container contents, field-kit priority and overflow, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
 | `scenes/tests/test_auto_loot.tscn` | clear-room reward beat, automatic container persistence, world-to-HUD item flights, and arrival-synchronized field-kit/backpack counts |
-| `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |
-| `scenes/tests/test_safezone_transition.tscn` | at-door claim clears camera/threat locks, safe-zone furniture remains decorative, settlement stores refill the field kit, and the gate walk reaches an outside road |
+| `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, persistent furniture placement, and cart-party carrying/unloading |
+| `scenes/tests/test_safezone_transition.tscn` | at-door claim clears camera/threat locks, entry auto-stores loot before field-kit refill, proximity-held stair travel, safe-zone furniture remains decorative, and the gate walk reaches an outside road |
 | `scenes/tests/test_tab_map.tscn` | stable fog-independent addresses, center-reticle building picking, collision-free map label nudging, supply-route caching/invalidation, menu/gameplay pointer handoff, and panel input capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_room_visibility.tscn` | partition-safe entrances, room-tinted ceilings, unrevealed structural occlusion, hidden encounters, and furniture sprite alpha |
@@ -310,6 +314,14 @@ Safe-zone entrance doors fill their frames and swing open automatically as the p
 approaches, then close after the player moves clear. They are visual-only inside permanent
 safe ground, so an animated leaf can never trap the player. Once a founding shelter exists,
 new sessions begin in its safe courtyard instead of back at the original street spawn.
+Walking into any claimed settlement automatically unloads carried salvage into that base,
+then refills the field kit from its stores. Each gate has a persistent expedition cart:
+stand beside it and press `K` to add rescued human residents (up to two) or clear the crew.
+Assigned companions follow the player in the city, the cart plus crew expands real backpack
+capacity, and the whole cargo is unloaded on the next settlement entry. Cats and dogs remain
+talking home companions rather than freight labor. In a multi-storey safehouse, standing at
+an up/down stair marker fills a short circular hold indicator and changes floors; moving away
+cancels it and each landing must be left before it can trigger again.
 
 Fortified perimeters combine building materials with zombie matter. They are permanent safe
 ground: outdoor zombies cannot spawn or remain inside them, and they never decay or trigger
@@ -329,6 +341,11 @@ the player's sparse mutations are stored.
 procedural furniture, doors with typeable words, entrance on floor 0 exactly where the
 facade door is). Topology and furnishing use separate stable RNG streams, so adding a prop
 does not perturb the room graph or its door words. Two planners:
+
+Bedrooms also derive a deterministic personality theme: bed side, larger dresser, rug
+dimensions/palette, wall-safe poster, console or desk choices vary with the furnishing RNG.
+All sprite extents participate in collision/door-lane settling, while posters use the same
+wall-plane and door/window exclusion pass as paintings.
 
 - **BSP** (`_plan_bsp`): rooms by BSP, a **stairwell strip** carved out of whatever it
   overlaps, doors as a spanning tree + ~22% loops. The building use programs the resulting

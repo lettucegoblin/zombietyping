@@ -17,6 +17,9 @@ const WARD_GRID := 2.5              ## one player-built wall edge / enclosed war
 const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
 const WORK_CYCLE_SECONDS := 45.0
 const BACKPACK_CAPACITY := 12
+const FOLLOWER_CAPACITY := 4
+const CART_CAPACITY := 12
+const CART_CREW_MAX := 2
 const FIELD_CAPACITY := {
 	"bandages": 2,
 	"packaged_food": 2,
@@ -83,6 +86,10 @@ var supply_links: Array[PackedStringArray] = []
 var placements: Array[Dictionary] = []
 var survivors: Dictionary = {}       ## stable survivor id -> named/traited roster record
 var pending_survivors: Array[String] = [] ## rescued before a base exists
+## The base whose assigned cart party is currently travelling with the player. Crew
+## selection lives on the base; this runtime leg is saved so a mid-expedition reload keeps
+## both the companions and the carrying limit.
+var expedition_base_id := ""
 var settlement_cycle := 0
 var settlement_work_seconds := 0.0
 var persistence_enabled := true
@@ -135,6 +142,7 @@ func save_snapshot() -> Dictionary:
 		"placements": placements.duplicate(true),
 		"survivors": survivors.duplicate(true),
 		"pending_survivors": pending_survivors.duplicate(),
+		"expedition_base_id": expedition_base_id,
 		"settlement_cycle": settlement_cycle,
 		"settlement_work_seconds": settlement_work_seconds,
 	}
@@ -160,6 +168,9 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	pending_survivors.clear()
 	for survivor_id in snapshot.get("pending_survivors", []):
 		pending_survivors.append(str(survivor_id))
+	expedition_base_id = str(snapshot.get("expedition_base_id", ""))
+	if expedition_base_id != "" and not building_state(expedition_base_id).get("claimed", false):
+		expedition_base_id = ""
 	settlement_cycle = int(snapshot.get("settlement_cycle", 0))
 	settlement_work_seconds = clampf(float(snapshot.get("settlement_work_seconds", 0.0)), 0.0, WORK_CYCLE_SECONDS)
 	_sectors.clear()
@@ -389,9 +400,37 @@ func backpack_units() -> int:
 	return PropLootRules.bundle_units(backpack)
 
 
+func cart_crew(id: String) -> Array[String]:
+	var out: Array[String] = []
+	if id == "":
+		return out
+	var st := building_state(id)
+	for raw_id in st.get("cart_crew", []):
+		var survivor_id := str(raw_id)
+		var person: Dictionary = survivors.get(survivor_id, {})
+		if not person.is_empty() and person.get("base_id", "") == id \
+				and str(person.get("species", "human")) == "human":
+			out.append(survivor_id)
+	return out
+
+
+func expedition_survivors() -> Array[Dictionary]:
+	var out: Array[Dictionary] = []
+	for survivor_id in cart_crew(expedition_base_id):
+		out.append((survivors.get(survivor_id, {}) as Dictionary).duplicate(true))
+	return out
+
+
+func backpack_capacity() -> int:
+	var crew_count := cart_crew(expedition_base_id).size()
+	return BACKPACK_CAPACITY + crew_count * FOLLOWER_CAPACITY + (CART_CAPACITY if crew_count > 0 else 0)
+
+
 func backpack_summary() -> String:
 	var used := backpack_units()
-	return "backpack %d/%d%s" % [used, BACKPACK_CAPACITY,
+	var crew_count := cart_crew(expedition_base_id).size()
+	var cart_text := " · cart +%d" % (crew_count * FOLLOWER_CAPACITY + CART_CAPACITY) if crew_count > 0 else ""
+	return "backpack %d/%d%s%s" % [used, backpack_capacity(), cart_text,
 		"" if backpack.is_empty() else " · " + PropLootRules.item_text(backpack)]
 
 
@@ -411,7 +450,7 @@ func item_summary(bundle: Dictionary) -> String:
 
 
 func can_carry(bundle: Dictionary) -> bool:
-	return backpack_units() + PropLootRules.bundle_units(bundle) <= BACKPACK_CAPACITY
+	return backpack_units() + PropLootRules.bundle_units(bundle) <= backpack_capacity()
 
 
 func loot_overflow(bundle: Dictionary) -> Dictionary:
@@ -536,7 +575,62 @@ func deposit_backpack(id: String) -> String:
 	backpack_changed.emit()
 	state_changed.emit(id)
 	settlement_changed.emit()
-	return "stashed at this base: " + PropLootRules.item_text(deposited)
+	var verb := "cart unloaded at this base: " if expedition_base_id != "" else "stashed at this base: "
+	return verb + PropLootRules.item_text(deposited)
+
+
+## Recruit rescued human residents into a small expedition party. The cart requires at
+## least one person, so the final press clears the roster rather than leaving an invisible
+## capacity upgrade behind. Animals remain residents/companions, not freight labor.
+func cycle_cart_crew(id: String) -> String:
+	var st := building_state(id)
+	if not st.get("claimed", false):
+		return "cart crews can only be assigned at a claimed base"
+	var candidates: Array[String] = []
+	for raw_id in st.get("resident_ids", []):
+		var survivor_id := str(raw_id)
+		var person: Dictionary = survivors.get(survivor_id, {})
+		if str(person.get("species", "human")) == "human":
+			candidates.append(survivor_id)
+	candidates.sort()
+	if candidates.is_empty():
+		return "rescue a human survivor before assigning the gate cart"
+	var crew := cart_crew(id)
+	if crew.size() >= mini(CART_CREW_MAX, candidates.size()):
+		crew.clear()
+	else:
+		for survivor_id in candidates:
+			if not crew.has(survivor_id):
+				crew.append(survivor_id)
+				break
+	st["cart_crew"] = crew.duplicate()
+	if expedition_base_id == id:
+		expedition_base_id = id if not crew.is_empty() else ""
+	state_changed.emit(id)
+	settlement_changed.emit()
+	if crew.is_empty():
+		return "gate cart parked — expedition crew cleared"
+	var names: Array[String] = []
+	for survivor_id in crew:
+		names.append(str((survivors.get(survivor_id, {}) as Dictionary).get("name", "survivor")))
+	var extra := crew.size() * FOLLOWER_CAPACITY + CART_CAPACITY
+	return "cart crew: %s — carrying capacity +%d" % [", ".join(names), extra]
+
+
+func begin_expedition(id: String) -> String:
+	var crew := cart_crew(id)
+	expedition_base_id = id if not crew.is_empty() else ""
+	settlement_changed.emit()
+	if crew.is_empty():
+		return ""
+	return "cart party following — backpack capacity %d" % backpack_capacity()
+
+
+func end_expedition() -> void:
+	if expedition_base_id == "":
+		return
+	expedition_base_id = ""
+	settlement_changed.emit()
 
 
 func break_down_backpack() -> String:

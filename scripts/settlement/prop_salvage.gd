@@ -8,12 +8,13 @@ static func material_yield(kind: String) -> Dictionary:
 		"bed": return { "wood": 2, "textiles": 2 }
 		"sofa": return { "wood": 2, "textiles": 2 }
 		"rug": return { "textiles": 2 }
-		"painting": return { "wood": 1, "textiles": 1 }
+		"painting", "poster_space", "poster_band": return { "wood": 1, "textiles": 1 }
 		"dresser", "nightstand", "cabinet", "shelf", "desk", "counter", "bench": return { "wood": 2 }
 		"chair": return { "wood": 1, "textiles": 1 }
 		"crate": return { "wood": 2, "building_materials": 1 }
 		"fridge": return { "metal": 3, "electronics": 1 }
 		"tv": return { "electronics": 3, "metal": 1 }
+		"game_console": return { "electronics": 2, "metal": 1 }
 		"stove": return { "metal": 3, "electronics": 1 }
 		"workbench": return { "wood": 2, "metal": 2, "tools": 1 }
 		"sink", "toilet", "tub": return { "metal": 2, "building_materials": 1 }

@@ -5,6 +5,9 @@ extends RefCounted
 const SPRITES := {
 	"rug": "res://assets/sprites/props/rug.png",
 	"painting": "res://assets/sprites/props/painting.png",
+	"poster_space": "res://assets/sprites/props/poster_space.png",
+	"poster_band": "res://assets/sprites/props/poster_band.png",
+	"game_console": "res://assets/sprites/props/game_console.png",
 	"fridge": "res://assets/sprites/props/fridge.png",
 	"tv": "res://assets/sprites/props/tv.png",
 	"bed": "res://assets/sprites/props/bed.png",
@@ -42,6 +45,9 @@ const OPAQUE_BOUNDS := {
 	"fridge": Rect2i(20, 0, 33, 52),
 	"nightstand": Rect2i(13, 8, 44, 46),
 	"painting": Rect2i(6, 6, 51, 41),
+	"poster_space": Rect2i(14, 6, 39, 55),
+	"poster_band": Rect2i(13, 5, 41, 56),
+	"game_console": Rect2i(2, 20, 63, 30),
 	"rug": Rect2i(0, 12, 57, 29),
 	"shelf": Rect2i(7, 14, 38, 53),
 	"sink": Rect2i(12, 10, 31, 52),
@@ -58,7 +64,7 @@ static func has_sprite(kind: String) -> bool:
 
 
 static func is_billboard(kind: String) -> bool:
-	return has_sprite(kind) and kind not in ["rug", "painting"]
+	return has_sprite(kind) and kind not in ["rug", "painting", "poster_space", "poster_band"]
 
 
 ## Matches InteriorMesher's display scale exactly. Keeping this here prevents placement

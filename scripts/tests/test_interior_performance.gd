@@ -15,6 +15,7 @@ func _ready() -> void:
 		get_tree().quit(1)
 		return
 	_check(tallest.floors >= 5, "fixture has no tall building to exercise")
+	_check(_check_furnishing_variety(), "procedural bedrooms lacked scaled storage, varied rugs, posters, or consoles")
 
 	InteriorGen.clear_cache()
 	var cold_start := Time.get_ticks_usec()
@@ -66,6 +67,29 @@ func _tallest_nearby_building() -> BuildingData:
 				if tallest == null or building.floors > tallest.floors:
 					tallest = building
 	return tallest
+
+
+func _check_furnishing_variety() -> bool:
+	var large_dresser := false
+	var poster := false
+	var console := false
+	var rug_sizes := {}
+	for sy in range(-1, 2):
+		for sx in range(-1, 2):
+			for building in World.get_sector(sx, sy).buildings:
+				var plan := InteriorGen.generate(World.seed, building, 0)
+				for prop in plan.props:
+					if prop.kind == "dresser" and prop.size.x >= 1.30:
+						large_dresser = true
+					elif prop.kind in ["poster_space", "poster_band"]:
+						poster = true
+						if InteriorGen.prop_overlaps_door_clearance(plan, prop):
+							return false
+					elif prop.kind == "game_console":
+						console = true
+					elif prop.kind == "rug":
+						rug_sizes[Vector2(snappedf(prop.size.x, 0.05), snappedf(prop.size.z, 0.05))] = true
+	return large_dresser and poster and console and rug_sizes.size() >= 3
 
 
 func _check(ok: bool, message: String) -> void:
