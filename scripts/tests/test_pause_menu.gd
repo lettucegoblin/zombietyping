@@ -12,12 +12,20 @@ func _ready() -> void:
 	main.settings.persistence_enabled = false
 	var menu: PauseMenu = main.pause_menu
 	_check(not menu.visible, "pause menu started open")
+	_check(main.hud.text.split("\n").size() <= 2, "gameplay HUD exceeded its two-line information ceiling")
+	_check(main.context_ribbon != null, "contextual control ribbon was not attached")
 	_check(menu.audio_slider_count() == GameSettings.AUDIO_BUSES.size(),
 		"pause menu did not generate one control per mixer bus")
 	for definition in GameSettings.AUDIO_BUSES:
 		var bus_name := str(definition["name"])
 		_check(AudioServer.get_bus_index(bus_name) >= 0, "missing mixer bus " + bus_name)
 		_check(menu.audio_slider(bus_name) != null, "missing dynamic slider for " + bus_name)
+	_check(not menu._audio_details_visible and menu._audio_detail_rows.all(func(row): return not row.visible),
+		"pause menu did not begin with secondary mixer categories collapsed")
+	menu._toggle_audio_details()
+	_check(menu._audio_details_visible and menu._audio_detail_rows.all(func(row): return row.visible),
+		"pause menu sound-category disclosure did not reveal all mixer controls")
+	menu._toggle_audio_details()
 
 	var escape := InputEventKey.new()
 	escape.pressed = true
@@ -58,7 +66,7 @@ func _ready() -> void:
 
 	main.settings.reset_defaults()
 	if not _failed:
-		print("PAUSE MENU OK  dynamic buses + routing + pause ownership + live accessibility settings")
+		print("PAUSE MENU OK  progressive mixer disclosure + routing + pause ownership + live accessibility settings")
 	get_tree().quit(1 if _failed else 0)
 
 

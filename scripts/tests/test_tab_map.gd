@@ -223,6 +223,20 @@ func _ready() -> void:
 	_check(map._show_all_buildings, "F3 did not enable all-sites detail")
 	map._input(f3)
 	_check(not map._show_all_buildings, "F3 did not return to focus mode")
+	map.buffer = ""
+	var letter_d := InputEventKey.new()
+	letter_d.keycode = KEY_D
+	letter_d.pressed = true
+	map._input(letter_d)
+	_check(map.buffer == "d", "details disclosure stole the letter D from typed addresses")
+	map.buffer = ""
+	var details := InputEventKey.new()
+	details.keycode = KEY_F4
+	details.pressed = true
+	map._input(details)
+	_check(map._show_building_details, "F4 did not reveal optional settlement details")
+	map._input(details)
+	_check(not map._show_building_details, "F4 did not restore the settlement summary")
 	map.visible = false
 	World.state[hidden_id] = { "visited": true }
 	var priority_ids := {}

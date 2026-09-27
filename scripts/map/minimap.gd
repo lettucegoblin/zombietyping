@@ -13,6 +13,8 @@ const COL_QUEUED := Color("#ffd166")
 const LABEL_NUDGE_STEP := 5.0
 const LABEL_NUDGE_RINGS := 8
 const LABEL_OVERSCAN := 42.0       # laid out offscreen, then clipped for smooth edge entry
+const LABEL_DENSITY_DIVISOR := 4   # full registry stays typeable; the glance map stays calm
+const MIN_NEARBY_LABELS := 8
 
 var player: Node3D
 var tab_map: Control              # texture cache + fog dirty tracking live there
@@ -215,7 +217,7 @@ func _draw() -> void:
 	# Every address stays typeable even if this tiny view cannot draw it.
 	var queued: Array = player.queued_ids()
 	var fs := 11
-	var layout_entries: Array = []
+	var visible_entries: Array = []
 	var ordinary_entries: Array = []
 	var priority_entries: Array = []
 	for e in _placed:
@@ -224,19 +226,37 @@ func _draw() -> void:
 		if p.x < -LABEL_OVERSCAN or p.y < -LABEL_OVERSCAN \
 				or p.x > size.x + LABEL_OVERSCAN or p.y > size.y + LABEL_OVERSCAN:
 			continue
-		layout_entries.append(e)
+		visible_entries.append(e)
 		var label: String = e["label"]
-		if queued.has(b.id()) or (typing != "" and label.begins_with(typing)):
+		var st: Dictionary = World.state.get(b.id(), {})
+		var essential: bool = queued.has(b.id()) or bool(st.get("safe", false)) or bool(st.get("claimed", false)) \
+			or (typing != "" and label.begins_with(typing))
+		if essential:
 			priority_entries.append(e)
-		else:
+		elif (not st.is_empty() and posmod(b.seed_hash, 2) == 0) \
+				or posmod(b.seed_hash, LABEL_DENSITY_DIVISOR) == 0:
 			ordinary_entries.append(e)
+	# Sparse hashing makes the same buildings win every frame. If a very uniform block
+	# happens to produce too few, fill from the nearest candidates without changing the
+	# complete address registry consumed by typing.
+	if priority_entries.size() + ordinary_entries.size() < MIN_NEARBY_LABELS:
+		var fillers := visible_entries.duplicate()
+		fillers.sort_custom(func(a, b):
+			return (a["b"] as BuildingData).center_tile().distance_squared_to(center) \
+				< (b["b"] as BuildingData).center_tile().distance_squared_to(center))
+		for e in fillers:
+			if priority_entries.has(e) or ordinary_entries.has(e):
+				continue
+			ordinary_entries.append(e)
+			if priority_entries.size() + ordinary_entries.size() >= MIN_NEARBY_LABELS:
+				break
 	var draw_entries := priority_entries.duplicate()
 	draw_entries.append_array(ordinary_entries)
 	# Layout extends beyond all four sides. `clip_contents` reveals each label progressively
 	# as the world scrolls it through the minimap frame instead of popping in fully formed.
 	var bounds := Rect2(Vector2.ZERO, size).grow(LABEL_OVERSCAN)
 	var candidates: Array = []
-	for e in layout_entries:
+	for e in draw_entries:
 		var b: BuildingData = e["b"]
 		var label: String = e["label"]
 		var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x

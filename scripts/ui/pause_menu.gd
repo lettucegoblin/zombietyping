@@ -12,6 +12,9 @@ var _bool_controls: Dictionary = {}
 var _syncing := false
 var _resume_button: Button
 var _settings_box: VBoxContainer
+var _audio_detail_rows: Array[Control] = []
+var _audio_details_visible := false
+var _audio_toggle: Button
 
 const INK := Color("#120a1f")
 const PANEL := Color("#1d1329")
@@ -158,6 +161,8 @@ func _build_settings() -> void:
 	_audio_sliders.clear()
 	_value_controls.clear()
 	_bool_controls.clear()
+	_audio_detail_rows.clear()
+	_audio_details_visible = false
 	if settings == null:
 		return
 
@@ -165,13 +170,15 @@ func _build_settings() -> void:
 	var audio_definitions := settings.audio_controls()
 	if not audio_definitions.is_empty():
 		_add_audio_slider(audio_definitions[0])
-		var note := Label.new()
-		note.text = "Sound categories — generated from the active mixer"
-		note.add_theme_font_size_override("font_size", 13)
-		note.add_theme_color_override("font_color", MUTED)
-		_settings_box.add_child(note)
+		_audio_toggle = _button("SHOW SOUND CATEGORIES  (%d)" % (audio_definitions.size() - 1), Color("#30263f"), CREAM)
+		_audio_toggle.custom_minimum_size.y = 34.0
+		_audio_toggle.pressed.connect(_toggle_audio_details)
+		_settings_box.add_child(_audio_toggle)
 		for i in range(1, audio_definitions.size()):
 			_add_audio_slider(audio_definitions[i])
+			var row := _audio_sliders[str(audio_definitions[i]["name"])].get_parent() as Control
+			row.visible = false
+			_audio_detail_rows.append(row)
 
 	_add_section("CONTROLS")
 	_add_value_slider("mouse_sensitivity", "Mouse look sensitivity", 25.0, 200.0, 1.0,
@@ -189,6 +196,15 @@ func _build_settings() -> void:
 
 	_add_section("DISPLAY")
 	_add_check("fullscreen", "Fullscreen", func(v: bool): settings.set_bool("fullscreen", v))
+
+
+func _toggle_audio_details() -> void:
+	_audio_details_visible = not _audio_details_visible
+	for row in _audio_detail_rows:
+		row.visible = _audio_details_visible
+	if _audio_toggle != null:
+		_audio_toggle.text = "%s SOUND CATEGORIES  (%d)" % [
+			"HIDE" if _audio_details_visible else "SHOW", _audio_detail_rows.size()]
 
 
 func _add_section(text: String) -> void:

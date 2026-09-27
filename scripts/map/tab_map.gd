@@ -55,6 +55,7 @@ var _supply_route_cache: Array[Dictionary] = []
 var _supply_topology_key := ""
 var _supply_route_build_count := 0  # exposed to focused tests; never used by gameplay
 var _show_all_buildings := false
+var _show_building_details := false
 var _facility_cache: Dictionary = {} # building id -> {signature, profile}
 
 var buffer := ""                      # what the player has typed (we own key handling: typing game)
@@ -133,6 +134,8 @@ func _input(event: InputEvent) -> void:
 			_center = Vector2(player.tile) + Vector2(0.5, 0.5); _invalidate()
 		elif k == KEY_F3:
 			_toggle_label_detail()
+		elif k == KEY_F4:
+			_toggle_building_details()
 		elif k == KEY_BACKSPACE:
 			buffer = buffer.left(maxi(buffer.length() - 1, 0)); queue_redraw()
 		elif k == KEY_ENTER or k == KEY_KP_ENTER:
@@ -164,6 +167,8 @@ func _gui_input(event: InputEvent) -> void:
 						var action: String = hit["action"]
 						if action == "toggle_labels":
 							_toggle_label_detail()
+						elif action == "toggle_details":
+							_toggle_building_details()
 						else:
 							_run_settlement_action(action)
 						accept_event()
@@ -243,6 +248,12 @@ func _on_submit(text: String) -> void:
 func _toggle_label_detail() -> void:
 	_show_all_buildings = not _show_all_buildings
 	flash("all known buildings" if _show_all_buildings else "priority sites only")
+	queue_redraw()
+
+
+func _toggle_building_details() -> void:
+	_show_building_details = not _show_building_details
+	flash("management details shown" if _show_building_details else "management summary shown")
 	queue_redraw()
 
 
@@ -788,7 +799,7 @@ func _draw() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
 	status.text = _msg if now < _msg_until else ""
 	prompt.text = "> " + buffer + ("_" if int(now * 2.0) % 2 == 0 else " ")
-	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "F3 focus/all  ·  click to manage  ·  type labels + Enter to travel  ·  info/action <label>  ·  Tab close"
+	hint.text = "zoom in to label buildings" if _ppt < LABEL_MIN_PPT else "click a site  ·  type labels + Enter to travel  ·  F3 labels  ·  F4 details  ·  Tab close"
 	var sec := World.sector_of_tile(Vector2i(_center))
 	var sd_here := World.get_sector(sec.x, sec.y)
 	var count_text := "%d/%d priority labels" % [displayed.size(), _placed.size()] if not _show_all_buildings else "%d addressable buildings" % _placed.size()
@@ -827,16 +838,31 @@ func _draw_building_panel(font: Font) -> void:
 	draw_rect(toggle_rect, Color("#8067a8"), false, 1.0)
 	draw_string(font, toggle_rect.position + Vector2(8.0, 17.0), toggle_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#f6c177"))
 	_action_hitboxes.append({ "rect": toggle_rect, "action": "toggle_labels" })
+	var detail_text := "F4  LESS" if _show_building_details else "F4 DETAILS"
+	var detail_rect := Rect2(Vector2(pr.end.x - 217.0, pr.position.y + 8.0), Vector2(90.0, 24.0))
+	draw_rect(detail_rect, Color("#30263f"))
+	draw_rect(detail_rect, Color("#8067a8"), false, 1.0)
+	draw_string(font, detail_rect.position + Vector2(8.0, 17.0), detail_text, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#f6c177"))
+	_action_hitboxes.append({ "rect": detail_rect, "action": "toggle_details" })
 	y += 25.0
-	var material_lines := _wrap_text(World.material_summary(), 42)
-	for line in material_lines:
-		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#a6e3a1"))
+	if _show_building_details:
+		var material_lines := _wrap_text(World.material_summary(), 42)
+		for line in material_lines:
+			draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#a6e3a1"))
+			y += 17.0
+		for line in _wrap_text(World.backpack_summary(), 42):
+			draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffb86c"))
+			y += 15.0
+		for line in _wrap_text(World.field_summary(), 42):
+			draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#68d5ff"))
+			y += 15.0
+	else:
+		var material_total := 0
+		for material in World.materials:
+			material_total += int(World.materials[material])
+		draw_string(font, Vector2(x, y), "STORES  %d materials  ·  PACK %d/%d" % [material_total, World.backpack_units(), World.backpack_capacity()], HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#a6e3a1"))
 		y += 17.0
-	for line in _wrap_text(World.backpack_summary(), 42):
-		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffb86c"))
-		y += 15.0
-	for line in _wrap_text(World.field_summary(), 42):
-		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#68d5ff"))
+		draw_string(font, Vector2(x, y), "FIELD  bandages %d  ·  food %d" % [World.field_count("bandages"), World.field_count("packaged_food")], HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#68d5ff"))
 		y += 15.0
 	var hp := 100
 	if health_provider.is_valid():
@@ -882,7 +908,7 @@ func _draw_building_panel(font: Font) -> void:
 	if not profile["cleared"]:
 		draw_string(font, Vector2(x, y), profile["readiness"], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#9f95ad"))
 		y += 20.0
-	else:
+	elif _show_building_details:
 		draw_string(font, Vector2(x, y), "program  " + FacilityProfile.program_text(profile), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#b8adca"))
 		y += 16.0
 		for utility_line in FacilityProfile.utility_lines(profile):
@@ -894,14 +920,18 @@ func _draw_building_panel(font: Font) -> void:
 		if int(profile.get("upgrade_level", 0)) > 0:
 			draw_string(font, Vector2(x, y), FacilityUpgradeRules.effect_text(str(profile["role_id"]), int(profile["upgrade_level"])), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#a6e3a1") if profile.get("upgrade_operational", false) else Color("#ff6f91"))
 			y += 16.0
+	else:
+		var readiness_color := Color("#a6e3a1") if profile["readiness_kind"] in ["ready", "operational"] else (Color("#ff6f91") if profile["readiness_kind"] == "needs" else Color("#f6c177"))
+		draw_string(font, Vector2(x, y), str(profile["readiness"]), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, readiness_color)
+		y += 20.0
 	if st.get("claimed", false):
 		var residents := World.resident_records(_selected_id)
 		draw_string(font, Vector2(x, y), "CREW %d  ·  next work cycle %ds" % [int(st.get("citizens", 0)), World.seconds_until_work_cycle()], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 11, Color("#f6c177"))
 		y += 16.0
-		if residents.is_empty():
+		if residents.is_empty() and _show_building_details:
 			draw_string(font, Vector2(x, y), "founder caretaker · rescue people to specialize", HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#9f95ad"))
 			y += 15.0
-		else:
+		elif _show_building_details:
 			for i in mini(2, residents.size()):
 				var person: Dictionary = residents[i]
 				var condition := World.survivor_condition(person)
@@ -920,7 +950,7 @@ func _draw_building_panel(font: Font) -> void:
 			draw_string(font, Vector2(x, y), "stores: " + World.item_summary(stored_items), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#68d5ff"))
 			y += 15.0
 		var last: Dictionary = st.get("last_production", {})
-		if not last.is_empty():
+		if not last.is_empty() and _show_building_details:
 			var output: Dictionary = last.get("output", {})
 			var work_text := "idle" if output.is_empty() else World.cost_text(output)
 			if int(last.get("unavailable", 0)) > 0:
@@ -929,8 +959,12 @@ func _draw_building_panel(font: Font) -> void:
 			draw_string(font, Vector2(x, y), "last: %s · %s" % [work_text, delivery], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, Color("#a6e3a1") if last.get("delivered", false) else Color("#ff6f91"))
 			y += 16.0
 	var supply_lines := _supply_lines_for(_selected_id)
-	for i in mini(2, supply_lines.size()):
-		draw_string(font, Vector2(x, y), supply_lines[i], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#68d5ff"))
+	if _show_building_details:
+		for i in mini(2, supply_lines.size()):
+			draw_string(font, Vector2(x, y), supply_lines[i], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#68d5ff"))
+			y += 18.0
+	elif not supply_lines.is_empty():
+		draw_string(font, Vector2(x, y), "SUPPLY LINKS  %d" % supply_lines.size(), HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 12, Color("#68d5ff"))
 		y += 18.0
 	if st.get("cleared", false) and not st.get("fortified", false):
 		draw_string(font, Vector2(x, y), "Cleared ≠ claimable. Build the perimeter.", HORIZONTAL_ALIGNMENT_LEFT, -1, 13, Color("#ff6f91"))

@@ -92,6 +92,10 @@ is the technical guide for contributors.
   the menu generates those rows from `GameSettings.AUDIO_BUSES` so future categories remain
   a data addition rather than a UI rewrite. It also owns mouse look, display, and accessibility
   preferences (shake, hit flash, and world typing-text scale).
+- Screen states use progressive disclosure: the play HUD has a two-line information ceiling,
+  controls appear briefly in a state-aware bottom ribbon, the minimap draws a deterministic
+  sparse slice of its fully typeable address registry, and detailed settlement/audio data is
+  available on demand instead of competing with the current action.
 
 ## 2. Running things
 

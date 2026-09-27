@@ -68,9 +68,11 @@ var _typing_target_id := ""
 @onready var loot_flyover: LootFlyover = $UI/LootFlyover
 @onready var mode_hint: ModeHint = $UI/ModeHint
 @onready var orientation_cue: OrientationCue = $UI/OrientationCue
+@onready var context_ribbon: Control = $UI/ContextRibbon
 
 
 func _ready() -> void:
+	_style_hud()
 	pause_menu.configure(settings)
 	pause_menu.resume_requested.connect(_on_pause_resumed)
 	settings.changed.connect(_on_setting_changed)
@@ -1248,82 +1250,127 @@ func _spark(pos: Vector3, size: float) -> void:
 
 # ------------------------------------------------------------------ hud
 
+func _style_hud() -> void:
+	# A small opaque card keeps the persistent information readable without letting the
+	# upper-left HUD claim half of the play field. Contextual controls live in the ribbon.
+	var style := StyleBoxFlat.new()
+	style.bg_color = Color("#120a1f", 0.86)
+	style.border_color = Color("#8067a8", 0.86)
+	style.border_width_left = 3
+	style.content_margin_left = 10.0
+	style.content_margin_right = 10.0
+	style.content_margin_top = 6.0
+	style.content_margin_bottom = 6.0
+	hud.add_theme_stylebox_override("normal", style)
+
+
 func _refresh_hud() -> void:
 	var lines: Array[String] = []
 	var q: Array[String] = player.queued_ids()
+	var place := ""
+	var priority := ""
+	var context_key := ""
+	var context_title := ""
+	var context_detail := ""
 	match mode:
 		Mode.STREET:
 			if q.is_empty():
-				lines.append("[color=#9aa]Idle — Tab: map, type a destination · move mouse: look[/color]")
+				place = "[color=#68d5ff][b]STREET[/b][/color]  READY"
+				context_key = "street_idle"
+				context_title = "TYPE A BUILDING ADDRESS"
+				context_detail = "Tab opens the city map  ·  mouse looks around"
 			else:
-				lines.append("Heading to [b]%s[/b]   (%d queued)" % [q[0], q.size()])
+				var queued_label := MapLabels.label_for_id(q[0])
+				place = "[color=#68d5ff][b]STREET[/b][/color]  HEADING TO [b]%s[/b]" % (queued_label if queued_label != "" else q[0])
+				priority = "%d stop%s queued" % [q.size(), "" if q.size() == 1 else "s"]
 		Mode.DOOR:
 			var t := "" if door_timer < 0.0 else "   [color=#ff8866]%.1fs[/color]" % door_timer
-			lines.append("At the door of [b]%s[/b]%s" % [door_building.id() if door_building else "?", t])
+			var label := MapLabels.label_for_id(door_building.id()) if door_building else "?"
+			place = "[color=#facc15][b]DOOR %s[/b][/color]%s" % [label, t]
+			priority = "Breach word is on the door"
+			context_key = "door"
+			context_title = "BREACH"
+			context_detail = "type the yellow-marked word"
 		Mode.INSIDE:
 			var p: Vector2i = interior.progress() if interior.is_inside() else Vector2i.ZERO
 			var fl: int = interior.plan.floor + 1 if interior.is_inside() else 0
-			lines.append("Inside [b]%s[/b]  floor %d/%d   rooms cleared %d/%d%s" % [interior.building.id() if interior.building else "?", fl, interior.building.floors if interior.building else 0, p.x, p.y, "   [color=#9aa]nothing left here — moving on[/color]" if _searching else ""])
+			var inside_label := MapLabels.label_for_id(interior.building.id()) if interior.building else "?"
+			place = "[color=#c39bd3][b]%s · FLOOR %d/%d[/b][/color]  ROOMS %d/%d" % [inside_label, fl, interior.building.floors if interior.building else 0, p.x, p.y]
 			var rescue: Dictionary = interior.active_rescue() if interior.is_inside() else {}
 			if not rescue.is_empty():
 				var location: String = "HERE — type %s" % rescue.get("word", "help") if interior.rescue_waiting_here() and interior.is_room_cleared(interior.current_room) else "floor %d · %s" % [int(rescue["floor"]) + 1, rescue["room_kind"]]
-				lines.append("[color=#f6c177]RESCUE %s [b]%s[/b] · %s · %s[/color]" % [World.survivor_archetype_label(rescue).to_upper(), rescue["name"], rescue["trait"], location])
+				priority = "[color=#f6c177]RESCUE %s [b]%s[/b] · %s[/color]" % [World.survivor_archetype_label(rescue).to_upper(), rescue["name"], location]
 			var loot_text: String = interior.loot_hint(player.global_position) if interior.is_inside() else ""
 			if loot_text != "":
-				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
-			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
-			lines.append("[color=#68d5ff]%s[/color]" % World.field_summary())
+				priority = "[color=#ffb86c]%s[/color]" % loot_text
+			if _searching:
+				priority = "[color=#9aa]Room clear · moving to the next frontier[/color]"
 		Mode.SAFEZONE:
-			_append_safezone_hud(lines)
-	var parts: Array[String] = []
-	for p in typist.prompts():
-		var w: String = p["word"]
-		var typed: String = typist.buffer if w.begins_with(typist.buffer) else ""
-		parts.append("[color=#ffd166][b]%s[/b][/color]%s" % [typed, w.substr(typed.length())])
+			var safe_hud := _safezone_hud_state()
+			place = safe_hud["place"]
+			priority = safe_hud["priority"]
+			context_key = safe_hud["context_key"]
+			context_title = safe_hud["context_title"]
+			context_detail = safe_hud["context_detail"]
 	if typist.in_combat():
 		var n: int = director.targetable().size()
-		parts.append("[color=#ff6fb5]%d zombie%s in sight[/color]" % [n, "" if n == 1 else "s"])
-		if OS.is_debug_build():
-			parts.append("[color=#94a3b8]" + " ".join(director.targetable_words()) + "[/color]")
-	if not parts.is_empty():
-		lines.append("[font_size=24]" + "   ".join(parts) + "[/font_size]")
+		priority = "[color=#ff6fb5][b]%d ZOMBIE%s IN SIGHT[/b][/color]  type the word over your target" % [n, "" if n == 1 else "S"]
+		context_key = ""
+	if typist.dest_buffer != "" or (mode == Mode.DOOR and typist.buffer != ""):
+		context_key = "" # the typed word itself is now the only instruction that matters
 	var bar := ""
-	for i in 10:
-		bar += "█" if hp > i * 10 else "░"
-	lines.append("[color=#ff2d55]HP %s[/color]  %d   [color=#facc15]kills %d[/color]" % [bar, hp, kills])
+	for i in 5:
+		bar += "|" if hp > i * 20 else "."
+	lines.append("%s   [color=#ff2d55][b]HP %s %d[/b][/color]   [color=#facc15]KILLS %d[/color]" % [place, bar, hp, kills])
+	if priority != "":
+		lines.append(priority)
 	hud.text = "\n".join(lines)
+	hud.offset_bottom = 78.0 if priority != "" else 49.0
+	if context_key == "":
+		context_ribbon.hide_context()
+	else:
+		context_ribbon.show_context(context_key, context_title, context_detail)
 	loot_flyover.queue_redraw()
 
 
-func _append_safezone_hud(lines: Array[String]) -> void:
+func _safezone_hud_state() -> Dictionary:
+	var state := {
+		"place": "", "priority": "", "context_key": "", "context_title": "",
+		"context_detail": "",
+	}
 	if _safezone_exiting:
-		lines.append("[color=#68d5ff][b]LEAVING SAFE ZONE[/b][/color]  crossing the gate → road")
-		lines.append("[color=#9aa]typed travel resumes when you reach the road[/color]")
-		return
-	var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-	lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  T talk  ·  P pet  ·  %s  ·  Tab manage/travel" % floor_text)
+		state["place"] = "[color=#68d5ff][b]LEAVING SAFE ZONE[/b][/color]"
+		state["priority"] = "Crossing the gate · typed travel resumes at the road"
+		return state
+	var floor_text := " · FLOOR %d/%d" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
+	state["place"] = "[color=#68d5ff][b]SAFE ZONE%s[/b][/color]" % floor_text
 	if settlement.build_mode:
 		var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 				else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
 		var cost := World.cost_text(World.build_cost(settlement.selected_kind()))
-		lines.append("[color=#ffd166][b]BUILD %s %d°[/b][/color]  cost %s  ·  %s" % [
-			settlement.selected_kind(), settlement.preview_rotation * 90, cost, preview_state])
-		lines.append("arrows nudge · C recenter · Q/E item · R rotate · F place · Esc cancel")
+		state["priority"] = "[color=#ffd166][b]BUILD %s %d°[/b][/color]  %s · %s" % [
+			settlement.selected_kind(), settlement.preview_rotation * 90, cost, preview_state]
+		state["context_key"] = "safe_build"
+		state["context_title"] = "F PLACE  ·  R ROTATE  ·  Q/E ITEM"
+		state["context_detail"] = "arrows nudge  ·  C recenter  ·  Esc cancel"
 	else:
-		lines.append("B build · K assign gate cart · G store supplies · V break down loot · H bandage · J eat")
+		state["context_key"] = "safe_roam"
+		state["context_title"] = "WASD FREE ROAM"
+		state["context_detail"] = "B build  ·  T talk  ·  P pet  ·  Tab settlement map"
 	var undo_left := settlement.undo_seconds_remaining()
 	if undo_left > 0.0:
-		lines.append("[color=#ffd166]U undo %.1fs · full refund[/color]" % undo_left)
+		state["priority"] = "[color=#ffd166]U UNDO %.1fs · full refund[/color]" % undo_left
 	if not settlement.build_mode:
 		var salvage_text: String = interior.salvage_hint(player.global_position)
 		if salvage_text != "":
-			lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
+			state["priority"] = "[color=#ffb86c]%s[/color]" % salvage_text
+			state["context_key"] = "safe_salvage"
+			state["context_title"] = "X DISMANTLE"
+			state["context_detail"] = "the highlighted furnishing becomes building materials"
 		var dismantle_text := settlement.dismantle_hint()
 		if dismantle_text != "":
-			lines.append("[color=#ffb86c]%s[/color]" % dismantle_text)
-	lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
-	lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
-	lines.append("[color=#68d5ff]%s[/color]" % World.field_summary())
-	var stored_items: Dictionary = World.building_state(settlement.active_building_id).get("stored_items", {})
-	if not stored_items.is_empty():
-		lines.append("[color=#68d5ff]base stores · %s[/color]" % World.item_summary(stored_items))
+			state["priority"] = "[color=#ffb86c]%s[/color]" % dismantle_text
+			state["context_key"] = "safe_dismantle"
+			state["context_title"] = "U DISMANTLE"
+			state["context_detail"] = "recover half of the placed object's materials"
+	return state
