@@ -22,6 +22,7 @@ const INTERACTION_SOUNDS := ["door", "creak", "clank"]
 const FOOTSTEP_SOUNDS := ["step1", "step2"]
 const AMBIENCE_SOUNDS := ["wind", "room", "electric", "pipes", "crow1", "crow2",
 	"flutter", "groan_far", "drip", "creak2", "thump", "knock", "hum", "siren"]
+const UI_SOUNDS := ["key", "loot_pickup", "loot_complete"]
 
 var persistence_enabled := DisplayServer.get_name() != "headless"
 var mouse_sensitivity := 1.0
@@ -177,6 +178,6 @@ static func bus_for_sound(sound_name: String) -> String:
 		return "Footsteps"
 	if sound_name in AMBIENCE_SOUNDS:
 		return "Ambience"
-	if sound_name == "key":
+	if sound_name in UI_SOUNDS:
 		return "UI"
 	return "Interaction"

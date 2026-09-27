@@ -136,8 +136,9 @@ func _process(_dt: float) -> void:
 			# state-aware next action carries the recommendation marker.
 			var labels: Node3D = _interior._room_nodes[ri].get_node("Labels")
 			var recommended: Dictionary = _interior.recommended_option()
-			# Rescue/help and container loot are in-room HUD actions rather than doorway chevrons.
-			var recommended_seen: bool = recommended.is_empty() or recommended.get("kind", "") in ["rescue", "loot"]
+			# Rescue/help is an in-room action rather than a doorway chevron. Loot now flows
+			# automatically during the room-clear reward beat and is never a typed route.
+			var recommended_seen: bool = recommended.is_empty() or recommended.get("kind", "") == "rescue"
 			for node in labels.get_children():
 				if not node is WordLabel: continue
 				var label := node as WordLabel
@@ -166,9 +167,6 @@ func _process(_dt: float) -> void:
 				if not w.has(door_word): return _fail("unexplored door word missing from prompts")
 			if w.has("help"):
 				_type("help")
-				return
-			if w.has("loot"):
-				_type("loot")
 				return
 			if w.has("up") and not _climbed:
 				_climbed = true

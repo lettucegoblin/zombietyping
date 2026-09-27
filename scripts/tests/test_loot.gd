@@ -34,14 +34,16 @@ func _ready() -> void:
 	var animated := room.find_children("*", "Node3D", true, false).filter(
 		func(node: Node): return bool(node.get_meta("lootable_animation", false)))
 	_check(not animated.is_empty(), "unsearched containers had no collectible motion")
-	var loot_labels := room.find_children("Loot_*", "", true, false).filter(
-		func(node: Node): return node is WordLabel and (node as WordLabel).option_kind == "loot")
-	_check(not loot_labels.is_empty(), "unsearched containers had no on-object LOOT word")
+	var loot_labels := room.find_children("Loot_*", "Label3D", true, false).filter(
+		func(node: Node): return (node as Label3D).text == "SUPPLIES")
+	_check(not loot_labels.is_empty(), "unsearched containers had no on-object SUPPLIES marker")
 	_check((animated[0] as Node3D).get_node_or_null("LootMotes") is GPUParticles3D,
 		"unsearched containers had no collectible motes")
 	var words: Array = interior.options().map(func(o): return o["word"])
-	_check(words.has("loot"), "cleared room did not expose the typed loot action")
-	var message: String = interior.loot_here(prop.pos)
+	_check(not words.has("loot"), "cleared room still exposed the retired typed loot action")
+	_check(interior.lootable_props_in_room(prop.room, true).has(prop),
+		"cleared room did not expose the container to automatic collection")
+	var message: String = interior.loot_prop(prop)
 	_check(message.begins_with("searched"), "container could not be searched: " + message)
 	_check(PropLootRules.is_looted(b.id(), prop.id), "searched container id was not persisted")
 	_check(World.backpack == first, "rolled items did not enter the backpack")

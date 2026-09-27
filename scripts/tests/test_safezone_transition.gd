@@ -77,12 +77,21 @@ func _run() -> void:
 		_fail("Escape opened pause menu instead of cancelling active build mode")
 		return
 	var gate_dir := Vector2(b.road_tile - b.door_tile).normalized()
-	var gate_world := World.tile_to_world(b.road_tile)
-	main.player.global_position = gate_world + Vector3(gate_dir.x, 0, gate_dir.y) * 1.9
+	var gate2 := World.ward_gate_world(b.id())
+	main.player.global_position = Vector3(gate2.x - gate_dir.x * 0.7, 0, gate2.y - gate_dir.y * 0.7)
 	main.player.facing = Vector3(gate_dir.x, 0, gate_dir.y)
 	main.player._manual_move_vector(Vector2(0, -1), 0.25)
-	if main.mode != 0 or main.player.manual_control: # Main.Mode.STREET
-		_fail("walking through the visible gate did not leave SAFEZONE")
+	if main.mode != 3 or main.player.manual_control or not main._safezone_exiting: # Main.Mode.SAFEZONE
+		_fail("gate threshold did not begin the walk-out transition")
+		return
+	var exit_frames := 0
+	while main.mode != 0 and exit_frames < 300: # Main.Mode.STREET
+		exit_frames += 1
+		await get_tree().process_frame
+	var exit_point := Vector2(main.player.global_position.x, main.player.global_position.z)
+	if main.mode != 0 or main.player.manual_control or World.ward_contains_point(b.id(), exit_point) \
+			or World.road_at(main.player.tile) <= 0:
+		_fail("walk-out transition did not finish on a road outside the ward")
 		return
 	var tower: BuildingData
 	for candidate in World.get_sector(0, 0).buildings:
@@ -118,7 +127,7 @@ func _run() -> void:
 		_fail("safe-zone stash control did not deposit carried loot")
 		return
 
-	print("SAFEZONE TRANSITION OK  build cursor input + gate exit + multi-storey free roam + backpack controls")
+	print("SAFEZONE TRANSITION OK  build cursor input + walked gate exit + multi-storey free roam + backpack controls")
 	get_tree().quit(0)
 
 

@@ -1,4 +1,4 @@
-[gd_scene load_steps=23 format=3]
+[gd_scene load_steps=24 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/streamer.gd" id="2_streamer"]
@@ -17,6 +17,7 @@
 [ext_resource type="Script" path="res://scripts/ui/building_reticle.gd" id="15_reticle"]
 [ext_resource type="Script" path="res://scripts/settings/game_settings.gd" id="16_settings"]
 [ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="17_pause"]
+[ext_resource type="Script" path="res://scripts/ui/loot_flyover.gd" id="18_loot"]
 
 [sub_resource type="ShaderMaterial" id="post_mat"]
 shader = ExtResource("7_post")
@@ -146,6 +147,15 @@ theme_override_constants/outline_size = 6
 theme_override_colors/font_outline_color = Color(0.07, 0.04, 0.12, 1)
 theme_override_colors/default_color = Color(0.99, 0.96, 0.89, 1)
 text = "Idle"
+
+[node name="LootFlyover" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("18_loot")
 
 [node name="Minimap" type="Control" parent="UI"]
 anchors_preset = 1

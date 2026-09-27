@@ -79,6 +79,25 @@ n = secs(0.06)
 save("key", mix([v * env(i / SR, 0.0005, 0.02) for i, v in enumerate(highpass(noise(n), 3000))],
                 tone(lambda t: 1900, n, lambda t: 0.4 * env(t, 0.0005, 0.015))))
 
+# --- loot arrivals: a compact mallet/coin pickup whose pitch rises for each icon, then a
+# warm resolving chord for the final unit. Playback supplies the progression pitch so one
+# pair of tiny assets can make long pickups feel increasingly rewarding.
+n = secs(0.24)
+pickup = mix(
+    tone(lambda t: 760 + 520 * min(1.0, t / 0.055), n, lambda t: 0.75 * env(t, 0.001, 0.16), tri),
+    tone(lambda t: 1520, n, lambda t: 0.28 * env(t, 0.001, 0.09)),
+    tone(lambda t: 2280, n, lambda t: 0.12 * env(t, 0.001, 0.045)),
+)
+save("loot_pickup", pickup)
+n = secs(0.42)
+complete = mix(
+    tone(lambda t: 660, n, lambda t: 0.55 * env(t, 0.002, 0.30), tri),
+    tone(lambda t: 825, n, lambda t: 0.46 * env(t, 0.018, 0.31), tri),
+    tone(lambda t: 990, n, lambda t: 0.36 * env(t, 0.038, 0.32), tri),
+    tone(lambda t: 1980, n, lambda t: 0.10 * env(t, 0.001, 0.12)),
+)
+save("loot_complete", complete)
+
 # --- door: wood crack + boom
 n = secs(0.7)
 crack = [v * env(i / SR, 0.001, 0.06) for i, v in enumerate(highpass(noise(n), 1200))]

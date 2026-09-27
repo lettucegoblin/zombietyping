@@ -8,6 +8,7 @@ const DOOR_W := 1.2
 const DOOR_H := 2.2
 const WIN_LO := 1.2
 const WIN_HI := 2.2
+const WALL_FACE_INSET := 0.012
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
 const PropVisuals = preload("res://scripts/interior/prop_visuals.gd")
 const LootableProp = preload("res://scripts/interior/lootable_prop.gd")
@@ -290,15 +291,17 @@ static func _searched_label(prop: FloorPlan.Prop) -> Label3D:
 	return label
 
 
-static func _loot_label(prop: FloorPlan.Prop) -> WordLabel:
-	var label := WordLabel.new("loot", 24)
+static func _loot_label(prop: FloorPlan.Prop) -> Label3D:
+	var label := Label3D.new()
 	label.name = "Loot_" + prop.id.replace(":", "_")
+	label.text = "SUPPLIES"
 	label.position = Vector3(0, maxf(prop.size.y + 0.34, 0.72), 0)
-	label.option_kind = "loot"
-	label.option_door = -1
-	label.option_target = prop.id
-	label.edge_hint = false
-	label.visible = false
+	label.font_size = 22
+	label.pixel_size = 0.008
+	label.modulate = Color("#facc15")
+	label.outline_modulate = Color("#17131f")
+	label.outline_size = 8
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	return label
 
 
@@ -622,8 +625,13 @@ static func _fling(parent: Node, start: Transform3D, away: Vector3, w: float, h:
 
 ## Wall from p0 to p1, height H, minus holes [[t0, t1, y_lo, y_hi], ...] in metres along p0->p1.
 static func _wall_with_holes(st: SurfaceTool, p0: Vector3, p1: Vector3, n: Vector3, H: float, holes: Array, col: Color) -> void:
-	p0 = p0 + Vector3(0, -0.08, 0)
-	p1 = p1 + Vector3(0, -0.08, 0)
+	# Offset the whole inward face, not just the lintel. A lintel-only bias stopped the two
+	# rooms fighting for the same depth but left a literal depth step where it met the
+	# surrounding wall; that seam flashed open at oblique angles while the camera moved.
+	# Moving every fragment together keeps shared vertices watertight and separates the
+	# opposing room faces enough for stable depth testing.
+	p0 = p0 + Vector3(0, -0.08, 0) + n * WALL_FACE_INSET
+	p1 = p1 + Vector3(0, -0.08, 0) + n * WALL_FACE_INSET
 	H += 0.08
 	for h in holes:
 		if h[2] > 0.0: h[2] += 0.08
@@ -642,10 +650,7 @@ static func _wall_with_holes(st: SurfaceTool, p0: Vector3, p1: Vector3, n: Vecto
 		if h[2] > 0.0:
 			_wq(st, p0, dir, t0, t1, 0.0, h[2], H, n, col)
 		if h[3] < H:
-			# Both adjoining rooms author their own inward-facing partition surface. Give
-			# the cap over an opening a tiny room-side bias so its wall swatch cannot lose
-			# a coplanar depth tie and reveal the other room/ceiling colour instead.
-			_wq(st, p0 + n * 0.012, dir, t0, t1, h[3], H, H, n, col)
+			_wq(st, p0, dir, t0, t1, h[3], H, H, n, col)
 		cursor = maxf(cursor, t1)
 	if cursor < len - 0.001:
 		_wq(st, p0, dir, cursor, len, 0.0, H, H, n, col)

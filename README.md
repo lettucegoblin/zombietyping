@@ -46,7 +46,7 @@ than another upkeep timer.
 
 | Input | Action |
 |---|---|
-| Type the visible word | Travel, interact, open a door, loot, or attack |
+| Type the visible word | Travel, interact, open a door, rescue, or attack |
 | Mouse | Look around in first person |
 | `Tab` | Pause, open the city/building map, and use field or safehouse care |
 | `Esc` | Pause and open settings |
@@ -110,9 +110,10 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_camera_control.tscn` | kicked-door camera lock plus mouse-look priority over ambient auto-aim |
 | `scenes/tests/test_pause_menu.tscn` | Escape pause ownership, dynamic mixer sliders, sound routing, and live accessibility controls |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
-| `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
+| `scenes/tests/test_loot.tscn` | deterministic container contents, automatic-room-loot eligibility, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
+| `scenes/tests/test_auto_loot.tscn` | clear-room reward beat, automatic container persistence, world-to-HUD item flights, and arrival-synchronized backpack count |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |
-| `scenes/tests/test_safezone_transition.tscn` | at-door claim immediately enters the safe zone and removes retained street threats before typing combat is disabled |
+| `scenes/tests/test_safezone_transition.tscn` | at-door claim enters the safe zone, removes retained threats, and walking through its gate carries the player to an outside road before typed travel resumes |
 | `scenes/tests/test_tab_map.tscn` | stable fog-independent addresses, center-reticle building picking, collision-free map label nudging, supply-route caching/invalidation, menu/gameplay pointer handoff, and panel input capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_room_visibility.tscn` | partition-safe entrances, room-tinted ceilings, unrevealed structural occlusion, hidden encounters, and furniture sprite alpha |
@@ -222,7 +223,7 @@ are inside).
 Clearing a building is only a tactical milestone and never makes it claimable by itself.
 Click its label in the Tab map (or type `info <label>`) to open the building panel. The loop is:
 
-1. Clear generated rooms, search individual containers into the carried backpack, then
+1. Clear generated rooms, collect their container rewards into the carried backpack, then
    salvage the generated furnishings into material classes after claiming the site.
 2. Dismantle seed-placed street cars over four persistent visual stages, ending as a frame
    on blocks; stages yield metal, electronics, fuel, tools, and vehicle parts.
@@ -244,11 +245,12 @@ cancels, and `U` gives a ten-second full-refund undo before dismantling the near
 object for a 50% rounded-up refund. It never silently removes the newest object elsewhere.
 
 Searchable dressers, cabinets, shelves, fridges, crates, televisions, stoves, and workbenches
-roll contents from their procedural loot-table tag and stable prop ID. Once a room is safe,
-each unsearched container gets a subtle proportion-weighted hop, six gold collectible motes,
-and an on-object `loot` word. Loot guidance outranks doors but still yields to zombies;
-`loot` searches the nearest unsearched container and the search rail waits while a fitting item
-bundle remains. The twelve-slot backpack persists between sessions. Searched containers are
+roll contents from their procedural loot-table tag and stable prop ID. While a room is
+dangerous, unsearched containers have a subtle proportion-weighted hop, six gold collectible
+motes, and an on-object `SUPPLIES` marker. Once it is safe, route typing pauses for a short
+reward beat and every carryable unit arcs from its world position into the top-left backpack
+chip. Its number, color pulse, and rising pickup cadence land together; a full backpack leaves
+the remaining supplies visibly in place. The twelve-slot backpack persists between sessions. Searched containers are
 dimmed and marked `EMPTY` on return. At a safe zone, `G` stashes carried items for residents,
 `V` sorts them into existing construction material classes, `H` uses bandages, and `J` eats
 packaged food. Only searched prop IDs are saved—the contents themselves regenerate

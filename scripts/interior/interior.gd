@@ -120,13 +120,37 @@ func nearest_lootable_prop(world_pos: Vector3, require_capacity := true) -> Floo
 	return nearest
 
 
+func lootable_props_in_room(ri := -1, require_capacity := true) -> Array[FloorPlan.Prop]:
+	var out: Array[FloorPlan.Prop] = []
+	if plan == null or building == null:
+		return out
+	var room_index := current_room if ri < 0 else ri
+	for prop in plan.props:
+		if prop.room != room_index or prop.loot_table == "" \
+				or PropLootRules.is_looted(building.id(), prop.id) \
+				or PropSalvage.is_salvaged(building.id(), prop.id):
+			continue
+		if require_capacity and not World.can_carry(PropLootRules.contents(building.id(), prop)):
+			continue
+		out.append(prop)
+	out.sort_custom(func(a: FloorPlan.Prop, b: FloorPlan.Prop): return a.id < b.id)
+	return out
+
+
+func has_uncollected_loot(ri := -1) -> bool:
+	return not lootable_props_in_room(ri, false).is_empty()
+
+
 func has_loot_here(world_pos: Vector3) -> bool:
 	return nearest_lootable_prop(world_pos) != null
 
 
 func loot_hint(world_pos: Vector3) -> String:
 	var prop := nearest_lootable_prop(world_pos)
-	return "" if prop == null else "type LOOT to search %s" % prop.kind
+	if prop != null:
+		return "room supplies ready — collecting automatically"
+	var blocked := nearest_lootable_prop(world_pos, false)
+	return "" if blocked == null else "backpack full — supplies left in place"
 
 
 func loot_here(world_pos: Vector3) -> String:
@@ -135,6 +159,12 @@ func loot_here(world_pos: Vector3) -> String:
 		var blocked := nearest_lootable_prop(world_pos, false)
 		if blocked != null:
 			return "backpack full — return to a safe zone to sort it"
+		return "nothing left to loot in this room"
+	return loot_prop(prop)
+
+
+func loot_prop(prop: FloorPlan.Prop) -> String:
+	if prop == null:
 		return "nothing left to loot in this room"
 	var result: String = PropLootRules.loot(building.id(), prop)
 	if result.begins_with("searched"):
@@ -584,8 +614,6 @@ func options() -> Array:
 	if rescue_waiting_here() and is_room_cleared(current_room):
 		var mission := active_rescue()
 		out.append({ "word": mission.get("word", "help"), "kind": "rescue", "door": -1, "survivor": mission.get("id", "") })
-	if is_room_cleared(current_room) and has_loot_here(plan.room_stand_world(current_room)):
-		out.append({ "word": "loot", "kind": "loot", "door": -1 })
 	return out
 
 
@@ -663,9 +691,6 @@ func recommended_option() -> Dictionary:
 	var rescue_option := recommended_rescue_option()
 	if not rescue_option.is_empty():
 		return rescue_option
-	if is_room_cleared(current_room) and has_loot_here(plan.room_stand_world(current_room)):
-		var prop := nearest_lootable_prop(plan.room_stand_world(current_room))
-		return { "word": "loot", "kind": "loot", "door": -1, "target": prop.id }
 	var useful := unexplored_doors(current_room)
 	if not useful.is_empty():
 		var di: int = useful[0]

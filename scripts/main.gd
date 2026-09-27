@@ -9,6 +9,7 @@ enum Mode { STREET, DOOR, INSIDE, SAFEZONE }
 
 const DOOR_WORDS := ["breach", "kick", "shove", "pry", "force", "bash", "ram", "smash"]
 const DOOR_WINDOW := 4.0
+const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
 
 var mode := Mode.STREET
 var door_building: BuildingData
@@ -35,6 +36,9 @@ var _gameplay_mouse_look := false
 const HALT_RANGE := 14.0              # a zombie you can fire at (in sight, in range) stops the rail
 const AIM_RANGE := 14.0               # ...and turns you to face it whenever you are not walking
 var _rescue_cue: SurvivorCue
+var _loot_collecting := false
+var _loot_ticket := 0
+var _safezone_exiting := false
 
 @onready var player: Node3D = $View/Viewport/World/Player
 @onready var settings: GameSettings = $Settings
@@ -55,6 +59,7 @@ var _rescue_cue: SurvivorCue
 @onready var hud: RichTextLabel = $UI/HUD
 @onready var words: WordOverlay = $UI/Words
 @onready var pause_menu: PauseMenu = $UI/PauseMenu
+@onready var loot_flyover: LootFlyover = $UI/LootFlyover
 
 
 func _ready() -> void:
@@ -72,6 +77,7 @@ func _ready() -> void:
 	map.health_provider = func(): return hp
 	map.healing_requested.connect(_on_map_healing_requested)
 	sfx.player = player
+	loot_flyover.configure(player.cam, $View, $View/Viewport, sfx, hud)
 	sky.player = player
 	sky.sfx = sfx
 	settlement.configure(player)
@@ -273,6 +279,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
 			minimap.flash(msg)
+			loot_flyover.sync_backpack()
 			_refresh_hud()
 			get_viewport().set_input_as_handled()
 			return
@@ -414,14 +421,17 @@ func _on_queue_changed() -> void:
 
 func _on_arrived(id: String) -> void:
 	_moving_on = false
+	if id == "safezone_exit":
+		_finish_safezone_exit()
+		return
 	if id.begins_with("room:"):
 		var ri := int(id.substr(5))
 		interior.set_room(ri)
 		_populate_room(ri)
 		_refresh_prompts()
 		_face_arrival(ri)
-		if interior.is_room_cleared(ri) and not interior.rescue_waiting_here():
-			_queue_search(0.35)
+		if interior.is_room_cleared(ri):
+			_schedule_room_rewards(ri, 0.55)
 		return
 	if id == "approach":
 		_refresh_prompts()
@@ -437,8 +447,8 @@ func _on_arrived(id: String) -> void:
 		# A search target can become complete while we are walking to it (for example a
 		# zero-zombie living room reached through several already-open service rooms).
 		# Continue the automatic search instead of idling among irrelevant open-door words.
-		if interior.is_room_cleared(ri) and interior.unexplored_doors(ri).is_empty() and not interior.rescue_waiting_here():
-			_queue_search(0.35)
+		if interior.is_room_cleared(ri):
+			_schedule_room_rewards(ri, 0.55)
 		return
 	if id == "stairs":
 		# standing on the landing of the new storey: look through the archways, shoot,
@@ -453,6 +463,7 @@ func _on_arrived(id: String) -> void:
 		_queue_search(0.35)
 		return
 	if id == "exit":
+		_cancel_room_rewards()
 		_rescue_cue.resolve()
 		director.clear_room_zombies()
 		_spawned_rooms.clear()
@@ -494,12 +505,14 @@ func _leave_door() -> void:
 
 
 func _enter_safezone(b: BuildingData) -> void:
+	_cancel_room_rewards()
 	mode = Mode.SAFEZONE
 	door_building = b
 	_search_pending = false
 	_searching = false
 	_moving_on = false
 	_climbing = false
+	_safezone_exiting = false
 	typist.clear_prompts()
 	typist.enabled = false
 	_rescue_cue.resolve()
@@ -512,6 +525,7 @@ func _enter_safezone(b: BuildingData) -> void:
 	settlement.enter(b.id())
 	director.clear_room_zombies()
 	director.clear_street_zombies()
+	loot_flyover.sync_backpack()
 	minimap.flash("safe zone: WASD move · B build · Tab travel/manage")
 	_refresh_hud()
 
@@ -534,6 +548,7 @@ func _on_world_state_changed(id: String) -> void:
 
 
 func _leave_safezone_for_travel() -> void:
+	_safezone_exiting = false
 	_rescue_cue.resolve()
 	var b := World.building_by_id(settlement.active_building_id)
 	interior.unload()
@@ -545,17 +560,68 @@ func _leave_safezone_for_travel() -> void:
 
 
 func _on_safezone_gate_exit() -> void:
-	if mode != Mode.SAFEZONE:
+	if mode != Mode.SAFEZONE or _safezone_exiting:
 		return
-	_rescue_cue.resolve()
 	var b := World.building_by_id(settlement.active_building_id)
+	if b == null:
+		_leave_safezone_for_travel()
+		return
+	_safezone_exiting = true
+	var gate := World.ward_gate_world(b.id())
+	var outward := Vector2(b.road_tile - b.door_tile).normalized()
+	if outward == Vector2.ZERO:
+		outward = Vector2.RIGHT
+	var outside_tile := _outside_road_tile(b, gate, outward)
+	var road := World.tile_to_world(outside_tile)
+	var through := Vector3(gate.x + outward.x * 1.35, 0.0, gate.y + outward.y * 1.35)
+	player.guide_toward(through)
+	player.push_local(PackedVector3Array([
+		player.global_position,
+		Vector3(gate.x, 0.0, gate.y),
+		through,
+		road,
+	]), "safezone_exit", 3.4)
+	minimap.flash("leaving the safe zone — walking out to the road")
+	_refresh_hud()
+
+
+func _outside_road_tile(b: BuildingData, gate: Vector2, outward: Vector2) -> Vector2i:
+	var probe := Vector3(gate.x + outward.x * (World.TILE_M * 0.75), 0.0,
+		gate.y + outward.y * (World.TILE_M * 0.75))
+	var center := World.world_to_tile(probe)
+	var best := b.road_tile
+	var best_score := INF
+	for radius in range(0, 13):
+		for y in range(center.y - radius, center.y + radius + 1):
+			for x in range(center.x - radius, center.x + radius + 1):
+				if radius > 0 and x > center.x - radius and x < center.x + radius \
+						and y > center.y - radius and y < center.y + radius:
+					continue
+				var tile := Vector2i(x, y)
+				var world := World.tile_to_world(tile)
+				if World.road_at(tile) <= 0 or World.ward_contains_point(b.id(), Vector2(world.x, world.z)):
+					continue
+				var delta := Vector2(world.x - gate.x, world.z - gate.y)
+				var score := delta.length_squared() - maxf(0.0, delta.dot(outward)) * 2.0
+				if score < best_score:
+					best_score = score
+					best = tile
+		if best_score < INF:
+			break
+	return best
+
+
+func _finish_safezone_exit() -> void:
+	var b := World.building_by_id(settlement.active_building_id)
+	var final_tile := World.world_to_tile(player.global_position)
+	_rescue_cue.resolve()
 	interior.unload()
 	settlement.leave()
 	mode = Mode.STREET
 	typist.enabled = true
-	if b != null:
-		player.snap_to_road(b.road_tile)
-	minimap.flash("left the safe zone — typed travel restored")
+	_safezone_exiting = false
+	player.snap_to_road(final_tile if World.road_at(final_tile) > 0 else (b.road_tile if b != null else final_tile))
+	minimap.flash("on the road — typed travel restored")
 	_refresh_hud()
 
 
@@ -602,6 +668,7 @@ func _on_map_healing_requested(source: String, base_id: String) -> void:
 			sfx.play("hit", -14.0, 0.04, 1.35)
 			result = "treated at the safehouse — health %d" % hp
 	map.flash(result)
+	loot_flyover.sync_backpack()
 	_refresh_hud()
 
 
@@ -623,6 +690,7 @@ func _hide_door_label() -> void:
 # ------------------------------------------------------------------ inside
 
 func _enter_building() -> void:
+	_cancel_room_rewards()
 	var b := door_building
 	var rescue := World.ensure_rescue_candidate(b.id())
 	_moving_on = true
@@ -719,15 +787,80 @@ func _queue_search(beat: float) -> void:
 	_search_beat = beat
 
 
+func _cancel_room_rewards() -> void:
+	_loot_ticket += 1
+	_loot_collecting = false
+
+
+## A cleared room gets a short victory beat while its still-bouncing supplies remain in
+## the world, then each carried unit flies into the HUD. Door prompts are held until the
+## last icon and sound land so the reward cannot be skipped by immediately typing onward.
+func _schedule_room_rewards(ri: int, beat := 0.85) -> void:
+	if mode != Mode.INSIDE or not interior.is_inside() or ri != interior.current_room \
+			or not interior.is_room_cleared(ri):
+		return
+	if _loot_collecting:
+		return
+	var props: Array = interior.lootable_props_in_room(ri, true)
+	if props.is_empty():
+		if interior.has_uncollected_loot(ri):
+			minimap.flash("room clear — backpack full, supplies left in place")
+		_refresh_prompts()
+		_face_room()
+		if not interior.rescue_waiting_here():
+			_queue_search(0.35)
+		return
+	_loot_ticket += 1
+	var ticket := _loot_ticket
+	_loot_collecting = true
+	_search_pending = false
+	_searching = false
+	typist.clear_prompts()
+	var first: FloorPlan.Prop = props[0]
+	player.guide_toward(first.pos + Vector3(0, maxf(first.size.y, 0.7), 0))
+	minimap.flash("room clear — supplies incoming")
+	_collect_room_rewards(ri, ticket, beat)
+	_refresh_hud()
+
+
+func _collect_room_rewards(ri: int, ticket: int, beat: float) -> void:
+	await get_tree().create_timer(beat, false).timeout
+	while ticket == _loot_ticket and mode == Mode.INSIDE and interior.is_inside() \
+			and interior.current_room == ri:
+		var props: Array = interior.lootable_props_in_room(ri, true)
+		if props.is_empty():
+			break
+		var prop: FloorPlan.Prop = props[0]
+		var bundle: Dictionary = PropLootRules.contents(interior.building.id(), prop)
+		var units_before := World.backpack_units()
+		var origin := prop.pos + Vector3(0, maxf(prop.size.y * 0.72, 0.62), 0)
+		var result: String = interior.loot_prop(prop)
+		if not result.begins_with("searched"):
+			break
+		var flight := loot_flyover.fly_bundle(origin, bundle, units_before)
+		minimap.flash("collected " + PropLootRules.item_text(bundle))
+		_refresh_hud()
+		if flight > 0.0:
+			await get_tree().create_timer(flight, false).timeout
+	if ticket != _loot_ticket:
+		return
+	_loot_collecting = false
+	_refresh_prompts()
+	_face_room()
+	if interior.has_uncollected_loot(ri):
+		minimap.flash("backpack full — remaining supplies stay here")
+	if not interior.rescue_waiting_here():
+		_queue_search(0.35)
+	_refresh_hud()
+
+
 func _search_step() -> void:
-	if mode != Mode.INSIDE or not interior.is_inside() or player.is_moving():
+	if mode != Mode.INSIDE or not interior.is_inside() or player.is_moving() or _loot_collecting:
 		return
 	var here: int = interior.current_room
 	if here < 0 or not interior.is_room_cleared(here):
 		return
 	if interior.rescue_waiting_here():
-		return
-	if interior.has_loot_here(player.global_position):
 		return
 	var target: int = interior.search_target(here)
 	if OS.is_debug_build():
@@ -745,6 +878,10 @@ func _search_step() -> void:
 
 
 func _refresh_prompts() -> void:
+	if _loot_collecting:
+		typist.clear_prompts()
+		_refresh_hud()
+		return
 	var list := []
 	for o in interior.options():
 		var opt: Dictionary = o
@@ -901,9 +1038,10 @@ func _on_zombie_killed(z: Zombie) -> void:
 	World.add_materials({ "zombie_matter": 1 })
 	if z.room >= 0 and interior.is_inside() and director.alive_in_room(z.room) == 0:
 		interior.mark_room_cleared(z.room)
-		_refresh_prompts()
-	if interior.is_inside() and not interior.rescue_waiting_here():
-		_queue_search(1.0)   # runs only once the room we stand in is clear and the fight is over
+		if z.room == interior.current_room:
+			_schedule_room_rewards(z.room, 0.85)
+		else:
+			_refresh_prompts()
 	_refresh_hud()
 
 
@@ -998,32 +1136,7 @@ func _refresh_hud() -> void:
 				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
-			var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  T talk  ·  %s  ·  Tab manage/travel" % floor_text)
-			if settlement.build_mode:
-				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
-						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
-				var cost := World.cost_text(World.build_cost(settlement.selected_kind()))
-				lines.append("[color=#ffd166][b]BUILD %s %d°[/b][/color]  cost %s  ·  %s" % [
-					settlement.selected_kind(), settlement.preview_rotation * 90, cost, preview_state])
-				lines.append("arrows nudge · C recenter · Q/E item · R rotate · F place · Esc cancel")
-			else:
-				lines.append("B build · G store supplies · V break down loot · H bandage · J eat")
-			var undo_left := settlement.undo_seconds_remaining()
-			if undo_left > 0.0:
-				lines.append("[color=#ffd166]U undo %.1fs · full refund[/color]" % undo_left)
-			if not settlement.build_mode:
-				var salvage_text: String = interior.salvage_hint(player.global_position)
-				if salvage_text != "":
-					lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
-				var dismantle_text := settlement.dismantle_hint()
-				if dismantle_text != "":
-					lines.append("[color=#ffb86c]%s[/color]" % dismantle_text)
-			lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
-			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
-			var stored_items: Dictionary = World.building_state(settlement.active_building_id).get("stored_items", {})
-			if not stored_items.is_empty():
-				lines.append("[color=#68d5ff]base stores · %s[/color]" % World.item_summary(stored_items))
+			_append_safezone_hud(lines)
 	var parts: Array[String] = []
 	for p in typist.prompts():
 		var w: String = p["word"]
@@ -1041,3 +1154,37 @@ func _refresh_hud() -> void:
 		bar += "█" if hp > i * 10 else "░"
 	lines.append("[color=#ff2d55]HP %s[/color]  %d   [color=#facc15]kills %d[/color]" % [bar, hp, kills])
 	hud.text = "\n".join(lines)
+	loot_flyover.queue_redraw()
+
+
+func _append_safezone_hud(lines: Array[String]) -> void:
+	if _safezone_exiting:
+		lines.append("[color=#68d5ff][b]LEAVING SAFE ZONE[/b][/color]  crossing the gate → road")
+		lines.append("[color=#9aa]typed travel resumes when you reach the road[/color]")
+		return
+	var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
+	lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  T talk  ·  %s  ·  Tab manage/travel" % floor_text)
+	if settlement.build_mode:
+		var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
+				else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()
+		var cost := World.cost_text(World.build_cost(settlement.selected_kind()))
+		lines.append("[color=#ffd166][b]BUILD %s %d°[/b][/color]  cost %s  ·  %s" % [
+			settlement.selected_kind(), settlement.preview_rotation * 90, cost, preview_state])
+		lines.append("arrows nudge · C recenter · Q/E item · R rotate · F place · Esc cancel")
+	else:
+		lines.append("B build · G store supplies · V break down loot · H bandage · J eat")
+	var undo_left := settlement.undo_seconds_remaining()
+	if undo_left > 0.0:
+		lines.append("[color=#ffd166]U undo %.1fs · full refund[/color]" % undo_left)
+	if not settlement.build_mode:
+		var salvage_text: String = interior.salvage_hint(player.global_position)
+		if salvage_text != "":
+			lines.append("[color=#ffb86c]%s[/color]" % salvage_text)
+		var dismantle_text := settlement.dismantle_hint()
+		if dismantle_text != "":
+			lines.append("[color=#ffb86c]%s[/color]" % dismantle_text)
+	lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
+	lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
+	var stored_items: Dictionary = World.building_state(settlement.active_building_id).get("stored_items", {})
+	if not stored_items.is_empty():
+		lines.append("[color=#68d5ff]base stores · %s[/color]" % World.item_summary(stored_items))

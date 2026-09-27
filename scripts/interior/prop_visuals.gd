@@ -32,7 +32,7 @@ const CANVAS_SIZE := Vector2i(67, 67)
 ## Opaque extents measured from the source PNG alpha once at authoring time. Scanning
 ## texture pixels the first time each kind spawned caused avoidable room-entry stalls.
 const OPAQUE_BOUNDS := {
-	"bed": Rect2i(3, 39, 61, 27),
+	"bed": Rect2i(3, 41, 61, 26),
 	"cabinet": Rect2i(13, 8, 44, 46),
 	"chair": Rect2i(22, 15, 29, 49),
 	"counter": Rect2i(5, 20, 61, 33),
