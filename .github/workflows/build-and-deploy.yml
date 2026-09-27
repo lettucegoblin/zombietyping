@@ -29,6 +29,8 @@ jobs:
 
       - name: Install export templates
         run: |
+          apt-get update
+          apt-get install -y --no-install-recommends zip
           mkdir -p ~/.local/share/godot/export_templates
           mv "/root/.local/share/godot/export_templates/${GODOT_VERSION}.stable" \
             "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
@@ -45,7 +47,7 @@ jobs:
           godot --headless --export-release macOS build/macos/zombietyping.zip
           chmod +x build/linux/zombietyping.x86_64
           tar -C build/linux -czf build/packages/zombietyping-linux-x86_64.tar.gz .
-          python3 -m zipfile -c build/packages/zombietyping-windows.zip build/windows/*
+          zip -j build/packages/zombietyping-windows.zip build/windows/*
           cp build/macos/zombietyping.zip build/packages/zombietyping-macos-unsigned.zip
 
       - name: Upload desktop builds

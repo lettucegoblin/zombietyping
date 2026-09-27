@@ -13,6 +13,9 @@ zombie is a bullet.
 
 ![Typing combat in the procedural city](docs/screenshots/typing-gameplay.gif)
 
+[Watch the quick-cut gameplay trailer](docs/media/zombietyping-gameplay-trailer.mp4) ·
+[Watch the original uncut take](docs/media/zombietyping-gameplay-longform.mp4)
+
 | Procedural street view | Persistent city map |
 |---|---|
 | ![Procedural city street](docs/screenshots/city.png) | ![City map and route selection](docs/screenshots/map.png) |
