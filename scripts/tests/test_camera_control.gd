@@ -66,6 +66,7 @@ func _ready() -> void:
 		var swing: Node3D = hinge.get_node("Swing")
 		_check(absf(swing.rotation.y) > 0.5, "safe-zone door swings open before contact")
 		_check(hinge.get_node_or_null("Swing/Leaf") is MeshInstance3D, "safe-zone doorway keeps a full-size visible leaf")
+		_check(hinge.get_node_or_null("Swing/Block") == null, "safe-zone swinging door cannot collide with the player")
 	interior.unload()
 
 	print("CAMERA CONTROL PASS")

@@ -5,13 +5,7 @@ extends Node3D
 signal door_kicked(di: int)
 
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
-const RESCUE_TEXTURES := {
-	"adult": preload("res://assets/sprites/survivor/citizen.png"),
-	"grandma": preload("res://assets/sprites/survivor/grandma.png"),
-	"grandpa": preload("res://assets/sprites/survivor/grandpa.png"),
-	"cat": preload("res://assets/sprites/survivor/cat.png"),
-	"dog": preload("res://assets/sprites/survivor/dog.png"),
-}
+const ResidentVisuals = preload("res://scripts/settlement/resident_visuals.gd")
 
 var building: BuildingData
 var plan: FloorPlan
@@ -539,10 +533,10 @@ func _rebuild(ri: int, include_furnishings := true) -> void:
 		var archetype := str(mission.get("archetype", "adult"))
 		var rescued := Sprite3D.new()
 		rescued.name = "RescueTarget"
-		rescued.texture = RESCUE_TEXTURES.get(archetype, RESCUE_TEXTURES["adult"])
+		rescued.texture = ResidentVisuals.texture(archetype)
 		rescued.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		rescued.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-		rescued.pixel_size = 0.012 if archetype in ["cat", "dog"] else 0.015
+		rescued.pixel_size = ResidentVisuals.pixel_size(archetype)
 		rescued.shaded = false
 		rescued.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 		node.add_child(rescued)
@@ -553,7 +547,8 @@ func _rebuild(ri: int, include_furnishings := true) -> void:
 		if (d.b < 0 and not safezone_mode) or d.open_always or _door_nodes.has(di):
 			continue
 		var other_col := InteriorMesher.wall_color(building, d.b) if d.b >= 0 else InteriorMesher.wall_color(building, d.a)
-		var leaf := InteriorMesher.build_door_leaf(d, false if safezone_mode else is_door_open(d), InteriorMesher.wall_color(building, d.a), other_col)
+		var leaf := InteriorMesher.build_door_leaf(d, false if safezone_mode else is_door_open(d),
+				InteriorMesher.wall_color(building, d.a), other_col, not safezone_mode)
 		add_child(leaf)
 		_door_nodes[di] = leaf
 
@@ -809,7 +804,7 @@ func rescue_world_pos() -> Vector3:
 	var offset_seed := Det.h(World.seed, building.seed_hash, ri, 1204)
 	var offset_bit := floori(float(offset_seed) / 2.0) % 2
 	var archetype := str(mission.get("archetype", "adult"))
-	var sprite_y := 0.46 if archetype == "dog" else (0.39 if archetype == "cat" else 0.85)
+	var sprite_y := ResidentVisuals.rest_y(archetype)
 	var offset := Vector3(0.45 if offset_seed % 2 == 0 else -0.45, sprite_y, 0.25 if offset_bit == 0 else -0.25)
 	var room_rect := target_plan.rooms[ri].rect
 	var lo := target_plan.cell_to_world(Vector2(room_rect.position))

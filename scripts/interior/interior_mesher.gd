@@ -492,7 +492,8 @@ static func door_material() -> StandardMaterial3D:
 ## blocks sightlines). Kicking it turns it into a loose physics body (see kick_in).
 ## `col_a` / `col_b` are the wall colours of rooms a and b: a fill behind the leaf, one
 ## side each, so the door sprite's transparent edges never show the (unbuilt) room beyond.
-static func build_door_leaf(d: FloorPlan.Door, is_open: bool, col_a := Color.WHITE, col_b := Color.WHITE) -> Node3D:
+static func build_door_leaf(d: FloorPlan.Door, is_open: bool, col_a := Color.WHITE,
+		col_b := Color.WHITE, blocks_movement := true) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Door_%d" % d.index
 	root.position = d.pos
@@ -524,15 +525,16 @@ static func build_door_leaf(d: FloorPlan.Door, is_open: bool, col_a := Color.WHI
 	leaf.material_override = door_material()
 	leaf.position = Vector3(DOOR_W * 0.5, DOOR_H * 0.5, 0)
 	swing.add_child(leaf)
-	var body := StaticBody3D.new()
-	body.name = "Block"
-	var cs := CollisionShape3D.new()
-	var box := BoxShape3D.new()
-	box.size = Vector3(DOOR_W, DOOR_H, 0.08)
-	cs.shape = box
-	cs.position = Vector3(DOOR_W * 0.5, DOOR_H * 0.5, 0)
-	body.add_child(cs)
-	swing.add_child(body)
+	if blocks_movement:
+		var body := StaticBody3D.new()
+		body.name = "Block"
+		var cs := CollisionShape3D.new()
+		var box := BoxShape3D.new()
+		box.size = Vector3(DOOR_W, DOOR_H, 0.08)
+		cs.shape = box
+		cs.position = Vector3(DOOR_W * 0.5, DOOR_H * 0.5, 0)
+		body.add_child(cs)
+		swing.add_child(body)
 	return root
 
 
@@ -563,8 +565,8 @@ static func kick_in(hinge: Node3D, d: FloorPlan.Door, from_room: int) -> void:
 	_fling(hinge.get_parent(), start, away, DOOR_W, DOOR_H)
 
 
-## Animate a claimed-building door around its jamb. Its collider is a child of the same
-## pivot, so the visual and walkable openings cannot drift apart.
+## Animate a claimed-building door around its jamb. Safe-zone leaves are deliberately
+## non-colliding: an opening or closing decorative leaf can never pin the player.
 static func set_safezone_swing(hinge: Node3D, amount: float, direction: float) -> void:
 	var swing: Node3D = hinge.get_node_or_null("Swing")
 	if swing == null:

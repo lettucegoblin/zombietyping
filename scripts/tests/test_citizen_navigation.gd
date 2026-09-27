@@ -2,6 +2,7 @@ extends Node
 ## Focused regression for deterministic yard routing and citizen position preservation.
 
 const CitizenNav = preload("res://scripts/settlement/citizen_navigation.gd")
+const ResidentVisuals = preload("res://scripts/settlement/resident_visuals.gd")
 
 
 func _ready() -> void:
@@ -12,6 +13,11 @@ func _run() -> void:
 	await get_tree().process_frame
 	World.state.clear()
 	World.placements.clear()
+	if ResidentVisuals.pixel_size("adult") * 88.0 < 1.75 \
+			or ResidentVisuals.pixel_size("grandma") * 97.0 < 1.75 \
+			or ResidentVisuals.pixel_size("grandpa") * 95.0 < 1.75:
+		_fail("human resident art is still shorter than an adult eye-height scale")
+		return
 	var b: BuildingData = World.get_sector(0, 0).buildings[0]
 	var safe := World.safe_rect_world(b)
 	var structure := World.building_rect_world(b)

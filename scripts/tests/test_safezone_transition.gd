@@ -52,6 +52,14 @@ func _run() -> void:
 	if not street.is_queued_for_deletion():
 		_fail("the retained street zombie was not removed")
 		return
+	if World.primary_base_id() != b.id():
+		_fail("the founding safehouse was not selected as the home spawn")
+		return
+	main._position_player_at_base_start(b)
+	var start2 := Vector2(main.player.global_position.x, main.player.global_position.z)
+	if not World.ward_contains_point(b.id(), start2) or World.building_rect_world(b).has_point(start2):
+		_fail("home spawn was not in the safe courtyard: %s" % start2)
+		return
 	World.add_materials({ "wood": 10 })
 	main.settlement.build_index = Settlement.BUILD_KINDS.find("crate")
 	_press(main, KEY_B)

@@ -808,6 +808,17 @@ func claimed_ids() -> Array[String]:
 	return out
 
 
+## The first claimed shelter remains the player's home spawn. Older saves identify it by
+## its founding caretaker; the lexical fallback is deterministic for expansion-only saves.
+func primary_base_id() -> String:
+	var claims := claimed_ids()
+	claims.sort()
+	for id in claims:
+		if int(building_state(id).get("founders", 0)) > 0:
+			return id
+	return claims[0] if not claims.is_empty() else ""
+
+
 func resident_records(id: String) -> Array[Dictionary]:
 	var out: Array[Dictionary] = []
 	for survivor_id in building_state(id).get("resident_ids", []):

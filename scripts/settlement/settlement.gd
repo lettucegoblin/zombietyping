@@ -10,13 +10,7 @@ const CAR_TEXTURES := [
 	preload("res://assets/sprites/vehicles/car_salvage_3.png"),
 	preload("res://assets/sprites/vehicles/car_salvage_4.png"),
 ]
-const CITIZEN_TEXTURES := {
-	"adult": preload("res://assets/sprites/survivor/citizen.png"),
-	"grandma": preload("res://assets/sprites/survivor/grandma.png"),
-	"grandpa": preload("res://assets/sprites/survivor/grandpa.png"),
-	"cat": preload("res://assets/sprites/survivor/cat.png"),
-	"dog": preload("res://assets/sprites/survivor/dog.png"),
-}
+const ResidentVisuals = preload("res://scripts/settlement/resident_visuals.gd")
 const PROP_TEXTURES := {
 	"crate": preload("res://assets/sprites/props/crate.png"),
 	"bed": preload("res://assets/sprites/props/bed.png"),
@@ -479,14 +473,14 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 			schedule_offset = int(survivor.get("schedule_offset", schedule_offset))
 	var sprite := Sprite3D.new()
 	sprite.name = "Sprite"
-	sprite.texture = CITIZEN_TEXTURES.get(archetype, CITIZEN_TEXTURES["adult"])
+	sprite.texture = ResidentVisuals.texture(archetype)
 	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	var animal := archetype in ["cat", "dog"]
-	sprite.pixel_size = 0.012 if animal else 0.015
+	sprite.pixel_size = ResidentVisuals.pixel_size(archetype)
 	sprite.shaded = false
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-	var rest_y := 0.46 if archetype == "dog" else (0.39 if archetype == "cat" else 0.84)
+	var rest_y := ResidentVisuals.rest_y(archetype)
 	sprite.position.y = rest_y
 	n.add_child(sprite)
 	var nav := _navigation_for(b)

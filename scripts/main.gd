@@ -62,6 +62,9 @@ func _ready() -> void:
 	pause_menu.resume_requested.connect(_on_pause_resumed)
 	settings.changed.connect(_on_setting_changed)
 	_apply_runtime_settings()
+	var startup_base := _startup_base()
+	if startup_base != null:
+		_position_player_at_base_start(startup_base)
 	World.state_changed.connect(_on_world_state_changed)
 	streamer.target = player
 	streamer.prime(World.sector_of_tile(player.tile))
@@ -104,8 +107,34 @@ func _ready() -> void:
 	director.zombie_spawned.connect(func(z): z.hit_player.connect(_on_player_hit))
 	_spark_tex = _make_spark()
 	game_over.visible = false
+	if startup_base != null:
+		_enter_safezone(startup_base)
 	_capture_mouse_look()
 	_refresh_hud()
+
+
+func _startup_base() -> BuildingData:
+	var id := World.primary_base_id()
+	return World.building_by_id(id) if id != "" else null
+
+
+## Begin each session in the courtyard of the founding safehouse, looking back toward its
+## entrance. This is inside the permanent perimeter but clear of the building and door arc.
+func _position_player_at_base_start(b: BuildingData) -> void:
+	var entrance := InteriorGen.entrance_position(b, InteriorGen.footprint(b))
+	var outward := Vector2(b.road_tile - b.door_tile).normalized()
+	if outward == Vector2.ZERO:
+		outward = Vector2.RIGHT
+	var point := Vector2(entrance.x, entrance.z) + outward * 2.6
+	var bounds := World.ward_bounds_world(b.id()).grow(-0.6)
+	if bounds.has_area():
+		point.x = clampf(point.x, bounds.position.x, bounds.end.x)
+		point.y = clampf(point.y, bounds.position.y, bounds.end.y)
+	player.global_position = Vector3(point.x, 0.0, point.y)
+	player.tile = World.world_to_tile(player.global_position)
+	player.facing = (entrance - player.global_position).normalized()
+	player.facing.y = 0.0
+	World.mark_explored(player.tile, player.reveal_radius)
 
 
 func _process(dt: float) -> void:

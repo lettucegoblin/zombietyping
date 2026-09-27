@@ -297,7 +297,9 @@ The Tab map also exposes immediate care without adding another twitch control: c
 bandages provide field healing, while a selected safehouse can treat the player from its
 stored or connected medical supply when the player is physically inside that safe zone.
 Safe-zone entrance doors fill their frames and swing open automatically as the player
-approaches, then close after the player moves clear.
+approaches, then close after the player moves clear. They are visual-only inside permanent
+safe ground, so an animated leaf can never trap the player. Once a founding shelter exists,
+new sessions begin in its safe courtyard instead of back at the original street spawn.
 
 Fortified perimeters combine building materials with zombie matter. They are permanent safe
 ground: outdoor zombies cannot spawn or remain inside them, and they never decay or trigger
