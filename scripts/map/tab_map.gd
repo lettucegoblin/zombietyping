@@ -905,7 +905,7 @@ func _draw_building_panel(font: Font) -> void:
 				var condition_color := Color("#a6e3a1") if condition in ["happy", "thriving"] else (Color("#f6c177") if condition == "recovering" else Color("#ded8e8"))
 				var home := "home %02d" % int(person.get("home_slot", i + 1))
 				var schedule := World.survivor_schedule(person)
-				draw_string(font, Vector2(x, y), "%s · %s → %s · %s · %s" % [person.get("name", "survivor"), person.get("trait", ""), person.get("job", "unassigned"), home, schedule], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, condition_color)
+				draw_string(font, Vector2(x, y), "%s [%s] · %s → %s · %s · %s" % [person.get("name", "survivor"), World.survivor_archetype_label(person), person.get("trait", ""), person.get("job", "unassigned"), home, schedule], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, condition_color)
 				y += 15.0
 		var needs: Dictionary = st.get("needs", {})
 		if not needs.is_empty():

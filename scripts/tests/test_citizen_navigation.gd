@@ -61,6 +61,7 @@ func _run() -> void:
 	var resident_id := "nav-test-resident"
 	World.survivors[resident_id] = {
 		"id": resident_id, "name": "Mara", "trait": "builder", "job": "builder",
+		"archetype": "cat", "species": "cat",
 		"base_id": b.id(), "home_id": b.id(), "home_slot": 3, "schedule_offset": 0,
 	}
 	World.state[b.id()] = { "fortified": true, "claimed": true, "citizens": 1, "founders": 0, "resident_ids": [resident_id] }
@@ -73,6 +74,9 @@ func _run() -> void:
 	var citizen: Node3D = settlement._citizens[0]
 	if not (citizen.get_node_or_null("Sprite") is Sprite3D):
 		_fail("resident still uses placeholder geometry instead of a pixel person")
+		return
+	if citizen.get_meta("archetype", "") != "cat" or float(citizen.get_meta("sprite_rest_y", 9.0)) >= 0.5:
+		_fail("animal resident did not use quadruped scale and placement")
 		return
 	if int(citizen.get_meta("home_slot", -1)) != 3 or str(citizen.get_meta("schedule", "")) == "":
 		_fail("resident home or schedule metadata was not applied")

@@ -5,6 +5,13 @@ extends Node3D
 signal door_kicked(di: int)
 
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
+const RESCUE_TEXTURES := {
+	"adult": preload("res://assets/sprites/survivor/citizen.png"),
+	"grandma": preload("res://assets/sprites/survivor/grandma.png"),
+	"grandpa": preload("res://assets/sprites/survivor/grandpa.png"),
+	"cat": preload("res://assets/sprites/survivor/cat.png"),
+	"dog": preload("res://assets/sprites/survivor/dog.png"),
+}
 
 var building: BuildingData
 var plan: FloorPlan
@@ -527,6 +534,19 @@ func _rebuild(ri: int, include_furnishings := true) -> void:
 	var l: Node3D = node.get_node_or_null("Labels")
 	if l != null:
 		l.visible = (ri == current_room)
+	var mission := active_rescue()
+	if not mission.is_empty() and int(mission["floor"]) == plan.floor and int(mission["room"]) == ri:
+		var archetype := str(mission.get("archetype", "adult"))
+		var rescued := Sprite3D.new()
+		rescued.name = "RescueTarget"
+		rescued.texture = RESCUE_TEXTURES.get(archetype, RESCUE_TEXTURES["adult"])
+		rescued.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		rescued.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+		rescued.pixel_size = 0.012 if archetype in ["cat", "dog"] else 0.015
+		rescued.shaded = false
+		rescued.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+		node.add_child(rescued)
+		rescued.global_position = rescue_world_pos()
 	# door leaves are shared between two rooms: build once per floor
 	for di in plan.rooms[ri].doors:
 		var d := plan.doors[di]
@@ -788,12 +808,21 @@ func rescue_world_pos() -> Vector3:
 	var centre := target_plan.room_stand_world(ri)
 	var offset_seed := Det.h(World.seed, building.seed_hash, ri, 1204)
 	var offset_bit := floori(float(offset_seed) / 2.0) % 2
-	var offset := Vector3(0.45 if offset_seed % 2 == 0 else -0.45, 0.85, 0.25 if offset_bit == 0 else -0.25)
+	var archetype := str(mission.get("archetype", "adult"))
+	var sprite_y := 0.46 if archetype == "dog" else (0.39 if archetype == "cat" else 0.85)
+	var offset := Vector3(0.45 if offset_seed % 2 == 0 else -0.45, sprite_y, 0.25 if offset_bit == 0 else -0.25)
 	var room_rect := target_plan.rooms[ri].rect
 	var lo := target_plan.cell_to_world(Vector2(room_rect.position))
 	var hi := target_plan.cell_to_world(Vector2(room_rect.end))
 	var p := centre + offset
 	return Vector3(clampf(p.x, lo.x + 0.7, hi.x - 0.7), p.y, clampf(p.z, lo.z + 0.7, hi.z - 0.7))
+
+
+func clear_rescue_visual() -> void:
+	for room_node in _room_nodes.values():
+		var rescued: Node = room_node.get_node_or_null("RescueTarget")
+		if rescued != null:
+			rescued.queue_free()
 
 
 ## Route through the generated room graph regardless of door state. Used only for rescue

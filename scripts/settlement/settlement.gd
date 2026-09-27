@@ -10,7 +10,13 @@ const CAR_TEXTURES := [
 	preload("res://assets/sprites/vehicles/car_salvage_3.png"),
 	preload("res://assets/sprites/vehicles/car_salvage_4.png"),
 ]
-const CITIZEN_TEXTURE := preload("res://assets/sprites/survivor/citizen.png")
+const CITIZEN_TEXTURES := {
+	"adult": preload("res://assets/sprites/survivor/citizen.png"),
+	"grandma": preload("res://assets/sprites/survivor/grandma.png"),
+	"grandpa": preload("res://assets/sprites/survivor/grandpa.png"),
+	"cat": preload("res://assets/sprites/survivor/cat.png"),
+	"dog": preload("res://assets/sprites/survivor/dog.png"),
+}
 const PROP_TEXTURES := {
 	"crate": preload("res://assets/sprites/props/crate.png"),
 	"bed": preload("res://assets/sprites/props/bed.png"),
@@ -457,6 +463,7 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	var resident_index := index - int(base_state.get("founders", 0))
 	var home_slot := index + 1
 	var schedule_offset := posmod(b.seed_hash + index * 11, int(World.WORK_CYCLE_SECONDS))
+	var archetype := "adult"
 	if resident_index >= 0 and resident_index < resident_ids.size():
 		var survivor_id: String = resident_ids[resident_index]
 		var survivor: Dictionary = World.survivors.get(survivor_id, {})
@@ -467,17 +474,20 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 			n.set_meta("survivor_name", survivor.get("name", ""))
 			n.set_meta("trait", survivor.get("trait", ""))
 			n.set_meta("job", survivor.get("job", "unassigned"))
+			archetype = str(survivor.get("archetype", "adult"))
 			home_slot = int(survivor.get("home_slot", home_slot))
 			schedule_offset = int(survivor.get("schedule_offset", schedule_offset))
 	var sprite := Sprite3D.new()
 	sprite.name = "Sprite"
-	sprite.texture = CITIZEN_TEXTURE
+	sprite.texture = CITIZEN_TEXTURES.get(archetype, CITIZEN_TEXTURES["adult"])
 	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
-	sprite.pixel_size = 0.015
+	var animal := archetype in ["cat", "dog"]
+	sprite.pixel_size = 0.012 if animal else 0.015
 	sprite.shaded = false
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
-	sprite.position.y = 0.84
+	var rest_y := 0.46 if archetype == "dog" else (0.39 if archetype == "cat" else 0.84)
+	sprite.position.y = rest_y
 	n.add_child(sprite)
 	var nav := _navigation_for(b)
 	var seed_value := b.seed_hash + index * 97
@@ -494,6 +504,9 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	n.set_meta("building_id", b.id())
 	n.set_meta("home_seed", seed_value)
 	n.set_meta("home_slot", home_slot)
+	n.set_meta("archetype", archetype)
+	n.set_meta("sprite_rest_y", rest_y)
+	n.set_meta("walk_speed", 0.9 if animal else 0.75)
 	n.set_meta("schedule_offset", schedule_offset)
 	n.set_meta("schedule", "")
 	n.set_meta("stride", float(posmod(seed_value, 100)) * 0.1)
@@ -598,7 +611,7 @@ func _move_citizens(dt: float) -> void:
 			n.position = target
 			n.set_meta("path_index", path_index + 1)
 		else:
-			n.position += delta.normalized() * minf(delta.length(), dt * 0.75)
+			n.position += delta.normalized() * minf(delta.length(), dt * float(n.get_meta("walk_speed", 0.75)))
 			n.rotation.y = atan2(delta.x, delta.z)
 		_animate_citizen(n, dt, delta.length() >= 0.08)
 
@@ -609,8 +622,29 @@ func _animate_citizen(n: Node3D, dt: float, moving: bool) -> void:
 		return
 	var stride := float(n.get_meta("stride", 0.0)) + dt * (7.0 if moving else 1.5)
 	n.set_meta("stride", stride)
-	sprite.position.y = 0.84 + sin(stride) * (0.035 if moving else 0.012)
-	sprite.rotation.z = sin(stride * 0.5) * (0.025 if moving else 0.01)
+	var animal := str(n.get_meta("archetype", "adult")) in ["cat", "dog"]
+	var rest_y := float(n.get_meta("sprite_rest_y", 0.84))
+	sprite.position.y = rest_y + sin(stride) * (0.025 if moving and animal else (0.035 if moving else 0.012))
+	sprite.rotation.z = sin(stride * 0.5) * (0.04 if moving and animal else (0.025 if moving else 0.01))
+
+
+func talk_nearest(world_pos: Vector3, max_distance := 3.5) -> String:
+	var nearest: Node3D
+	var nearest_distance := max_distance
+	for citizen in _citizens:
+		if not is_instance_valid(citizen):
+			continue
+		var distance := citizen.global_position.distance_to(world_pos)
+		if distance < nearest_distance:
+			nearest = citizen
+			nearest_distance = distance
+	if nearest == null:
+		return "move closer to a resident to talk"
+	var survivor_id := str(nearest.get_meta("survivor_id", ""))
+	if survivor_id == "" or not World.survivors.has(survivor_id):
+		return "Caretaker: \"Everyone made it home. That's enough for today.\""
+	var person: Dictionary = World.survivors[survivor_id]
+	return "%s the %s: \"%s\"" % [person.get("name", "Resident"), World.survivor_archetype_label(person), World.survivor_dialogue(person)]
 
 
 func _add_placement(item: Dictionary) -> void:

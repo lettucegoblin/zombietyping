@@ -51,6 +51,7 @@ than another upkeep timer.
 | `Tab` | Pause, open the city/building map, and use field or safehouse care |
 | `Esc` | Pause and open settings |
 | `WASD` | Move freely inside a claimed safe zone |
+| `T` | Talk to the nearest safe-zone resident |
 
 ## Run locally
 
@@ -257,10 +258,12 @@ Eligible uncleared buildings also receive a deterministic named survivor in a se
 The room/floor route takes priority over irrelevant cleared branches, the survivor emits a
 distance-filtered directional knock from their exact generated location, and `help` becomes
 typeable only after their room is safe. Rescues persist in a pending roster until a base is
-claimed, then become named citizens at the nearest claimed base. Citizens use full survivor
-sprites, receive persistent homes, and follow deterministic home, work, community, and patrol
-schedules around obstacle-aware safe zones. Only the first base gets a single founder
-automatically; later settlement population comes from rescues.
+claimed, then become named citizens at the nearest claimed base. The procedural roster
+includes adults, grandmothers, grandfathers, ordinary quadruped cats, and ordinary quadruped
+dogs. The animals inexplicably talk. Citizens use archetype-specific sprites, receive
+persistent homes, and follow deterministic home, work, community, and patrol schedules around
+obstacle-aware safe zones. Only the first base gets a single founder automatically; later
+settlement population comes from rescues.
 
 The Tab building panel derives each site's role and beds/storage/water/power/comfort capacity
 from its complete procedural room program and still-intact generated props. Dismantled prop

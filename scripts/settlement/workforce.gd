@@ -24,7 +24,7 @@ static func suggested_job(survivor_trait: String, profile: Dictionary, farm_coun
 				return "medic"
 		"builder":
 			return "builder"
-		"scout", "radio operator", "teacher":
+		"scout", "radio operator", "teacher", "mouser", "tracker", "guard", "comfort":
 			return "scavenger"
 	if farm_count > 0:
 		return "farmer"

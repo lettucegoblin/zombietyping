@@ -211,6 +211,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		var msg := ""
 		match event.keycode:
 			KEY_B: msg = settlement.toggle_build()
+			KEY_T: msg = settlement.talk_nearest(player.global_position) if not settlement.build_mode else ""
 			KEY_Q: msg = settlement.cycle_build(-1) if settlement.build_mode else ""
 			KEY_E: msg = settlement.cycle_build(1) if settlement.build_mode else ""
 			KEY_R: msg = settlement.rotate_preview() if settlement.build_mode else ""
@@ -763,6 +764,7 @@ func _on_option(opt: Dictionary) -> void:
 			_moving_on = false
 			var result := World.complete_rescue(interior.building.id())
 			_rescue_cue.resolve()
+			interior.clear_rescue_visual()
 			minimap.flash(result)
 			interior._update_labels()
 			_refresh_prompts()
@@ -961,14 +963,14 @@ func _refresh_hud() -> void:
 			var rescue: Dictionary = interior.active_rescue() if interior.is_inside() else {}
 			if not rescue.is_empty():
 				var location: String = "HERE — type %s" % rescue.get("word", "help") if interior.rescue_waiting_here() and interior.is_room_cleared(interior.current_room) else "floor %d · %s" % [int(rescue["floor"]) + 1, rescue["room_kind"]]
-				lines.append("[color=#f6c177]RESCUE [b]%s[/b] · %s · %s[/color]" % [rescue["name"], rescue["trait"], location])
+				lines.append("[color=#f6c177]RESCUE %s [b]%s[/b] · %s · %s[/color]" % [World.survivor_archetype_label(rescue).to_upper(), rescue["name"], rescue["trait"], location])
 			var loot_text: String = interior.loot_hint(player.global_position) if interior.is_inside() else ""
 			if loot_text != "":
 				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
 		Mode.SAFEZONE:
 			var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  %s  ·  Tab manage/travel" % floor_text)
+			lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  T talk  ·  %s  ·  Tab manage/travel" % floor_text)
 			if settlement.build_mode:
 				var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 						else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()

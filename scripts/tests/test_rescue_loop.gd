@@ -20,6 +20,13 @@ func _run() -> void:
 		World.materials[key] = 0
 	main.director.set_meta("no_street", true)
 	main.director.street_spawning = false
+	var archetypes := {}
+	for i in World.RESCUE_ARCHETYPES.size():
+		archetypes[World.rescue_archetype(i * 31)] = true
+	for required in ["adult", "grandma", "grandpa", "cat", "dog"]:
+		if not archetypes.has(required):
+			_fail("procedural rescue roster never produced %s" % required)
+			return
 
 	var rescue_building: BuildingData
 	var other_buildings: Array[BuildingData] = []
@@ -38,13 +45,18 @@ func _run() -> void:
 	if mission.is_empty() or mission != repeated:
 		_fail("rescue candidate was missing or unstable")
 		return
-	if mission["name"] == "" or mission["trait"] == "" or mission["room_kind"] in ["", "stair", "hall"]:
+	if mission["name"] == "" or mission["trait"] == "" or mission["archetype"] == "" \
+			or mission["species"] == "" or mission["room_kind"] in ["", "stair", "hall"]:
 		_fail("candidate lacks a stable named, traited semantic target: %s" % mission)
 		return
 
 	main.mode = main.Mode.INSIDE
 	main.door_building = rescue_building
 	main.interior.enter(rescue_building, int(mission["floor"]))
+	var rescue_sprite: Node = main.interior._room_nodes[int(mission["room"])].get_node_or_null("RescueTarget")
+	if not (rescue_sprite is Sprite3D):
+		_fail("procedural rescue did not appear as its character sprite")
+		return
 	main._sync_rescue_cue()
 	if not main._rescue_cue.is_unresolved() or main._rescue_cue.target_id != mission["id"] \
 			or main._rescue_cue.target_position() != main.interior.rescue_world_pos():
@@ -137,12 +149,18 @@ func _run() -> void:
 
 	main.settlement._rebuild(first_base.sector)
 	var named_seen := false
+	var resident_node: Node3D
 	for citizen in main.settlement._citizens:
 		if citizen.get_meta("survivor_id", "") == survivor_id:
 			named_seen = citizen.get_meta("survivor_name", "") == mission["name"] \
 					and citizen.get_meta("trait", "") == mission["trait"]
+			resident_node = citizen
 	if not named_seen:
 		_fail("assigned survivor did not become a stable named settlement citizen")
+		return
+	var spoken: String = main.settlement.talk_nearest(resident_node.global_position, 0.5)
+	if not spoken.contains(str(mission["name"])) or not spoken.contains("\""):
+		_fail("assigned rescue could not speak in the safezone: %s" % spoken)
 		return
 
 	print("RESCUE LOOP OK  ", mission["name"], " / ", mission["trait"], " / floor ", int(mission["floor"]) + 1, " ", mission["room_kind"])

@@ -29,6 +29,26 @@ const PLACEMENT_SIZE := {
 }
 const SURVIVOR_NAMES := ["Mara", "Dante", "June", "Inez", "Cal", "Priya", "Owen", "Rafi", "Tess", "Noor", "Bea", "Sol"]
 const SURVIVOR_TRAITS := ["medic", "mechanic", "grower", "scout", "builder", "teacher", "cook", "radio operator"]
+const RESCUE_ARCHETYPES := ["grandma", "grandpa", "cat", "dog", "adult", "adult", "adult", "adult", "adult", "adult"]
+const ARCHETYPE_NAMES := {
+	"grandma": ["Evelyn", "Mabel", "Rosa", "Dot", "Loretta", "Nana Jo"],
+	"grandpa": ["Arthur", "Walter", "Hector", "Frank", "Lionel", "Grandpa Sol"],
+	"cat": ["Miso", "Pickle", "Marmalade", "Juniper", "Beans", "Orbit", "Mochi", "Waffles"],
+	"dog": ["Biscuit", "Maple", "Scout", "Pepper", "Rook", "Sunny", "Noodle", "Bear"],
+}
+const ARCHETYPE_TRAITS := {
+	"grandma": ["medic", "grower", "cook", "teacher"],
+	"grandpa": ["mechanic", "builder", "teacher", "radio operator"],
+	"cat": ["mouser", "scout", "comfort"],
+	"dog": ["tracker", "guard", "comfort", "scout"],
+}
+const ARCHETYPE_DIALOGUE := {
+	"adult": ["We'll make this place feel lived in.", "I marked a quiet route through the block.", "Tell me what needs doing."],
+	"grandma": ["Sit down before you fall down. I have tea.", "A garden, strong walls, and good neighbors. That's a life.", "I survived worse kitchens than this."],
+	"grandpa": ["The hinge is sound. The world around it needs work.", "Give me a toolbox and somewhere to put the kettle.", "I checked the wall twice. Habit."],
+	"cat": ["The food arrangement remains unacceptable.", "I found three quiet routes. You may thank me later.", "Yes, I can talk. Keep up."],
+	"dog": ["I checked the fence. Still excellent.", "We're safe. This is a very good place.", "I can carry supplies. Also sticks."],
+}
 
 var seed: int = 1337
 var _sectors: Dictionary = {}       ## Vector2i -> SectorData
@@ -564,6 +584,10 @@ func fortify_building(id: String) -> String:
 func _with_survivor_needs(record: Dictionary) -> Dictionary:
 	var person := record.duplicate(true)
 	var sid := str(person.get("id", "survivor"))
+	if not person.has("archetype"):
+		person["archetype"] = "adult"
+	if not person.has("species"):
+		person["species"] = person["archetype"] if person["archetype"] in ["cat", "dog"] else "human"
 	var roll := Det.h3(seed, sid.hash(), str(person.get("trait", "")).hash(), 0, 1401)
 	if not person.has("health"):
 		person["health"] = 48 + posmod(roll, 43)
@@ -605,6 +629,27 @@ func survivor_schedule(person: Dictionary) -> String:
 	if phase < 0.78:
 		return "community"
 	return "patrol"
+
+
+func rescue_archetype(identity_hash: int) -> String:
+	return RESCUE_ARCHETYPES[posmod(floori(float(identity_hash) / 31.0), RESCUE_ARCHETYPES.size())]
+
+
+func survivor_archetype_label(person: Dictionary) -> String:
+	match str(person.get("archetype", "adult")):
+		"grandma": return "grandma"
+		"grandpa": return "grandpa"
+		"cat": return "cat"
+		"dog": return "dog"
+	return "survivor"
+
+
+func survivor_dialogue(person: Dictionary) -> String:
+	var archetype := str(person.get("archetype", "adult"))
+	var lines: Array = ARCHETYPE_DIALOGUE.get(archetype, ARCHETYPE_DIALOGUE["adult"])
+	var sid := str(person.get("id", person.get("name", "resident")))
+	var roll := Det.h3(seed, sid.hash(), settlement_cycle, survivor_schedule(person).hash(), 1441)
+	return str(lines[posmod(roll, lines.size())])
 
 func rescue_eligible(b: BuildingData) -> bool:
 	# Eligibility is seed-derived rather than rolled on entry, so reloading or approaching
@@ -649,10 +694,15 @@ func ensure_rescue_candidate(id: String) -> Dictionary:
 	if target.is_empty():
 		return {}
 	var identity_hash := Det.h3(seed, b.seed_hash, target["floor"], target["room"], 1203)
+	var archetype := rescue_archetype(identity_hash)
+	var names: Array = ARCHETYPE_NAMES.get(archetype, SURVIVOR_NAMES)
+	var traits: Array = ARCHETYPE_TRAITS.get(archetype, SURVIVOR_TRAITS)
 	var record := {
 		"id": "survivor:%s:%d" % [id, identity_hash],
-		"name": SURVIVOR_NAMES[posmod(identity_hash, SURVIVOR_NAMES.size())],
-		"trait": SURVIVOR_TRAITS[posmod(floori(float(identity_hash) / 17.0), SURVIVOR_TRAITS.size())],
+		"name": names[posmod(identity_hash, names.size())],
+		"trait": traits[posmod(floori(float(identity_hash) / 17.0), traits.size())],
+		"archetype": archetype,
+		"species": archetype if archetype in ["cat", "dog"] else "human",
 		"building": id,
 		"floor": int(target["floor"]),
 		"room": int(target["room"]),
@@ -747,7 +797,7 @@ func complete_rescue(id: String) -> String:
 	state_changed.emit(id)
 	settlement_changed.emit()
 	survivor_rescued.emit(survivors[survivor_id].duplicate(true))
-	return "%s rescued (%s)%s" % [mission["name"], mission["trait"], " — waiting for a claimed base" if base_id == "" else " — assigned to " + base_id]
+	return "%s the %s rescued — \"%s\"%s" % [mission["name"], survivor_archetype_label(mission), survivor_dialogue(mission), " — waiting for a claimed base" if base_id == "" else " — assigned to " + base_id]
 
 
 func claimed_ids() -> Array[String]:
