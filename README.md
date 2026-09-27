@@ -1,22 +1,67 @@
-# zombietyping
+# Zombietyping
 
-A first-person, on-rails **typing survival game** in Godot 4.6.2 (GDScript) with pixel-art
-"Sunday Comic" zombies (PixelLab), set in an infinite procedural city. Outside claimed
-safe zones you travel on typed rails: type where to go, type door words to breach, and every
-letter you type at a zombie's word is a bullet. Think *Typing of the Dead* meets a SWAT-style
-building clear, growing into a survivor settlement sim.
+[![Build and deploy](https://github.com/lettucegoblin/zombietyping/actions/workflows/build-and-deploy.yml/badge.svg)](https://github.com/lettucegoblin/zombietyping/actions/workflows/build-and-deploy.yml)
+[![Godot 4.6](https://img.shields.io/badge/Godot-4.6-478CBF?logo=godot-engine&logoColor=white)](https://godotengine.org/)
 
-This README is the hand-off document: everything a fresh session needs to pick the project
-up. `NEXT_STEPS.md` holds the backlog and the open design questions.
+A first-person typing survival game set in an infinite procedural city. Type addresses to
+travel, breach doors one letter at a time, clear generated apartments, rescue survivors,
+salvage the city, and turn secure ground into a growing settlement. Every letter typed at a
+zombie is a bullet.
+
+[Play the latest browser build](https://lettucegoblin.github.io/zombietyping/) ·
+[Download desktop builds](https://github.com/lettucegoblin/zombietyping/releases)
+
+![Typing combat in the procedural city](docs/screenshots/typing-gameplay.gif)
+
+| Procedural street view | Persistent city map |
+|---|---|
+| ![Procedural city street](docs/screenshots/city.png) | ![City map and route selection](docs/screenshots/map.png) |
+| **Settlement construction** | **Accessible settings and audio mixer** |
+| ![A claimed safe zone](artifacts/settlement_safezone.png) | ![Settings menu](docs/screenshots/settings.png) |
+
+Zombietyping is an early playable prototype built in Godot 4.6.2. The city, buildings,
+apartment layouts, room programs, encounters, salvage, and settlement opportunities are
+generated deterministically from the world seed. The current direction combines the arcade
+clarity of a typing shooter with deliberate room clearing and a low-pressure, permanent
+settlement game: claimed walls stay safe, and expansion creates new places to live rather
+than another upkeep timer.
+
+## Highlights
+
+- Infinite streamed city generation informed by tensor-field urban-layout techniques.
+- Procedural multi-storey buildings with apartments, bedrooms, kitchens, bathrooms, doors,
+  windows, furnishings, loot, and room-aware encounters.
+- Type-to-travel navigation, physical door breaches, line-of-sight combat, and readable
+  route guidance through cleared and unexplored spaces.
+- Stable building addresses shared by the world view, minimap, and full map.
+- Persistent salvage, vehicle teardown, walls, farms, furnishings, survivors, jobs, supply
+  links, and safe-zone expansion.
+- A forced 21-colour comic palette, directional character animation, positional sound, and a
+  dynamic audio mixer.
+
+## Controls
+
+| Input | Action |
+|---|---|
+| Type the visible word | Travel, interact, open a door, loot, or attack |
+| Mouse | Look around in first person |
+| `Tab` | Pause and open the city/building map |
+| `Esc` | Pause and open settings |
+| `WASD` | Move freely inside a claimed safe zone |
+
+## Run locally
+
+Open `project.godot` in Godot 4.6.2 and run the main scene. Release exports are produced by
+the repository workflow for Web, Linux, Windows, and unsigned macOS builds. The browser build
+is deployed to GitHub Pages after every successful build on `master`.
+
+`NEXT_STEPS.md` tracks the current backlog and open design questions. The rest of this file
+is the technical guide for contributors.
 
 ---
 
-## 1. Ground rules (from the owner, do not break)
+## 1. Design pillars
 
-- **Project lives here (`~/zombietyping`).** Never put project files in `~/Projects/claude`
-  (that folder holds token/password files).
-- **Git:** commit freely at milestones. **No Claude attribution lines** (no `Co-Authored-By`,
-  no "Generated with"). Commit author is `lettuce <lettucetulip@gmail.com>`.
 - **Art:** one forced 21-colour palette (`assets/palette/palette.png`), kawaii/emoji zombie
   faces, Vice-City poppy colours, thick outlines, weighted comic strides. Every PixelLab
   generation passes the palette (`color_image_base64`) and every imported frame is quantized
@@ -440,3 +485,9 @@ Rules of the road:
   were shot after wandering out through an open door.
 - `Interior._rebuild` must build every room (an early return for unrevealed rooms once made
   "walls of unseen rooms" not exist; that bug caused most see-through-wall reports).
+
+## License
+
+Copyright © 2026 lettucegoblin. All rights reserved. No license is currently granted to
+copy, modify, or redistribute the original source or assets. Third-party components retain
+their own licenses; see the license files shipped with those components.

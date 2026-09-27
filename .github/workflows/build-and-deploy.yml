@@ -1,0 +1,77 @@
+name: Build and deploy
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    container:
+      image: barichello/godot-ci:4.6.2
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v5
+
+      - name: Import assets
+        run: godot --headless --editor --quit
+
+      - name: Export all platforms
+        run: |
+          mkdir -p build/web build/linux build/windows build/macos build/packages
+          godot --headless --export-release Web build/web/index.html
+          godot --headless --export-release Linux build/linux/zombietyping.x86_64
+          godot --headless --export-release Windows build/windows/zombietyping.exe
+          godot --headless --export-release macOS build/macos/zombietyping.zip
+          chmod +x build/linux/zombietyping.x86_64
+          tar -C build/linux -czf build/packages/zombietyping-linux-x86_64.tar.gz .
+          python3 -m zipfile -c build/packages/zombietyping-windows.zip build/windows/*
+          cp build/macos/zombietyping.zip build/packages/zombietyping-macos-unsigned.zip
+
+      - name: Upload desktop builds
+        uses: actions/upload-artifact@v4
+        with:
+          name: zombietyping-desktop-builds
+          path: build/packages/*
+          if-no-files-found: error
+
+      - name: Configure GitHub Pages
+        if: github.ref == 'refs/heads/master'
+        uses: actions/configure-pages@v5
+
+      - name: Upload browser build
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/web
+
+      - name: Publish tagged desktop release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/packages/*
+          generate_release_notes: true
+          prerelease: true
+
+  deploy:
+    if: github.ref == 'refs/heads/master'
+    needs: export
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy browser build
+        id: deployment
+        uses: actions/deploy-pages@v4

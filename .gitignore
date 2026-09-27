@@ -5,3 +5,8 @@
 .DS_Store
 addons/.godot_ai_update/
 tools/live/mcp_session_id.txt
+build/
+__pycache__/
+*.pyc
+mcp_session_id.txt
+docs/**/*.import
