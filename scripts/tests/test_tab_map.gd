@@ -72,6 +72,24 @@ func _ready() -> void:
 	occupied.append(first)
 	var second: Rect2 = minimap._nudged_label_rect(Vector2(80, 50), Vector2(28, 14), occupied, bounds)
 	_check(first.size != Vector2.ZERO and second.size != Vector2.ZERO and not first.intersects(second), "minimap label nudging allowed overlap")
+	# Once two labels have claimed offsets, their result is independent of which one is
+	# visited first on later frames. This prevents newly visible edge labels from cascading
+	# all existing addresses into different nudge slots.
+	minimap._label_offsets.clear()
+	var anchor := Vector2(80, 50)
+	var stable_none: Array[Rect2] = []
+	var stable_a: Rect2 = minimap._stable_label_rect("stable-a", anchor, Vector2(28, 14), stable_none, bounds)
+	var stable_occupied: Array[Rect2] = [stable_a]
+	var stable_b: Rect2 = minimap._stable_label_rect("stable-b", anchor, Vector2(28, 14), stable_occupied, bounds)
+	var offset_a: Vector2 = minimap._label_offsets["stable-a"]
+	var reverse_occupied: Array[Rect2] = []
+	var reverse_b: Rect2 = minimap._stable_label_rect("stable-b", anchor, Vector2(28, 14), reverse_occupied, bounds)
+	reverse_occupied.append(reverse_b)
+	var reverse_a: Rect2 = minimap._stable_label_rect("stable-a", anchor, Vector2(28, 14), reverse_occupied, bounds)
+	_check(reverse_a.size != Vector2.ZERO and reverse_b.size != Vector2.ZERO and not reverse_a.intersects(reverse_b),
+		"remembered minimap label slots became order-dependent")
+	_check((reverse_a.get_center() - anchor).is_equal_approx(offset_a),
+		"an existing minimap label shifted when another label became visible")
 	_check(map.building_name(a) == map.building_name(a), "building name is not deterministic")
 	_check(map.building_name(a).contains(" "), "building name is not human-readable")
 	World.state[a.id()] = { "cleared": true, "claimed": true }

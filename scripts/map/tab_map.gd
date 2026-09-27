@@ -41,6 +41,8 @@ var _fog_tex: Dictionary = {}         # Vector2i -> ImageTexture
 var _fog_dirty: Dictionary = {}       # Vector2i -> true
 var _labels: Dictionary = {}          # label -> building id (current view)
 var _placed: Array = []               # [{label, b, centre}]
+var _label_offsets: Dictionary = {}   # building id -> persistent nudge from its map anchor
+var _label_layout_ppt := -1.0
 var _dragging := false
 var _msg := ""
 var _msg_until := 0.0
@@ -587,6 +589,11 @@ func recompute_labels() -> void:
 	if key == _view_key:
 		return
 	_view_key = key
+	if not is_equal_approx(_label_layout_ppt, _ppt):
+		# Pixel offsets only have meaning at one zoom scale. Panning and movement retain
+		# them; an explicit zoom starts a fresh collision layout.
+		_label_offsets.clear()
+		_label_layout_ppt = _ppt
 	_labels.clear()
 	_placed.clear()
 	if _ppt < LABEL_MIN_PPT:
@@ -601,6 +608,20 @@ func recompute_labels() -> void:
 
 func _nudged_label_rect(anchor: Vector2, box_size: Vector2,
 		occupied: Array[Rect2], bounds: Rect2) -> Rect2:
+	return _stable_label_rect("", anchor, box_size, occupied, bounds)
+
+
+func _stable_label_rect(id: String, anchor: Vector2, box_size: Vector2,
+		occupied: Array[Rect2], bounds: Rect2) -> Rect2:
+	if id != "" and _label_offsets.has(id):
+		var remembered_offset: Vector2 = _label_offsets[id]
+		var remembered := Rect2(anchor + remembered_offset - box_size * 0.5, box_size)
+		if not bounds.encloses(remembered):
+			return Rect2()
+		for used in occupied:
+			if used.intersects(remembered.grow(1.0)):
+				return Rect2()
+		return remembered
 	for ring in range(9):
 		for gy in range(-ring, ring + 1):
 			for gx in range(-ring, ring + 1):
@@ -615,6 +636,8 @@ func _nudged_label_rect(anchor: Vector2, box_size: Vector2,
 						blocked = true
 						break
 				if not blocked:
+					if id != "":
+						_label_offsets[id] = rect.get_center() - anchor
 					return rect
 	return Rect2()
 
@@ -694,7 +717,7 @@ func _draw() -> void:
 			var selected: bool = b.id() == _selected_id
 			var bg := Color("#5b3f8c") if selected else (Color(0, 0, 0, 0.55) if qi < 0 else COL_ROUTE)
 			var fg := Color.WHITE if qi < 0 else Color.BLACK
-			var lr := _nudged_label_rect(p, Vector2(w + 8, fs * 1.35), occupied, label_bounds)
+			var lr := _stable_label_rect(b.id(), p, Vector2(w + 8, fs * 1.35), occupied, label_bounds)
 			if lr.size == Vector2.ZERO:
 				continue
 			occupied.append(lr)

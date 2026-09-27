@@ -620,25 +620,32 @@ static func _wall_with_holes(st: SurfaceTool, p0: Vector3, p1: Vector3, n: Vecto
 		if t1 <= t0:
 			continue
 		if t0 > cursor:
-			_wq(st, p0, dir, cursor, t0, 0.0, H, n, col)
+			_wq(st, p0, dir, cursor, t0, 0.0, H, H, n, col)
 		if h[2] > 0.0:
-			_wq(st, p0, dir, t0, t1, 0.0, h[2], n, col)
+			_wq(st, p0, dir, t0, t1, 0.0, h[2], H, n, col)
 		if h[3] < H:
 			# Both adjoining rooms author their own inward-facing partition surface. Give
 			# the cap over an opening a tiny room-side bias so its wall swatch cannot lose
 			# a coplanar depth tie and reveal the other room/ceiling colour instead.
-			_wq(st, p0 + n * 0.012, dir, t0, t1, h[3], H, n, col)
+			_wq(st, p0 + n * 0.012, dir, t0, t1, h[3], H, H, n, col)
 		cursor = maxf(cursor, t1)
 	if cursor < len - 0.001:
-		_wq(st, p0, dir, cursor, len, 0.0, H, n, col)
+		_wq(st, p0, dir, cursor, len, 0.0, H, H, n, col)
 
 
-static func _wq(st: SurfaceTool, p0: Vector3, dir: Vector3, ta: float, tb: float, ya: float, yb: float, n: Vector3, col: Color) -> void:
+## Sample the same vertical tint for every wall fragment. Previously a lintel began above
+## the dark skirting threshold and therefore received a flat full-strength swatch, while
+## the tall quads beside it were still midway through their vertical gradient.
+static func wall_tint_at_height(col: Color, y: float, wall_height: float) -> Color:
+	return col.darkened(0.35).lerp(col, clampf(y / maxf(wall_height, 0.001), 0.0, 1.0))
+
+
+static func _wq(st: SurfaceTool, p0: Vector3, dir: Vector3, ta: float, tb: float,
+		ya: float, yb: float, wall_height: float, n: Vector3, col: Color) -> void:
 	var a := p0 + dir * ta + Vector3(0, ya, 0)
 	var b := p0 + dir * tb + Vector3(0, ya, 0)
 	var c := p0 + dir * tb + Vector3(0, yb, 0)
 	var d := p0 + dir * ta + Vector3(0, yb, 0)
-	# baked shading: a darker band low on the wall (skirting/shadow), full colour above
-	var lo := col.darkened(0.35) if ya < 0.5 else col
-	var hi := col.darkened(0.35) if yb < 0.5 else col
+	var lo := wall_tint_at_height(col, ya, wall_height)
+	var hi := wall_tint_at_height(col, yb, wall_height)
 	SectorMesher._quad4(st, a, b, c, d, n, lo, lo, hi, hi)

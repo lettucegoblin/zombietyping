@@ -65,7 +65,7 @@ func _ready() -> void:
 		_check(not (audio as AudioStreamPlayer3D).playing, "television static survived interior unload")
 
 	if not _failed:
-		print("ROOM VISIBILITY OK  clear furnished doorways + fixed wall art + room-tinted ceilings + structural occlusion + hidden encounters + transparent props + TV audio teardown")
+		print("ROOM VISIBILITY OK  clear furnished doorways + continuous opening gradients + fixed wall art + room-tinted ceilings + structural occlusion + hidden encounters + transparent props + TV audio teardown")
 	get_tree().quit(1 if _failed else 0)
 
 
@@ -105,6 +105,12 @@ func _check_ceiling_palette() -> void:
 	for wall_col in InteriorMesher.WALL_COLS:
 		var ceiling := InteriorMesher.ceiling_color(wall_col)
 		_check(ceiling.is_equal_approx(wall_col), "ceiling lost its room wall swatch")
+		var wall_height := World.FLOOR_M + 0.08
+		var lintel_height := InteriorMesher.DOOR_H + 0.08
+		var expected: Color = wall_col.darkened(0.35).lerp(wall_col, lintel_height / wall_height)
+		var lintel: Color = InteriorMesher.wall_tint_at_height(wall_col, lintel_height, wall_height)
+		_check(lintel.is_equal_approx(expected), "door/window cap sampled a different wall gradient")
+		_check(not lintel.is_equal_approx(wall_col), "opening cap reverted to a flat full-strength swatch")
 
 
 func _check_furnishing_clearance_and_wall_art() -> void:

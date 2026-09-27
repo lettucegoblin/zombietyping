@@ -17,6 +17,7 @@ var player: Node3D
 var tab_map: Control              # texture cache + fog dirty tracking live there
 var labels: Dictionary = {}       # label -> building id (current window)
 var _placed: Array = []
+var _label_offsets: Dictionary = {} # building id -> persistent nudge from its map anchor
 var _label_center := Vector2(INF, INF)
 var _was_moving := false
 var _font: Font
@@ -60,6 +61,12 @@ func relabel() -> void:
 	var res := MapLabels.assign(Rect2i(lo, hi - lo + Vector2i.ONE), _label_center, radius, true)
 	labels = res["labels"]
 	_placed = res["placed"]
+	# The address registry only forgets a building after it is several complete view ranges
+	# away. Keep the visual nudge for exactly as long, so ordinary streaming at the edge of
+	# the minimap cannot make labels already on-screen jump.
+	for id in _label_offsets.keys():
+		if MapLabels.label_for_id(str(id)) == "":
+			_label_offsets.erase(id)
 
 
 func ensure_building_label(b: BuildingData) -> String:
@@ -98,6 +105,22 @@ func _tile_to_screen(t: Vector2, center: Vector2) -> Vector2:
 ## An address that cannot fit is only hidden visually; it remains in `labels` and typeable.
 func _nudged_label_rect(anchor: Vector2, box_size: Vector2,
 		occupied: Array[Rect2], bounds: Rect2) -> Rect2:
+	return _stable_label_rect("", anchor, box_size, occupied, bounds)
+
+
+func _stable_label_rect(id: String, anchor: Vector2, box_size: Vector2,
+		occupied: Array[Rect2], bounds: Rect2) -> Rect2:
+	if id != "" and _label_offsets.has(id):
+		var remembered_offset: Vector2 = _label_offsets[id]
+		var remembered := Rect2(anchor + remembered_offset - box_size * 0.5, box_size)
+		if not bounds.encloses(remembered):
+			return Rect2()
+		for used in occupied:
+			if used.intersects(remembered.grow(1.0)):
+				# Never move a settled label because a newcomer appeared. Hiding the later
+				# claimant for this frame is less distracting and both addresses remain typeable.
+				return Rect2()
+		return remembered
 	for ring in range(LABEL_NUDGE_RINGS + 1):
 		for gy in range(-ring, ring + 1):
 			for gx in range(-ring, ring + 1):
@@ -113,6 +136,8 @@ func _nudged_label_rect(anchor: Vector2, box_size: Vector2,
 						blocked = true
 						break
 				if not blocked:
+					if id != "":
+						_label_offsets[id] = rect.get_center() - anchor
 					return rect
 	return Rect2()
 
@@ -182,7 +207,7 @@ func _draw() -> void:
 		var w := _font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
 		var qi := queued.find(b.id())
 		var typed_match := typing != "" and label.begins_with(typing)
-		var lr := _nudged_label_rect(p, Vector2(w + 6, fs * 1.25), occupied, bounds)
+		var lr := _stable_label_rect(b.id(), p, Vector2(w + 6, fs * 1.25), occupied, bounds)
 		if lr.size == Vector2.ZERO:
 			continue
 		occupied.append(lr)
