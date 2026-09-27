@@ -55,7 +55,7 @@ static func is_looted(building_id: String, prop_id: String) -> bool:
 static func can_loot(building_id: String, prop: FloorPlan.Prop) -> bool:
 	return prop.loot_table != "" and not is_looted(building_id, prop.id) \
 		and not PropSalvage.is_salvaged(building_id, prop.id) \
-		and World.can_carry(contents(building_id, prop))
+		and World.can_collect_loot(contents(building_id, prop))
 
 
 static func loot(building_id: String, prop: FloorPlan.Prop) -> String:
@@ -64,9 +64,9 @@ static func loot(building_id: String, prop: FloorPlan.Prop) -> String:
 	if is_looted(building_id, prop.id):
 		return "%s already searched" % prop.kind
 	var found := contents(building_id, prop)
-	if not World.can_carry(found):
-		return "backpack full — need %d free slots" % bundle_units(found)
-	World.add_to_backpack(found)
+	if not World.can_collect_loot(found):
+		return "field kit and backpack full — need %d carried slots" % bundle_units(World.loot_overflow(found))
+	World.collect_loot(found)
 	var st := World.building_state(building_id)
 	var searched: Dictionary = st.get("looted_props", {})
 	searched[prop.id] = true

@@ -15,6 +15,7 @@ func _run() -> void:
 	World.placements.clear()
 	World.safezone_blocks.clear()
 	World.backpack.clear()
+	World.field_inventory.clear()
 	for key in World.materials:
 		World.materials[key] = 0
 
@@ -35,6 +36,10 @@ func _run() -> void:
 	if street.room >= 0:
 		_fail("test threat was not a street zombie")
 		return
+	main.typist.locked = street
+	street.set_locked(true)
+	main.player.halt = true
+	main.player.lock_look_toward(street.global_position)
 
 	var result: String = World.claim_building(b.id())
 	if not result.contains("claimed"):
@@ -45,6 +50,9 @@ func _run() -> void:
 		return
 	if main.typist.enabled:
 		_fail("typing combat remained enabled in SAFEZONE")
+		return
+	if main.typist.locked != null or main.player.halt or main.player.is_look_locked():
+		_fail("SAFEZONE entry retained a combat or camera lock")
 		return
 	if not main.director.alive().is_empty():
 		_fail("a hostile survived SAFEZONE entry")
@@ -103,8 +111,30 @@ func _run() -> void:
 		return
 	World.set_building_state(tower.id(), "claimed", true)
 	World.set_building_state(tower.id(), "safe", true)
+	World.set_building_state(tower.id(), "stored_items", { "bandages": 2, "packaged_food": 2 })
+	World.field_inventory.clear()
 	main.player.snap_to_road(tower.road_tile)
 	main._enter_safezone(tower)
+	if World.field_count("bandages") != 2 or World.field_count("packaged_food") != 2 \
+		or not (World.building_state(tower.id()).get("stored_items", {}) as Dictionary).is_empty():
+		_fail("settlement entry did not refill the field kit from base stores")
+		return
+	var loot_visuals: Array = main.interior.find_children("*", "Node3D", true, false).filter(
+		func(node: Node): return bool(node.get_meta("lootable_animation", false)))
+	var loot_labels: Array = main.interior.find_children("Loot_*", "Label3D", true, false)
+	var empty_labels: Array = main.interior.find_children("Searched_*", "Label3D", true, false)
+	if not loot_visuals.is_empty() or not loot_labels.is_empty() or not empty_labels.is_empty():
+		_fail("claimed-building furnishings still rendered loot or searched indicators")
+		return
+	var safe_facing := Vector3.FORWARD
+	main.player.facing = safe_facing
+	var outside: Zombie = main.director._spawn(
+		ZombieType.shambler(), main.player.global_position + Vector3(2.0, 0.0, 0.0))
+	main._process(0.1)
+	if not main.player.facing.is_equal_approx(safe_facing):
+		_fail("SAFEZONE auto-aim turned toward an outside threat")
+		return
+	main.director.clear_street_zombies()
 	var floor_result: String = main._safezone_floor(1)
 	if main.interior.plan.floor != 1 or main.player.global_position.y < World.FLOOR_M or not floor_result.contains("2/"):
 		_fail("claimed multi-storey navigation did not reach floor 2: " + floor_result)
@@ -115,8 +145,8 @@ func _run() -> void:
 	heal_key.pressed = true
 	heal_key.keycode = KEY_H
 	main._unhandled_input(heal_key)
-	if main.hp != 90 or not World.backpack.is_empty():
-		_fail("safe-zone bandage control did not consume carried medicine")
+	if main.hp != 90 or not World.backpack.is_empty() or World.field_count("bandages") != 2:
+		_fail("safe-zone bandage control did not consume backpack medicine before the field kit")
 		return
 	World.backpack = { "circuits": 1 }
 	var stash_key := InputEventKey.new()

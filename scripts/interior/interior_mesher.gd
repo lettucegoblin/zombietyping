@@ -36,7 +36,8 @@ static func ceiling_color(wall_col: Color) -> Color:
 	return wall_col
 
 
-static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictionary, include_furnishings := true) -> Node3D:
+static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictionary,
+		include_furnishings := true, decorate_only := false) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Room_%d" % ri
 	var room := fp.rooms[ri]
@@ -223,7 +224,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 			labels.add_child(_label("down", lps["down"], "down", -1))
 	root.add_child(labels)
 	if include_furnishings:
-		var furnishings := build_furnishings(fp, ri)
+		var furnishings := build_furnishings(fp, ri, decorate_only)
 		if furnishings != null:
 			root.add_child(furnishings)
 	return root
@@ -231,7 +232,7 @@ static func build_room(fp: FloorPlan, ri: int, b: BuildingData, opened: Dictiona
 
 ## Furniture is batched per room and deliberately has no collision. It gives each
 ## generated room a readable use without changing the rail, zombie paths, or LOS fairness.
-static func build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
+static func build_furnishings(fp: FloorPlan, ri: int, decorate_only := false) -> Node3D:
 	var root := Node3D.new()
 	root.name = "Furnishings"
 	var st := SurfaceTool.new()
@@ -243,12 +244,13 @@ static func build_furnishings(fp: FloorPlan, ri: int) -> Node3D:
 			continue
 		if PropSalvage.is_salvaged(fp.building_id, prop.id):
 			continue
-		var searched := prop.loot_table != "" and PropLootRules.is_looted(fp.building_id, prop.id)
+		var searched := not decorate_only and prop.loot_table != "" \
+			and PropLootRules.is_looted(fp.building_id, prop.id)
 		if PROP_SPRITES.has(prop.kind):
 			var visual := _sprite_prop(prop)
 			if searched:
 				_dim_sprites(visual)
-			elif prop.loot_table != "":
+			elif not decorate_only and prop.loot_table != "":
 				visual.set_script(LootableProp)
 				visual.call("configure", prop.id, prop.size, prop.yaw)
 				visual.add_child(_loot_label(prop))

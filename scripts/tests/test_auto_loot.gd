@@ -16,6 +16,7 @@ func _run() -> void:
 	main.settlement.leave()
 	World.state.clear()
 	World.backpack.clear()
+	World.field_inventory.clear()
 	var candidate := _find_room_with_loot()
 	if candidate.is_empty():
 		return _fail("no generated room with loot found")
@@ -39,11 +40,13 @@ func _run() -> void:
 		return _fail("automatic reward sequence never completed")
 	if not PropLoot.is_looted(b.id(), prop.id):
 		return _fail("room reward did not persist the searched prop")
-	if World.backpack_units() <= 0:
-		return _fail("room reward did not add supplies to the backpack")
+	if World.backpack_units() + PropLoot.bundle_units(World.field_inventory) <= 0:
+		return _fail("room reward did not add supplies to carried inventory")
 	if main.loot_flyover._displayed_units != World.backpack_units():
 		return _fail("HUD backpack count did not land in step with the final icon")
-	print("AUTO LOOT OK  bouncing room supplies -> world-to-HUD flight -> %s" % World.backpack_summary())
+	if main.loot_flyover._displayed_field != World.field_inventory:
+		return _fail("HUD field-kit count did not land in step with the final icon")
+	print("AUTO LOOT OK  bouncing room supplies -> world-to-HUD flight -> %s · %s" % [World.backpack_summary(), World.field_summary()])
 	get_tree().quit(0)
 
 

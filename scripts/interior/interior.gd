@@ -111,7 +111,7 @@ func nearest_lootable_prop(world_pos: Vector3, require_capacity := true) -> Floo
 				or PropLootRules.is_looted(building.id(), prop.id) \
 				or PropSalvage.is_salvaged(building.id(), prop.id):
 			continue
-		if require_capacity and not World.can_carry(PropLootRules.contents(building.id(), prop)):
+		if require_capacity and not World.can_collect_loot(PropLootRules.contents(building.id(), prop)):
 			continue
 		var d := Vector2(prop.pos.x - world_pos.x, prop.pos.z - world_pos.z).length_squared()
 		if d < best:
@@ -130,7 +130,7 @@ func lootable_props_in_room(ri := -1, require_capacity := true) -> Array[FloorPl
 				or PropLootRules.is_looted(building.id(), prop.id) \
 				or PropSalvage.is_salvaged(building.id(), prop.id):
 			continue
-		if require_capacity and not World.can_carry(PropLootRules.contents(building.id(), prop)):
+		if require_capacity and not World.can_collect_loot(PropLootRules.contents(building.id(), prop)):
 			continue
 		out.append(prop)
 	out.sort_custom(func(a: FloorPlan.Prop, b: FloorPlan.Prop): return a.id < b.id)
@@ -537,7 +537,7 @@ func _reveal(ri: int, hop := true) -> void:
 		if not _room_nodes.has(ri):
 			_rebuild(ri)
 		elif not _room_nodes[ri].has_node("Furnishings"):
-			var furnishings := InteriorMesher.build_furnishings(plan, ri)
+			var furnishings := InteriorMesher.build_furnishings(plan, ri, safezone_mode)
 			if furnishings != null:
 				_room_nodes[ri].add_child(furnishings)
 		_set_room_visible(ri, true)
@@ -552,7 +552,7 @@ func _reveal(ri: int, hop := true) -> void:
 func _rebuild(ri: int, include_furnishings := true) -> void:
 	if _room_nodes.has(ri):
 		_room_nodes[ri].queue_free()
-	var node := InteriorMesher.build_room(plan, ri, building, floor_state()["opened"], include_furnishings)
+	var node := InteriorMesher.build_room(plan, ri, building, floor_state()["opened"], include_furnishings, safezone_mode)
 	add_child(node)
 	_room_nodes[ri] = node
 	var l: Node3D = node.get_node_or_null("Labels")

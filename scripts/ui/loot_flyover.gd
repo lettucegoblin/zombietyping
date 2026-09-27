@@ -17,7 +17,7 @@ const ITEM_COLORS := {
 	"fasteners": Color("#a6e3a1"),
 	"fuel_can": Color("#ff6f91"),
 }
-const TRAY_SIZE := Vector2(178, 34)
+const TRAY_SIZE := Vector2(224, 58)
 const TOKEN_DURATION := 0.64
 const TOKEN_STAGGER := 0.12
 
@@ -28,6 +28,7 @@ var sfx: Node
 var hud: Control
 var _tokens: Array[Dictionary] = []
 var _displayed_units := 0
+var _displayed_field: Dictionary = {}
 var _pulse := 0.0
 var _combo := 0
 
@@ -45,39 +46,45 @@ func configure(world_camera: Camera3D, view: Control, viewport: SubViewport, sou
 func sync_backpack() -> void:
 	if _tokens.is_empty():
 		_displayed_units = World.backpack_units()
+		_displayed_field = World.field_inventory.duplicate(true)
 		queue_redraw()
 
 
 ## Queue one icon per carried unit. Returns the complete flight time so room navigation can
 ## wait for the final arrival beat without coupling game state to this presentation node.
-func fly_bundle(world_pos: Vector3, bundle: Dictionary, units_before: int) -> float:
+func fly_bundle(world_pos: Vector3, bundle: Dictionary, units_before: int,
+		field_before: Dictionary = {}) -> float:
 	var item_order: Array = bundle.keys()
 	item_order.sort()
-	var unit_items: Array[String] = []
+	var units: Array[Dictionary] = []
 	for item in item_order:
-		for _i in int(bundle[item]):
-			unit_items.append(str(item))
-	if unit_items.is_empty():
+		var field_gain := maxi(0, World.field_count(str(item)) - int(field_before.get(item, 0)))
+		for i in int(bundle[item]):
+			units.append({ "item": str(item), "destination": "field" if i < field_gain else "pack" })
+	if units.is_empty():
 		return 0.0
 	if _tokens.is_empty():
 		_displayed_units = units_before
+		_displayed_field = field_before.duplicate(true)
 		_combo = 0
 	var start := _world_to_ui(world_pos)
 	var tray := _tray_rect()
-	var target := tray.position + Vector2(18, tray.size.y * 0.5)
-	for i in unit_items.size():
-		var item := unit_items[i]
+	for i in units.size():
+		var item := str(units[i]["item"])
+		var destination := str(units[i]["destination"])
+		var target := tray.position + Vector2(18, 42 if destination == "field" else 17)
 		_tokens.append({
 			"item": item,
+			"destination": destination,
 			"from": start + Vector2((i % 2) * 9 - 4, -float(i) * 3.0),
 			"to": target,
 			"age": -float(i) * TOKEN_STAGGER,
 			"arrived": false,
-			"final": i == unit_items.size() - 1,
+			"final": i == units.size() - 1,
 		})
 	set_process(true)
 	queue_redraw()
-	return TOKEN_DURATION + float(unit_items.size() - 1) * TOKEN_STAGGER + 0.12
+	return TOKEN_DURATION + float(units.size() - 1) * TOKEN_STAGGER + 0.12
 
 
 func _process(delta: float) -> void:
@@ -97,7 +104,11 @@ func _process(delta: float) -> void:
 
 
 func _arrive(token: Dictionary) -> void:
-	_displayed_units = mini(World.BACKPACK_CAPACITY, _displayed_units + 1)
+	if str(token["destination"]) == "field":
+		var item := str(token["item"])
+		_displayed_field[item] = int(_displayed_field.get(item, 0)) + 1
+	else:
+		_displayed_units = mini(World.BACKPACK_CAPACITY, _displayed_units + 1)
 	_combo += 1
 	_pulse = 1.0
 	if sfx != null:
@@ -125,10 +136,17 @@ func _draw() -> void:
 	var tray := base_tray.grow(grow)
 	draw_rect(tray, Color(0.055, 0.035, 0.09, 0.92), true)
 	draw_rect(tray, pulse_color, false, 2.0 + _pulse * 2.0)
-	_draw_token(base_tray.position + Vector2(18, base_tray.size.y * 0.5), "packaged_food", 0.9 + _pulse * 0.22)
+	_draw_token(base_tray.position + Vector2(18, 17), "tool_kit", 0.9 + _pulse * 0.22)
 	var text := "PACK  %d/%d" % [_displayed_units, World.BACKPACK_CAPACITY]
 	draw_string(ThemeDB.fallback_font, base_tray.position + Vector2(38, 23), text,
 		HORIZONTAL_ALIGNMENT_LEFT, -1, 17, Color("#fdf6e3"))
+	_draw_token(base_tray.position + Vector2(18, 42), "bandages", 0.82 + _pulse * 0.18)
+	var field_text := "FIELD  B %d/%d  F %d/%d" % [
+		int(_displayed_field.get("bandages", 0)), int(World.FIELD_CAPACITY["bandages"]),
+		int(_displayed_field.get("packaged_food", 0)), int(World.FIELD_CAPACITY["packaged_food"]),
+	]
+	draw_string(ThemeDB.fallback_font, base_tray.position + Vector2(38, 48), field_text,
+		HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#68d5ff"))
 	for token in _tokens:
 		var age := float(token["age"])
 		if age < 0.0 or age >= TOKEN_DURATION + 0.18:

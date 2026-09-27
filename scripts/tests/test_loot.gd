@@ -10,6 +10,7 @@ func _ready() -> void:
 	World.persistence_enabled = false
 	World.state.clear()
 	World.backpack.clear()
+	World.field_inventory.clear()
 	for key in World.materials:
 		World.materials[key] = 0
 	var candidate := _find_container()
@@ -21,9 +22,23 @@ func _ready() -> void:
 	var repeat: Dictionary = PropLootRules.contents(b.id(), prop)
 	_check(not first.is_empty() and first == repeat, "container contents were not deterministic")
 	_check(PropLootRules.bundle_units(first) <= 2, "single container exceeded the intended carry unit range")
+	var field_trial := { "bandages": 3, "packaged_food": 3, "circuits": 1 }
+	_check(World.collect_loot(field_trial), "field-kit trial bundle could not be collected")
+	_check(World.field_count("bandages") == 2 and World.field_count("packaged_food") == 2,
+		"loot did not fill ready-use consumable slots first")
+	_check(int(World.backpack.get("bandages", 0)) == 1 \
+		and int(World.backpack.get("packaged_food", 0)) == 1 \
+		and int(World.backpack.get("circuits", 0)) == 1,
+		"consumable overflow did not enter the backpack")
+	_check(World.consume_field_supply("bandages"), "field supply could not be consumed")
+	_check(not World.backpack.has("bandages") and World.field_count("bandages") == 2,
+		"consumption did not drain backpack overflow before the field reserve")
 	World.backpack = { "packaged_food": World.BACKPACK_CAPACITY }
+	World.field_inventory = { "packaged_food": 2, "bandages": 2 }
 	_check(not World.can_carry(first), "full backpack accepted another container")
+	_check(not World.can_collect_loot(first), "full field kit and backpack accepted another container")
 	World.backpack.clear()
+	World.field_inventory.clear()
 
 	var interior = load("res://scripts/interior/interior.gd").new()
 	add_child(interior)
@@ -46,15 +61,20 @@ func _ready() -> void:
 	var message: String = interior.loot_prop(prop)
 	_check(message.begins_with("searched"), "container could not be searched: " + message)
 	_check(PropLootRules.is_looted(b.id(), prop.id), "searched container id was not persisted")
-	_check(World.backpack == first, "rolled items did not enter the backpack")
+	_check(_combined_carried() == first, "rolled items did not enter carried inventory")
 	_check(PropLootRules.loot(b.id(), prop).contains("already"), "container could be looted twice")
 
 	var snapshot := World.save_snapshot()
+	var expected_backpack := World.backpack.duplicate(true)
+	var expected_field := World.field_inventory.duplicate(true)
 	World.backpack.clear()
+	World.field_inventory.clear()
 	World.state.clear()
 	_check(World.restore_snapshot(snapshot), "loot snapshot could not be restored")
-	_check(World.backpack == first and PropLootRules.is_looted(b.id(), prop.id), "snapshot lost carried or searched loot")
-	var expected: Dictionary = PropLootRules.breakdown(first)
+	_check(World.backpack == expected_backpack and World.field_inventory == expected_field \
+		and PropLootRules.is_looted(b.id(), prop.id), "snapshot lost carried, field, or searched loot")
+	World.add_to_backpack({ "circuits": 1 })
+	var expected: Dictionary = PropLootRules.breakdown(World.backpack)
 	var breakdown_message := World.break_down_backpack()
 	_check(breakdown_message.begins_with("sorted"), "backpack did not break down at base")
 	_check(World.backpack.is_empty(), "breakdown did not empty backpack")
@@ -62,6 +82,13 @@ func _ready() -> void:
 		_check(int(World.materials[material]) == int(expected[material]), "wrong breakdown yield for " + material)
 	interior.queue_free()
 	_finish("")
+
+
+func _combined_carried() -> Dictionary:
+	var combined := World.backpack.duplicate(true)
+	for item in World.field_inventory:
+		combined[item] = int(combined.get(item, 0)) + int(World.field_inventory[item])
+	return combined
 
 
 func _find_container() -> Dictionary:

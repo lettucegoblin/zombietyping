@@ -835,12 +835,15 @@ func _draw_building_panel(font: Font) -> void:
 	for line in _wrap_text(World.backpack_summary(), 42):
 		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffb86c"))
 		y += 15.0
+	for line in _wrap_text(World.field_summary(), 42):
+		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#68d5ff"))
+		y += 15.0
 	var hp := 100
 	if health_provider.is_valid():
 		hp = clampi(int(health_provider.call()), 0, 100)
 	draw_string(font, Vector2(x, y), "FIELD CARE  ·  HP %d/100" % hp, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ff6f91") if hp < 60 else Color("#a6e3a1"))
 	y += 16.0
-	var bandages := int(World.backpack.get("bandages", 0))
+	var bandages := int(World.backpack.get("bandages", 0)) + World.field_count("bandages")
 	var heal_rect := Rect2(Vector2(x, y), Vector2(pr.size.x - 32.0, 32.0))
 	draw_rect(heal_rect, Color("#30263f") if hp < 100 and bandages > 0 else Color("#211b2b"))
 	draw_rect(heal_rect, Color("#8067a8"), false, 1.0)

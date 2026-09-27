@@ -110,10 +110,10 @@ report `Identifier not found: World` — ignore those lines from the parse check
 | `scenes/tests/test_camera_control.tscn` | kicked-door camera lock plus mouse-look priority over ambient auto-aim |
 | `scenes/tests/test_pause_menu.tscn` | Escape pause ownership, dynamic mixer sliders, sound routing, and live accessibility controls |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
-| `scenes/tests/test_loot.tscn` | deterministic container contents, automatic-room-loot eligibility, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
-| `scenes/tests/test_auto_loot.tscn` | clear-room reward beat, automatic container persistence, world-to-HUD item flights, and arrival-synchronized backpack count |
+| `scenes/tests/test_loot.tscn` | deterministic container contents, field-kit priority and overflow, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
+| `scenes/tests/test_auto_loot.tscn` | clear-room reward beat, automatic container persistence, world-to-HUD item flights, and arrival-synchronized field-kit/backpack counts |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |
-| `scenes/tests/test_safezone_transition.tscn` | at-door claim enters the safe zone, removes retained threats, and walking through its gate carries the player to an outside road before typed travel resumes |
+| `scenes/tests/test_safezone_transition.tscn` | at-door claim clears camera/threat locks, safe-zone furniture remains decorative, settlement stores refill the field kit, and the gate walk reaches an outside road |
 | `scenes/tests/test_tab_map.tscn` | stable fog-independent addresses, center-reticle building picking, collision-free map label nudging, supply-route caching/invalidation, menu/gameplay pointer handoff, and panel input capture |
 | `scenes/tests/test_construction.tscn` | placement ghost validity, rotation, confirm/cancel, full undo, partial dismantle, and upper-floor farm rejection |
 | `scenes/tests/test_room_visibility.tscn` | partition-safe entrances, room-tinted ceilings, unrevealed structural occlusion, hidden encounters, and furniture sprite alpha |
@@ -223,7 +223,7 @@ are inside).
 Clearing a building is only a tactical milestone and never makes it claimable by itself.
 Click its label in the Tab map (or type `info <label>`) to open the building panel. The loop is:
 
-1. Clear generated rooms, collect their container rewards into the carried backpack, then
+1. Clear generated rooms, collect their container rewards into the field kit/backpack, then
    salvage the generated furnishings into material classes after claiming the site.
 2. Dismantle seed-placed street cars over four persistent visual stages, ending as a frame
    on blocks; stages yield metal, electronics, fuel, tools, and vehicle parts.
@@ -248,13 +248,17 @@ Searchable dressers, cabinets, shelves, fridges, crates, televisions, stoves, an
 roll contents from their procedural loot-table tag and stable prop ID. While a room is
 dangerous, unsearched containers have a subtle proportion-weighted hop, six gold collectible
 motes, and an on-object `SUPPLIES` marker. Once it is safe, route typing pauses for a short
-reward beat and every carryable unit arcs from its world position into the top-left backpack
-chip. Its number, color pulse, and rising pickup cadence land together; a full backpack leaves
-the remaining supplies visibly in place. The twelve-slot backpack persists between sessions. Searched containers are
-dimmed and marked `EMPTY` on return. At a safe zone, `G` stashes carried items for residents,
-`V` sorts them into existing construction material classes, `H` uses bandages, and `J` eats
-packaged food. Only searched prop IDs are saved—the contents themselves regenerate
-deterministically from the world seed.
+reward beat and every carryable unit arcs from its world position into the top-left inventory
+chip. Bandages and packaged food fill two ready-use field slots each; overflow and all other
+loot use the persistent twelve-slot backpack. Consumption drains backpack overflow before the
+field reserve. Entering a settlement refills open field slots from that base's stored supplies,
+and `G` stashes the backpack before performing the same refill. The number, color pulse, and
+rising pickup cadence land together; full carried storage leaves remaining supplies visibly in
+place. Outside claimed buildings, searched containers are dimmed and marked `EMPTY` on return;
+inside a safe zone, the same furnishings are decoration with no loot state or marker. `V` sorts
+backpack contents into construction material classes, `H` uses bandages, and `J` eats packaged
+food. Only searched prop IDs are saved—the contents themselves regenerate deterministically
+from the world seed.
 
 Eligible uncleared buildings also receive a deterministic named survivor in a semantic room.
 The room/floor route takes priority over irrelevant cleared branches, the survivor emits a
@@ -295,8 +299,8 @@ contributing: meals, medicine, comfort, and high morale grant positive productiv
 instead of turning the settlement into an upkeep timer. The Tab building panel reports each
 base's wellbeing and each named resident's condition; all progress persists.
 
-The Tab map also exposes immediate care without adding another twitch control: carried
-bandages provide field healing, while a selected safehouse can treat the player from its
+The Tab map also exposes immediate care without adding another twitch control: backpack and
+field-kit bandages provide field healing, while a selected safehouse can treat the player from its
 stored or connected medical supply when the player is physically inside that safe zone.
 Safe-zone entrance doors fill their frames and swing open automatically as the player
 approaches, then close after the player moves clear. They are visual-only inside permanent

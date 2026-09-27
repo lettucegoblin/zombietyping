@@ -6,6 +6,7 @@ signal sector_generated(sd: SectorData)
 signal state_changed(building_id: String)
 signal materials_changed
 signal backpack_changed
+signal field_inventory_changed
 signal settlement_changed
 signal survivor_rescued(survivor: Dictionary)
 
@@ -16,6 +17,10 @@ const WARD_GRID := 2.5              ## one player-built wall edge / enclosed war
 const FARM_MIN_AREA_M2 := 30.0      ## one plot plus working room between rows
 const WORK_CYCLE_SECONDS := 45.0
 const BACKPACK_CAPACITY := 12
+const FIELD_CAPACITY := {
+	"bandages": 2,
+	"packaged_food": 2,
+}
 const WorkforceRules = preload("res://scripts/settlement/workforce.gd")
 const FacilityUpgradeRules = preload("res://scripts/settlement/facility_upgrade.gd")
 const PropLootRules = preload("res://scripts/loot/prop_loot.gd")
@@ -73,6 +78,7 @@ var materials: Dictionary = {
 	"zombie_matter": 0,
 }
 var backpack: Dictionary = {}        ## carried scavenged items, broken down at safe zones
+var field_inventory: Dictionary = {} ## ready-use consumables; overflow remains in backpack
 var supply_links: Array[PackedStringArray] = []
 var placements: Array[Dictionary] = []
 var survivors: Dictionary = {}       ## stable survivor id -> named/traited roster record
@@ -94,6 +100,7 @@ func _ready() -> void:
 	state_changed.connect(func(_id): _queue_save())
 	materials_changed.connect(_queue_save)
 	backpack_changed.connect(_queue_save)
+	field_inventory_changed.connect(_queue_save)
 	settlement_changed.connect(_queue_save)
 	settlement_changed.connect(func(): _ward_cache.clear())
 	if persistence_enabled:
@@ -123,6 +130,7 @@ func save_snapshot() -> Dictionary:
 		"safezone_blocks": safezone_blocks.duplicate(true),
 		"materials": materials.duplicate(true),
 		"backpack": backpack.duplicate(true),
+		"field_inventory": field_inventory.duplicate(true),
 		"supply_links": supply_links.duplicate(true),
 		"placements": placements.duplicate(true),
 		"survivors": survivors.duplicate(true),
@@ -143,6 +151,7 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	for key in materials:
 		materials[key] = int(loaded_materials.get(key, 0))
 	backpack = (snapshot.get("backpack", {}) as Dictionary).duplicate(true)
+	field_inventory = (snapshot.get("field_inventory", {}) as Dictionary).duplicate(true)
 	supply_links.clear()
 	for link in snapshot.get("supply_links", []):
 		supply_links.append(PackedStringArray(link))
@@ -160,6 +169,7 @@ func restore_snapshot(snapshot: Dictionary) -> bool:
 	_sector_task_mutex.unlock()
 	materials_changed.emit()
 	backpack_changed.emit()
+	field_inventory_changed.emit()
 	settlement_changed.emit()
 	return true
 
@@ -385,12 +395,63 @@ func backpack_summary() -> String:
 		"" if backpack.is_empty() else " · " + PropLootRules.item_text(backpack)]
 
 
+func field_count(item: String) -> int:
+	return int(field_inventory.get(item, 0))
+
+
+func field_summary() -> String:
+	return "field kit · bandages %d/%d · food %d/%d" % [
+		field_count("bandages"), int(FIELD_CAPACITY["bandages"]),
+		field_count("packaged_food"), int(FIELD_CAPACITY["packaged_food"]),
+	]
+
+
 func item_summary(bundle: Dictionary) -> String:
 	return "nothing" if bundle.is_empty() else PropLootRules.item_text(bundle)
 
 
 func can_carry(bundle: Dictionary) -> bool:
 	return backpack_units() + PropLootRules.bundle_units(bundle) <= BACKPACK_CAPACITY
+
+
+func loot_overflow(bundle: Dictionary) -> Dictionary:
+	var overflow := {}
+	for item in bundle:
+		var count := int(bundle[item])
+		if FIELD_CAPACITY.has(item):
+			count -= mini(count, maxi(0, int(FIELD_CAPACITY[item]) - field_count(item)))
+		if count > 0:
+			overflow[item] = count
+	return overflow
+
+
+func can_collect_loot(bundle: Dictionary) -> bool:
+	return can_carry(loot_overflow(bundle))
+
+
+## Loot tops up ready-use consumables first. Everything else, including consumable
+## overflow, remains in the general backpack for later use or settlement storage.
+func collect_loot(bundle: Dictionary) -> bool:
+	if not can_collect_loot(bundle):
+		return false
+	var overflow := {}
+	var field_changed := false
+	for item in bundle:
+		var count := int(bundle[item])
+		if FIELD_CAPACITY.has(item):
+			var room := maxi(0, int(FIELD_CAPACITY[item]) - field_count(item))
+			var field_take := mini(count, room)
+			if field_take > 0:
+				field_inventory[item] = field_count(item) + field_take
+				count -= field_take
+				field_changed = true
+		if count > 0:
+			overflow[item] = count
+	if field_changed:
+		field_inventory_changed.emit()
+	if not overflow.is_empty():
+		add_to_backpack(overflow)
+	return true
 
 
 func add_to_backpack(bundle: Dictionary) -> bool:
@@ -412,6 +473,53 @@ func consume_backpack_item(item: String, count := 1) -> bool:
 		backpack.erase(item)
 	backpack_changed.emit()
 	return true
+
+
+## Deliberately drain overflow first so the small field reserve survives routine use.
+func consume_field_supply(item: String, count := 1) -> bool:
+	if count <= 0 or int(backpack.get(item, 0)) + field_count(item) < count:
+		return false
+	var from_backpack := mini(count, int(backpack.get(item, 0)))
+	if from_backpack > 0:
+		consume_backpack_item(item, from_backpack)
+	var from_field := count - from_backpack
+	if from_field > 0:
+		var left := field_count(item) - from_field
+		if left > 0:
+			field_inventory[item] = left
+		else:
+			field_inventory.erase(item)
+		field_inventory_changed.emit()
+	return true
+
+
+## A settlement visit refills empty ready-use slots from that base's stores. It never
+## manufactures supplies, and it leaves all unrelated stored items untouched.
+func refresh_field_inventory(id: String) -> String:
+	var st := building_state(id)
+	if not st.get("claimed", false):
+		return ""
+	var stored: Dictionary = (st.get("stored_items", {}) as Dictionary).duplicate()
+	var moved := {}
+	for item in FIELD_CAPACITY:
+		var need := maxi(0, int(FIELD_CAPACITY[item]) - field_count(item))
+		var take := mini(need, int(stored.get(item, 0)))
+		if take <= 0:
+			continue
+		field_inventory[item] = field_count(item) + take
+		moved[item] = take
+		var left := int(stored[item]) - take
+		if left > 0:
+			stored[item] = left
+		else:
+			stored.erase(item)
+	if moved.is_empty():
+		return ""
+	st["stored_items"] = stored
+	field_inventory_changed.emit()
+	state_changed.emit(id)
+	settlement_changed.emit()
+	return "field kit restocked: " + PropLootRules.item_text(moved)
 
 
 func deposit_backpack(id: String) -> String:

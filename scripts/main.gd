@@ -199,7 +199,7 @@ func _process(dt: float) -> void:
 		_refresh_hud()
 	# auto-aim: standing still (or held by a threat) and not mid-word on a door, face the
 	# zombie you are shooting, else the closest one you can fire at
-	if (not player.is_moving() or player.halt) and typist.buffer == "":
+	if mode != Mode.SAFEZONE and (not player.is_moving() or player.halt) and typist.buffer == "":
 		var z: Zombie = null
 		if typist.locked != null and is_instance_valid(typist.locked) and typist.locked.is_alive():
 			z = typist.locked
@@ -269,6 +269,9 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_G:
 				if not settlement.build_mode:
 					msg = World.deposit_backpack(settlement.active_building_id)
+					var restock := World.refresh_field_inventory(settlement.active_building_id)
+					if restock != "":
+						msg += " · " + restock
 			KEY_H:
 				if not settlement.build_mode:
 					msg = _use_carried_supply("bandages", 30, "bandaged wounds")
@@ -515,6 +518,11 @@ func _enter_safezone(b: BuildingData) -> void:
 	_safezone_exiting = false
 	typist.clear_prompts()
 	typist.enabled = false
+	if typist.locked != null and is_instance_valid(typist.locked):
+		typist.locked.set_locked(false)
+	typist.locked = null
+	player.halt = false
+	player.unlock_look()
 	_rescue_cue.resolve()
 	_hide_door_label()
 	interior.enter(b, 0, true)
@@ -525,8 +533,9 @@ func _enter_safezone(b: BuildingData) -> void:
 	settlement.enter(b.id())
 	director.clear_room_zombies()
 	director.clear_street_zombies()
+	var restock := World.refresh_field_inventory(b.id())
 	loot_flyover.sync_backpack()
-	minimap.flash("safe zone: WASD move · B build · Tab travel/manage")
+	minimap.flash(restock if restock != "" else "safe zone: WASD move · B build · Tab travel/manage")
 	_refresh_hud()
 
 
@@ -645,8 +654,8 @@ func _safezone_floor(delta: int) -> String:
 func _use_carried_supply(item: String, healing: int, success_text: String) -> String:
 	if hp >= 100:
 		return "health is already full"
-	if not World.consume_backpack_item(item):
-		return "no " + item.replace("_", " ") + " in the backpack"
+	if not World.consume_field_supply(item):
+		return "no " + item.replace("_", " ") + " in the backpack or field kit"
 	hp = mini(100, hp + healing)
 	sfx.play("hit", -14.0, 0.04, 1.35)
 	return "%s — health %d" % [success_text, hp]
@@ -833,11 +842,12 @@ func _collect_room_rewards(ri: int, ticket: int, beat: float) -> void:
 		var prop: FloorPlan.Prop = props[0]
 		var bundle: Dictionary = PropLootRules.contents(interior.building.id(), prop)
 		var units_before := World.backpack_units()
+		var field_before := World.field_inventory.duplicate(true)
 		var origin := prop.pos + Vector3(0, maxf(prop.size.y * 0.72, 0.62), 0)
 		var result: String = interior.loot_prop(prop)
 		if not result.begins_with("searched"):
 			break
-		var flight := loot_flyover.fly_bundle(origin, bundle, units_before)
+		var flight := loot_flyover.fly_bundle(origin, bundle, units_before, field_before)
 		minimap.flash("collected " + PropLootRules.item_text(bundle))
 		_refresh_hud()
 		if flight > 0.0:
@@ -1135,6 +1145,7 @@ func _refresh_hud() -> void:
 			if loot_text != "":
 				lines.append("[color=#ffb86c]%s[/color]" % loot_text)
 			lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
+			lines.append("[color=#68d5ff]%s[/color]" % World.field_summary())
 		Mode.SAFEZONE:
 			_append_safezone_hud(lines)
 	var parts: Array[String] = []
@@ -1185,6 +1196,7 @@ func _append_safezone_hud(lines: Array[String]) -> void:
 			lines.append("[color=#ffb86c]%s[/color]" % dismantle_text)
 	lines.append("[color=#a6e3a1]%s[/color]" % World.material_summary())
 	lines.append("[color=#a6e3a1]%s[/color]" % World.backpack_summary())
+	lines.append("[color=#68d5ff]%s[/color]" % World.field_summary())
 	var stored_items: Dictionary = World.building_state(settlement.active_building_id).get("stored_items", {})
 	if not stored_items.is_empty():
 		lines.append("[color=#68d5ff]base stores · %s[/color]" % World.item_summary(stored_items))
