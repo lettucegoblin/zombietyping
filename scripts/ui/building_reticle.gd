@@ -12,16 +12,43 @@ var target_id := ""
 var target_label := ""
 
 var _font: Font
+var _mouse_idle := INF
+var _opacity := 0.0
+
+const MOUSE_HOLD_SECONDS := 1.15
+const MOUSE_FADE_SECONDS := 0.85
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_font = ThemeDB.fallback_font
+	visible = false
+	modulate.a = 0.0
 
 
-func _physics_process(_dt: float) -> void:
+## Called only from a real InputEventMouseMotion. Rail/camera steering never touches this,
+## so automatic travel cannot wake the inspection cursor merely by turning the view.
+func note_mouse_motion(relative: Vector2) -> void:
+	if relative.length_squared() <= 0.01:
+		return
+	_mouse_idle = 0.0
+	_opacity = 1.0
+	queue_redraw()
+
+
+func reticle_alpha() -> float:
+	return _opacity
+
+
+func _physics_process(dt: float) -> void:
+	_mouse_idle += dt
+	if _mouse_idle <= MOUSE_HOLD_SECONDS:
+		_opacity = 1.0
+	else:
+		_opacity = 1.0 - clampf((_mouse_idle - MOUSE_HOLD_SECONDS) / MOUSE_FADE_SECONDS, 0.0, 1.0)
+	modulate.a = _opacity
 	var outdoors: bool = game != null and int(game.mode) in [0, 1]
-	visible = outdoors and camera != null and player != null
+	visible = outdoors and camera != null and player != null and _opacity > 0.001
 	if not visible or not is_inside_tree():
 		_set_target("", "")
 		return

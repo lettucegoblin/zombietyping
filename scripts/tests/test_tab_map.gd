@@ -18,13 +18,19 @@ func _ready() -> void:
 	map.size = Vector2(1280, 720)
 	var player: Node3D = main.get_node("View/Viewport/World/Player")
 	var minimap: Control = main.get_node("UI/Minimap")
-	var reticle: Control = main.get_node("UI/BuildingReticle")
+	var reticle: BuildingReticle = main.get_node("UI/BuildingReticle")
 	_check(main._gameplay_mouse_look, "gameplay did not enable always-on mouse look")
+	reticle._physics_process(0.0)
+	_check(not reticle.visible and reticle.reticle_alpha() == 0.0,
+		"building cursor appeared before physical mouse movement")
 	var gameplay_facing: Vector3 = player.facing
 	var look_motion := InputEventMouseMotion.new()
 	look_motion.relative = Vector2(80, 0)
 	main._unhandled_input(look_motion)
 	_check(not player.facing.is_equal_approx(gameplay_facing), "unclicked gameplay mouse motion did not look")
+	reticle._physics_process(0.0)
+	_check(reticle.visible and reticle.reticle_alpha() == 1.0,
+		"physical mouse movement did not wake the building cursor")
 	main._toggle_map()
 	_check(map.visible and get_tree().paused, "Tab map did not open paused")
 	_check(Input.mouse_mode == Input.MOUSE_MODE_VISIBLE, "Tab map did not release its pointer")
@@ -63,6 +69,21 @@ func _ready() -> void:
 	_check(reticle_label != "" and minimap.labels.get(reticle_label, "") == aimed_id, "reticle address was not registered for HUD typing")
 	probe.queue_free()
 	await get_tree().physics_frame
+
+	reticle._physics_process(reticle.MOUSE_HOLD_SECONDS + reticle.MOUSE_FADE_SECONDS * 0.5)
+	_check(reticle.visible and reticle.reticle_alpha() > 0.0 and reticle.reticle_alpha() < 1.0,
+		"idle building id did not fade gradually")
+	reticle._physics_process(reticle.MOUSE_FADE_SECONDS)
+	_check(not reticle.visible and reticle.target_label == "", "idle building cursor did not finish fading")
+	# Manual look remains a valid wake-up while a rail leg is active.
+	player._cur = {"id": "mouse-test", "points": PackedVector3Array([
+		player.global_position, player.global_position + Vector3(1, 0, 0)]), "tiles": [], "speed": 1.0}
+	_check(player.is_moving(), "mouse-during-navigation fixture was not moving")
+	main._unhandled_input(look_motion)
+	reticle._physics_process(0.0)
+	_check(reticle.visible and reticle.reticle_alpha() == 1.0,
+		"physical mouse movement did not wake cursor during navigation")
+	player._cur.clear()
 
 	# Dense map labels nudge into non-overlapping slots instead of painting over one another.
 	var bounds := Rect2(Vector2.ZERO, Vector2(160, 100))

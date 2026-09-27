@@ -47,7 +47,7 @@ var _rescue_cue: SurvivorCue
 @onready var typist: Node = $Typist
 @onready var map: Control = $UI/TabMap
 @onready var minimap: Control = $UI/Minimap
-@onready var building_reticle: Control = $UI/BuildingReticle
+@onready var building_reticle: BuildingReticle = $UI/BuildingReticle
 @onready var sfx: Node = $Sfx
 @onready var ash: GPUParticles3D = $View/Viewport/World/Player/Ash
 @onready var sky: Node3D = $View/Viewport/World/SkyLife
@@ -194,6 +194,7 @@ func _process(dt: float) -> void:
 
 func _unhandled_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion and _gameplay_mouse_look and not map.visible and not pause_menu.visible:
+		building_reticle.note_mouse_motion(event.relative)
 		player.mouse_look(event.relative)
 		get_viewport().set_input_as_handled()
 		return
