@@ -66,6 +66,8 @@ func _ready() -> void:
 	streamer.target = player
 	streamer.prime(World.sector_of_tile(player.tile))
 	map.player = player
+	map.health_provider = func(): return hp
+	map.healing_requested.connect(_on_map_healing_requested)
 	sfx.player = player
 	sky.player = player
 	sky.sfx = sfx
@@ -185,6 +187,8 @@ func _process(dt: float) -> void:
 	sfx.footsteps(dt, player.current_speed())
 	sfx.atmosphere(dt)
 	ash.emitting = mode != Mode.INSIDE
+	if mode == Mode.SAFEZONE and interior.is_inside():
+		interior.update_safezone_doors(player.global_position, dt)
 	if Engine.get_process_frames() % 10 == 0:
 		_refresh_hud()
 
@@ -470,7 +474,7 @@ func _enter_safezone(b: BuildingData) -> void:
 	typist.enabled = false
 	_rescue_cue.resolve()
 	_hide_door_label()
-	interior.enter(b, 0)
+	interior.enter(b, 0, true)
 	interior.reveal_all()
 	# A claim can complete while the survivor is on an upper floor. Free roam currently
 	# represents the generated ground floor, so keep the existing X/Z position and land it.
@@ -531,7 +535,7 @@ func _safezone_floor(delta: int) -> String:
 	var next_floor: int = interior.plan.floor + delta
 	if next_floor < 0 or next_floor >= door_building.floors:
 		return "no storey in that direction"
-	interior.enter(door_building, next_floor)
+	interior.enter(door_building, next_floor, true)
 	interior.reveal_all()
 	if interior.plan.stair_room >= 0:
 		player.global_position = interior.plan.room_stand_world(interior.plan.stair_room) + Vector3(0, 0.05, 0)
@@ -550,6 +554,25 @@ func _use_carried_supply(item: String, healing: int, success_text: String) -> St
 	hp = mini(100, hp + healing)
 	sfx.play("hit", -14.0, 0.04, 1.35)
 	return "%s — health %d" % [success_text, hp]
+
+
+func _on_map_healing_requested(source: String, base_id: String) -> void:
+	var result := ""
+	if source == "carried":
+		result = _use_carried_supply("bandages", 30, "bandaged wounds")
+	elif source == "base":
+		if hp >= 100:
+			result = "health is already full"
+		elif mode != Mode.SAFEZONE or settlement.active_building_id != base_id:
+			result = "safehouse treatment requires being inside this base"
+		elif not World.consume_base_medicine(base_id):
+			result = "this safehouse has no bandages or medicine"
+		else:
+			hp = mini(100, hp + 60)
+			sfx.play("hit", -14.0, 0.04, 1.35)
+			result = "treated at the safehouse — health %d" % hp
+	map.flash(result)
+	_refresh_hud()
 
 
 func _show_door_label(word: String, pos: Vector3, visited := false) -> void:
@@ -642,7 +665,7 @@ func _face_arrival(ri: int) -> void:
 		for di in fp.rooms[ri].doors:
 			var d: FloorPlan.Door = fp.doors[di]
 			if d.b >= 0 and fp.other_room(di, ri) == target:
-				player.face_toward(d.pos)
+				player.guide_toward(interior.option_look_pos({ "kind": "door", "door": di }, player.global_position))
 				return
 	_face_room()
 
@@ -813,9 +836,9 @@ func _on_typing() -> void:
 			for o in interior.options():
 				var opt: Dictionary = o
 				if (opt["word"] as String).begins_with(typist.buffer):
-					var p: Vector3 = interior.option_pos(opt)
+					var p: Vector3 = interior.option_look_pos(opt, player.global_position)
 					if p != Vector3.INF:
-						player.face_toward(p)
+						player.guide_toward(p)
 					break
 
 

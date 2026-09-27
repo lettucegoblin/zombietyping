@@ -185,6 +185,10 @@ func _ready() -> void:
 	World.state[a.id()] = { "cleared": true, "claimed": true, "founders": 0, "citizens": 1, "resident_ids": [crew_id] }
 	map._on_submit("job %s medic" % crew_label)
 	_check(World.survivors[crew_id]["job"] == "medic", "typed building-menu job command did not assign the resident")
+	var healing := { "source": "", "base": "" }
+	map.healing_requested.connect(func(source, base_id): healing["source"] = source; healing["base"] = base_id)
+	map._on_submit("heal")
+	_check(healing["source"] == "carried", "Tab field-care command did not request a carried bandage")
 	World.state.erase(a.id())
 	World.survivors.clear()
 	map._show_all_buildings = false

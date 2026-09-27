@@ -10,6 +10,7 @@ const CAR_TEXTURES := [
 	preload("res://assets/sprites/vehicles/car_salvage_3.png"),
 	preload("res://assets/sprites/vehicles/car_salvage_4.png"),
 ]
+const CITIZEN_TEXTURE := preload("res://assets/sprites/survivor/citizen.png")
 const PROP_TEXTURES := {
 	"crate": preload("res://assets/sprites/props/crate.png"),
 	"bed": preload("res://assets/sprites/props/bed.png"),
@@ -454,6 +455,8 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	var base_state: Dictionary = World.state.get(b.id(), {})
 	var resident_ids: Array = base_state.get("resident_ids", [])
 	var resident_index := index - int(base_state.get("founders", 0))
+	var home_slot := index + 1
+	var schedule_offset := posmod(b.seed_hash + index * 11, int(World.WORK_CYCLE_SECONDS))
 	if resident_index >= 0 and resident_index < resident_ids.size():
 		var survivor_id: String = resident_ids[resident_index]
 		var survivor: Dictionary = World.survivors.get(survivor_id, {})
@@ -464,17 +467,18 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 			n.set_meta("survivor_name", survivor.get("name", ""))
 			n.set_meta("trait", survivor.get("trait", ""))
 			n.set_meta("job", survivor.get("job", "unassigned"))
-	var body := MeshInstance3D.new()
-	var bm := CapsuleMesh.new()
-	bm.radius = 0.27
-	bm.height = 1.05
-	var mat := StandardMaterial3D.new()
-	var cols := [Color("#ff6fb5"), Color("#68d5ff"), Color("#f6c177"), Color("#a6e3a1")]
-	mat.albedo_color = cols[posmod(b.seed_hash + index, cols.size())]
-	bm.material = mat
-	body.mesh = bm
-	body.position.y = 0.72
-	n.add_child(body)
+			home_slot = int(survivor.get("home_slot", home_slot))
+			schedule_offset = int(survivor.get("schedule_offset", schedule_offset))
+	var sprite := Sprite3D.new()
+	sprite.name = "Sprite"
+	sprite.texture = CITIZEN_TEXTURE
+	sprite.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
+	sprite.pixel_size = 0.015
+	sprite.shaded = false
+	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
+	sprite.position.y = 0.84
+	n.add_child(sprite)
 	var nav := _navigation_for(b)
 	var seed_value := b.seed_hash + index * 97
 	var remembered: Dictionary = _citizen_memory.get(citizen_key, {})
@@ -489,6 +493,10 @@ func _add_citizen(b: BuildingData, index: int) -> void:
 	n.set_meta("citizen_key", citizen_key)
 	n.set_meta("building_id", b.id())
 	n.set_meta("home_seed", seed_value)
+	n.set_meta("home_slot", home_slot)
+	n.set_meta("schedule_offset", schedule_offset)
+	n.set_meta("schedule", "")
+	n.set_meta("stride", float(posmod(seed_value, 100)) * 0.1)
 	n.set_meta("leg", leg)
 	_root.add_child(n)
 	_citizens.append(n)
@@ -522,33 +530,66 @@ func _assign_citizen_route(n: Node3D) -> void:
 		n.set_meta("path", PackedVector2Array())
 		return
 	var leg: int = n.get_meta("leg", 0)
-	var seed_value: int = n.get_meta("home_seed", 0)
 	var from := Vector2(n.position.x, n.position.z)
-	# A target can hash to the citizen's current cell. Advance deterministically until
-	# there is an actual walking leg, with a small bound for pathological one-cell yards.
-	for attempt in 8:
-		var target: Vector2 = nav.deterministic_point(seed_value, leg)
-		var path: PackedVector2Array = nav.route(from, target)
-		if path.size() > 1 or (path.size() == 1 and path[0].distance_to(from) > 0.15):
-			n.set_meta("leg", leg)
-			n.set_meta("path", path)
-			n.set_meta("path_index", 0)
-			return
-		leg += 1
+	var schedule := _citizen_schedule(n)
+	n.set_meta("schedule", schedule)
+	var target := _schedule_target(n, nav, schedule, leg)
+	var path: PackedVector2Array = nav.route(from, target)
 	n.set_meta("leg", leg)
-	n.set_meta("path", PackedVector2Array())
+	n.set_meta("path", path)
 	n.set_meta("path_index", 0)
+
+
+func _citizen_schedule(n: Node3D) -> String:
+	return World.survivor_schedule({ "schedule_offset": n.get_meta("schedule_offset", 0) })
+
+
+func _schedule_target(n: Node3D, nav: RefCounted, schedule: String, leg: int) -> Vector2:
+	var bid := str(n.get_meta("building_id", ""))
+	var b := World.building_by_id(bid)
+	var seed_value := int(n.get_meta("home_seed", 0))
+	if b == null:
+		return nav.deterministic_point(seed_value, leg)
+	if schedule == "home":
+		var entrance := InteriorGen.entrance_position(b, InteriorGen.footprint(b))
+		var out := Vector2(b.road_tile - b.door_tile).normalized()
+		var side := Vector2(-out.y, out.x) * (float(int(n.get_meta("home_slot", 1)) % 3) - 1.0) * 0.55
+		return nav.nearest_walkable(Vector2(entrance.x, entrance.z) + out * 1.35 + side)
+	if schedule == "work":
+		var job := str(n.get_meta("job", ""))
+		var candidates: Array[Dictionary] = []
+		for item in World.placements:
+			if item.get("building", "") != bid:
+				continue
+			if job == "farmer" and item.get("kind", "") != "farm":
+				continue
+			candidates.append(item)
+		if not candidates.is_empty():
+			var item: Dictionary = candidates[posmod(seed_value + leg, candidates.size())]
+			var pos: Vector3 = item.get("pos", Vector3.ZERO)
+			var angle := float(posmod(seed_value + leg * 47, 360)) * PI / 180.0
+			return nav.nearest_walkable(Vector2(pos.x, pos.z) + Vector2(cos(angle), sin(angle)) * 1.25)
+	if schedule == "community":
+		var centre := World.safe_rect_world(b).get_center()
+		var angle := float(posmod(seed_value, 360)) * PI / 180.0
+		return nav.nearest_walkable(centre + Vector2(cos(angle), sin(angle)) * 3.0)
+	return nav.deterministic_point(seed_value, leg)
 
 
 func _move_citizens(dt: float) -> void:
 	for n in _citizens:
 		if not is_instance_valid(n):
 			continue
+		var schedule := _citizen_schedule(n)
+		if schedule != str(n.get_meta("schedule", "")):
+			_assign_citizen_route(n)
 		var path: PackedVector2Array = n.get_meta("path", PackedVector2Array())
 		var path_index: int = n.get_meta("path_index", 0)
 		if path.is_empty() or path_index >= path.size():
-			n.set_meta("leg", int(n.get_meta("leg", 0)) + 1)
-			_assign_citizen_route(n)
+			if schedule != "home":
+				n.set_meta("leg", int(n.get_meta("leg", 0)) + 1)
+				_assign_citizen_route(n)
+			_animate_citizen(n, dt, false)
 			continue
 		var target2 := path[path_index]
 		var target := Vector3(target2.x, 0.0, target2.y)
@@ -559,6 +600,17 @@ func _move_citizens(dt: float) -> void:
 		else:
 			n.position += delta.normalized() * minf(delta.length(), dt * 0.75)
 			n.rotation.y = atan2(delta.x, delta.z)
+		_animate_citizen(n, dt, delta.length() >= 0.08)
+
+
+func _animate_citizen(n: Node3D, dt: float, moving: bool) -> void:
+	var sprite: Sprite3D = n.get_node_or_null("Sprite")
+	if sprite == null:
+		return
+	var stride := float(n.get_meta("stride", 0.0)) + dt * (7.0 if moving else 1.5)
+	n.set_meta("stride", stride)
+	sprite.position.y = 0.84 + sin(stride) * (0.035 if moving else 0.012)
+	sprite.rotation.z = sin(stride * 0.5) * (0.025 if moving else 0.01)
 
 
 func _add_placement(item: Dictionary) -> void:

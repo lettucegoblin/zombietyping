@@ -8,6 +8,7 @@ extends Control
 signal destinations_typed(ids: Array[String])
 signal clear_requested
 signal closed
+signal healing_requested(source: String, base_id: String)
 
 const S := SectorData.SIZE
 const BAND_TILES := 6
@@ -34,6 +35,7 @@ const NAME_SUFFIXES := {
 }
 
 var player: Node3D
+var health_provider: Callable
 var _center := Vector2.ZERO          # view centre, tile coords
 var _ppt := 10.0                      # pixels per tile
 var _base_tex: Dictionary = {}        # Vector2i -> ImageTexture
@@ -203,6 +205,9 @@ func _on_submit(text: String) -> void:
 		clear_requested.emit()
 		flash("queue cleared")
 		return
+	if tokens[0] in ["heal", "bandage"]:
+		healing_requested.emit("carried", "")
+		return
 	if tokens[0] == "job":
 		if tokens.size() < 3 or not _labels.has(tokens[1]):
 			flash("use job <label> farmer|scavenger|builder|mechanic|medic")
@@ -242,6 +247,12 @@ func _toggle_label_detail() -> void:
 
 
 func _run_settlement_action(action: String) -> void:
+	if action == "heal_carried":
+		healing_requested.emit("carried", "")
+		return
+	if action == "heal_base":
+		healing_requested.emit("base", _selected_id)
+		return
 	var message := World.settlement_action(action, _selected_id)
 	if action == "supply" and message.begins_with("supply line established"):
 		message = _new_supply_message(_selected_id)
@@ -824,6 +835,19 @@ func _draw_building_panel(font: Font) -> void:
 	for line in _wrap_text(World.backpack_summary(), 42):
 		draw_string(font, Vector2(x, y), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ffb86c"))
 		y += 15.0
+	var hp := 100
+	if health_provider.is_valid():
+		hp = clampi(int(health_provider.call()), 0, 100)
+	draw_string(font, Vector2(x, y), "FIELD CARE  ·  HP %d/100" % hp, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color("#ff6f91") if hp < 60 else Color("#a6e3a1"))
+	y += 16.0
+	var bandages := int(World.backpack.get("bandages", 0))
+	var heal_rect := Rect2(Vector2(x, y), Vector2(pr.size.x - 32.0, 32.0))
+	draw_rect(heal_rect, Color("#30263f") if hp < 100 and bandages > 0 else Color("#211b2b"))
+	draw_rect(heal_rect, Color("#8067a8"), false, 1.0)
+	draw_string(font, heal_rect.position + Vector2(9, 20), "Use carried bandage  +30 HP  ·  %d left" % bandages, HORIZONTAL_ALIGNMENT_LEFT, -1, 11, Color.WHITE if hp < 100 and bandages > 0 else Color("#756b80"))
+	if hp < 100 and bandages > 0:
+		_action_hitboxes.append({ "rect": heal_rect, "action": "heal_carried" })
+	y += 40.0
 	if _selected_id == "":
 		y += 18.0
 		draw_string(font, Vector2(x, y), "Click a priority label to inspect it.", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, Color("#dddddd"))
@@ -879,7 +903,9 @@ func _draw_building_panel(font: Font) -> void:
 				var person: Dictionary = residents[i]
 				var condition := World.survivor_condition(person)
 				var condition_color := Color("#a6e3a1") if condition in ["happy", "thriving"] else (Color("#f6c177") if condition == "recovering" else Color("#ded8e8"))
-				draw_string(font, Vector2(x, y), "%s · %s → %s · %s" % [person.get("name", "survivor"), person.get("trait", ""), person.get("job", "unassigned"), condition], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, condition_color)
+				var home := "home %02d" % int(person.get("home_slot", i + 1))
+				var schedule := World.survivor_schedule(person)
+				draw_string(font, Vector2(x, y), "%s · %s → %s · %s · %s" % [person.get("name", "survivor"), person.get("trait", ""), person.get("job", "unassigned"), home, schedule], HORIZONTAL_ALIGNMENT_LEFT, pr.size.x - 32.0, 10, condition_color)
 				y += 15.0
 		var needs: Dictionary = st.get("needs", {})
 		if not needs.is_empty():
@@ -918,6 +944,7 @@ func _draw_building_panel(font: Font) -> void:
 	if not st.get("claimed", false):
 		rows.append({ "action": "claim", "label": "Claim building", "cost": World.cost_text(World.claim_cost(b)) })
 	else:
+		rows.push_front({ "action": "heal_base", "label": "Receive safehouse treatment", "cost": "%d treatment%s available · must be here" % [World.base_medicine_count(_selected_id), "" if World.base_medicine_count(_selected_id) == 1 else "s"] })
 		if int(profile.get("upgrade_level", 0)) < FacilityUpgradeRules.MAX_LEVEL:
 			rows.append({ "action": "upgrade", "label": "Upgrade %s to level %d" % [profile["role_label"], int(profile.get("upgrade_level", 0)) + 1], "cost": World.cost_text(World.facility_upgrade_cost(_selected_id)) })
 		if not (st.get("resident_ids", []) as Array).is_empty():

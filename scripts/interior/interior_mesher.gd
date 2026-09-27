@@ -501,36 +501,38 @@ static func build_door_leaf(d: FloorPlan.Door, is_open: bool, col_a := Color.WHI
 	root.set_meta("open", is_open)
 	if is_open:
 		return root    # an already-kicked door is simply gone
+	var swing := Node3D.new()
+	swing.name = "Swing"
+	swing.position.x = -DOOR_W * 0.5
+	root.add_child(swing)
 	var fill := MeshInstance3D.new()
 	fill.name = "Fill"
 	var fst := SurfaceTool.new()
 	fst.begin(Mesh.PRIMITIVE_TRIANGLES)
-	var hw := DOOR_W * 0.5 + 0.03
+	var width := DOOR_W + 0.06
 	var hh := DOOR_H + 0.03
-	# each backing sits just BEHIND the leaf as seen from its own room (room a looks
-	# along -z at the door, so its backing is at -z, facing +z)
-	SectorMesher._quad(fst, Vector3(-hw, -0.05, -0.012), Vector3(hw, -0.05, -0.012), Vector3(hw, hh, -0.012), Vector3(-hw, hh, -0.012), Vector3(0, 0, 1), col_a.darkened(0.12))
-	SectorMesher._quad(fst, Vector3(-hw, -0.05, 0.012), Vector3(hw, -0.05, 0.012), Vector3(hw, hh, 0.012), Vector3(-hw, hh, 0.012), Vector3(0, 0, -1), col_b.darkened(0.12))
+	# The pivot is on the left jamb, so leaf-local x runs from 0 to the full width.
+	# Both opaque backings move with the leaf instead of lingering across an open doorway.
+	SectorMesher._quad(fst, Vector3(-0.03, -0.05, -0.012), Vector3(width, -0.05, -0.012), Vector3(width, hh, -0.012), Vector3(-0.03, hh, -0.012), Vector3(0, 0, 1), col_a.darkened(0.12))
+	SectorMesher._quad(fst, Vector3(-0.03, -0.05, 0.012), Vector3(width, -0.05, 0.012), Vector3(width, hh, 0.012), Vector3(-0.03, hh, 0.012), Vector3(0, 0, -1), col_b.darkened(0.12))
 	fill.mesh = fst.commit()
 	fill.material_override = SectorMesher.flat_material()
-	root.add_child(fill)
+	swing.add_child(fill)
 	var leaf := MeshInstance3D.new()
 	leaf.name = "Leaf"
-	var qm := QuadMesh.new()
-	qm.size = Vector2(DOOR_W, DOOR_H)
-	leaf.mesh = qm
+	leaf.mesh = SectorMesher.door_leaf_mesh()
 	leaf.material_override = door_material()
-	leaf.position = Vector3(0, DOOR_H * 0.5, 0)
-	root.add_child(leaf)
+	leaf.position = Vector3(DOOR_W * 0.5, DOOR_H * 0.5, 0)
+	swing.add_child(leaf)
 	var body := StaticBody3D.new()
 	body.name = "Block"
 	var cs := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(DOOR_W, DOOR_H, 0.08)
 	cs.shape = box
-	cs.position = Vector3(0, DOOR_H * 0.5, 0)
+	cs.position = Vector3(DOOR_W * 0.5, DOOR_H * 0.5, 0)
 	body.add_child(cs)
-	root.add_child(body)
+	swing.add_child(body)
 	return root
 
 
@@ -541,13 +543,14 @@ static func kick_in(hinge: Node3D, d: FloorPlan.Door, from_room: int) -> void:
 	if hinge.get_meta("open", false):
 		return
 	hinge.set_meta("open", true)
-	var block := hinge.get_node_or_null("Block")
+	var swing := hinge.get_node_or_null("Swing")
+	var block := hinge.get_node_or_null("Swing/Block")
 	if block != null:
 		block.queue_free()
-	var fill := hinge.get_node_or_null("Fill")
+	var fill := hinge.get_node_or_null("Swing/Fill")
 	if fill != null:
 		fill.queue_free()
-	var leaf: MeshInstance3D = hinge.get_node_or_null("Leaf")
+	var leaf: MeshInstance3D = hinge.get_node_or_null("Swing/Leaf")
 	if leaf == null:
 		return
 	# fly AWAY from the kicker: local +z faces room a, so from room a the leaf goes -z
@@ -555,7 +558,20 @@ static func kick_in(hinge: Node3D, d: FloorPlan.Door, from_room: int) -> void:
 	var away := hinge.global_transform.basis * away_local
 	var start := leaf.global_transform
 	leaf.queue_free()
+	if swing != null:
+		swing.queue_free()
 	_fling(hinge.get_parent(), start, away, DOOR_W, DOOR_H)
+
+
+## Animate a claimed-building door around its jamb. Its collider is a child of the same
+## pivot, so the visual and walkable openings cannot drift apart.
+static func set_safezone_swing(hinge: Node3D, amount: float, direction: float) -> void:
+	var swing: Node3D = hinge.get_node_or_null("Swing")
+	if swing == null:
+		return
+	swing.rotation.y = clampf(amount, 0.0, 1.0) * deg_to_rad(92.0) * direction
+	hinge.set_meta("swing_amount", amount)
+	hinge.set_meta("swing_direction", direction)
 
 
 ## Facade door: same fling, inward off the street.

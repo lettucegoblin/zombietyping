@@ -71,6 +71,13 @@ func _ready() -> void:
 	World.survivors.clear()
 	_check(World.restore_snapshot(snapshot), "needs snapshot could not be restored")
 	_check(int(World.survivors[sid].get("hunger", 0)) == 75 and World.building_state(b.id()).has("needs"), "save lost resident or base wellbeing")
+	var resident: Dictionary = World.resident_records(b.id())[0]
+	_check(resident.get("home_id", "") == b.id() and int(resident.get("home_slot", 0)) > 0, "older resident state did not migrate to a persistent home")
+	World.building_state(b.id())["stored_items"] = { "bandages": 1 }
+	_check(World.consume_base_medicine(b.id()), "safehouse care could not consume stored bandages")
+	_check(not (World.building_state(b.id())["stored_items"] as Dictionary).has("bandages"), "safehouse care did not spend its treatment")
+	World.materials["medicine"] = 1
+	_check(World.consume_base_medicine(b.id()) and int(World.materials.get("medicine", 0)) == 0, "networked safehouse care could not consume settlement medicine")
 	if not _failed:
 		print("SURVIVOR NEEDS OK  ", World.building_state(b.id())["needs"])
 	get_tree().quit(1 if _failed else 0)

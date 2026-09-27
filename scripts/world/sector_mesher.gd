@@ -9,6 +9,7 @@ const S := SectorData.SIZE
 static var _mat: ShaderMaterial
 static var _flat: ShaderMaterial
 static var _door_leaf_mat: StandardMaterial3D
+static var _door_leaf_mesh: ArrayMesh
 ## building id -> {mmi: MultiMeshInstance3D, idx: int} for the facade door leaves of loaded sectors
 static var door_instances: Dictionary = {}
 ## building id -> {mmi, idx} for the dark vestibule behind each facade door (hidden while
@@ -214,9 +215,7 @@ static func _finish_buildings(root: Node3D, sd: SectorData, bt: SurfaceTool) -> 
 	# facade door leaves: one MultiMesh per sector; a kicked door's instance is collapsed
 	var mm := MultiMesh.new()
 	mm.transform_format = MultiMesh.TRANSFORM_3D
-	var qm := QuadMesh.new()
-	qm.size = Vector2(DOOR_W, DOOR_H)
-	mm.mesh = qm
+	mm.mesh = door_leaf_mesh()
 	mm.instance_count = sd.buildings.size()
 	var mmi := MultiMeshInstance3D.new()
 	mmi.name = "DoorLeaves"
@@ -451,6 +450,35 @@ static func door_leaf_material() -> StandardMaterial3D:
 	return _door_leaf_mat
 
 
+## The source art has a two-pixel transparent safety border. Crop only that border in UV
+## space so the painted leaf fills the generated opening without making transparency opaque.
+static func door_leaf_mesh() -> ArrayMesh:
+	if _door_leaf_mesh != null:
+		return _door_leaf_mesh
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hw := DOOR_W * 0.5
+	var hh := DOOR_H * 0.5
+	var u0 := 2.0 / 32.0
+	var u1 := 30.0 / 32.0
+	var v0 := 2.0 / 56.0
+	var v1 := 54.0 / 56.0
+	var points := [
+		[Vector3(-hw, -hh, 0), Vector2(u0, v1)],
+		[Vector3(hw, hh, 0), Vector2(u1, v0)],
+		[Vector3(hw, -hh, 0), Vector2(u1, v1)],
+		[Vector3(-hw, -hh, 0), Vector2(u0, v1)],
+		[Vector3(-hw, hh, 0), Vector2(u0, v0)],
+		[Vector3(hw, hh, 0), Vector2(u1, v0)],
+	]
+	for point in points:
+		st.set_normal(Vector3(0, 0, 1))
+		st.set_uv(point[1])
+		st.add_vertex(point[0])
+	_door_leaf_mesh = st.commit()
+	return _door_leaf_mesh
+
+
 ## World transform of a building's facade door leaf: a quad in the opening, facing the
 ## street (local +z = out). `y` is the quad centre height; pass 0.0 for ground-anchored meshes.
 static func door_leaf_transform(b: BuildingData, y: float = DOOR_H * 0.5) -> Transform3D:
@@ -476,6 +504,22 @@ static func kick_facade_door(bid: String) -> void:
 	var mmi: MultiMeshInstance3D = e["mmi"]
 	if is_instance_valid(mmi):
 		mmi.multimesh.set_instance_transform(e["idx"], Transform3D().scaled(Vector3.ZERO))
+
+
+## Claimed interiors own an animated hinged entrance while they are loaded. Hide the
+## batched street leaf temporarily, then restore its persisted state on exit.
+static func set_facade_door_hidden(bid: String, hidden: bool) -> void:
+	var e: Dictionary = door_instances.get(bid, {})
+	if e.is_empty():
+		return
+	var mmi: MultiMeshInstance3D = e["mmi"]
+	if not is_instance_valid(mmi):
+		return
+	var b := World.building_by_id(bid)
+	if b == null:
+		return
+	var kicked := bool(World.state.get(bid, {}).get("door_kicked", false))
+	mmi.multimesh.set_instance_transform(e["idx"], Transform3D().scaled(Vector3.ZERO) if hidden or kicked else door_leaf_transform(b))
 
 
 ## Quad mapped to a sprite stored in an atlas cell (uv 0..uv_max within the cell).

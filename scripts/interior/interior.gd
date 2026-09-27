@@ -15,19 +15,23 @@ var _door_nodes: Dictionary = {}    # di -> Node3D (leaf on its hinge)
 var _old_floor: Node3D              # previous storey kept alive during a stair climb
 var _floor_plans: Dictionary = {}   # floor -> immutable FloorPlan while this building is active
 var _total_rooms := -1
+var safezone_mode := false
 
 
 func is_inside() -> bool:
 	return plan != null
 
 
-func enter(b: BuildingData, floor: int) -> void:
+func enter(b: BuildingData, floor: int, as_safezone := false) -> void:
 	unload()
 	building = b
+	safezone_mode = as_safezone
 	plan = _plan_for_floor(floor)
 	current_room = -1
 	_set_own_collider(false)
 	SectorMesher.set_doorway_open(b.id(), true)
+	if safezone_mode:
+		SectorMesher.set_facade_door_hidden(b.id(), true)
 	_build_all()
 
 
@@ -38,6 +42,31 @@ func reveal_all() -> void:
 		return
 	for ri in plan.rooms.size():
 		_reveal(ri)
+
+
+## Claimed interiors keep intact hinged doors. They open before the survivor reaches the
+## threshold and close after a generous hysteresis band, avoiding both collision snags and
+## rapid flapping when somebody pauses in a doorway.
+func update_safezone_doors(player_pos: Vector3, dt: float) -> void:
+	if not safezone_mode or plan == null:
+		return
+	for di in _door_nodes:
+		var hinge: Node3D = _door_nodes[di]
+		if not is_instance_valid(hinge) or not hinge.has_node("Swing"):
+			continue
+		var distance := Vector2(hinge.global_position.x - player_pos.x, hinge.global_position.z - player_pos.z).length()
+		var amount := float(hinge.get_meta("swing_amount", 0.0))
+		var opening := bool(hinge.get_meta("swing_open", false))
+		if distance < 2.15:
+			opening = true
+		elif distance > 3.0:
+			opening = false
+		if opening and amount < 0.01:
+			var local_player := hinge.to_local(player_pos)
+			hinge.set_meta("swing_direction", -1.0 if local_player.z >= 0.0 else 1.0)
+		hinge.set_meta("swing_open", opening)
+		amount = move_toward(amount, 1.0 if opening else 0.0, dt * 2.8)
+		InteriorMesher.set_safezone_swing(hinge, amount, float(hinge.get_meta("swing_direction", 1.0)))
 
 
 func nearest_salvageable_prop(world_pos: Vector3, max_distance: float = 3.4) -> FloorPlan.Prop:
@@ -334,6 +363,8 @@ func unload() -> void:
 	_set_own_collider(true)
 	if building != null:
 		SectorMesher.set_doorway_open(building.id(), false)
+		if safezone_mode:
+			SectorMesher.set_facade_door_hidden(building.id(), false)
 	# Stop television emitters synchronously before their room nodes are deferred for free.
 	# This prevents even a one-frame tail from following the player back onto the street.
 	for child in find_children("*", "AudioStreamPlayer3D", true, false):
@@ -351,6 +382,7 @@ func unload() -> void:
 	plan = null
 	building = null
 	current_room = -1
+	safezone_mode = false
 
 
 # ------------------------------------------------------------------ state
@@ -498,9 +530,10 @@ func _rebuild(ri: int, include_furnishings := true) -> void:
 	# door leaves are shared between two rooms: build once per floor
 	for di in plan.rooms[ri].doors:
 		var d := plan.doors[di]
-		if d.b < 0 or d.open_always or _door_nodes.has(di):
+		if (d.b < 0 and not safezone_mode) or d.open_always or _door_nodes.has(di):
 			continue
-		var leaf := InteriorMesher.build_door_leaf(d, is_door_open(d), InteriorMesher.wall_color(building, d.a), InteriorMesher.wall_color(building, d.b))
+		var other_col := InteriorMesher.wall_color(building, d.b) if d.b >= 0 else InteriorMesher.wall_color(building, d.a)
+		var leaf := InteriorMesher.build_door_leaf(d, false if safezone_mode else is_door_open(d), InteriorMesher.wall_color(building, d.a), other_col)
 		add_child(leaf)
 		_door_nodes[di] = leaf
 
@@ -704,19 +737,18 @@ func option_pos(opt: Dictionary) -> Vector3:
 	return Vector3.INF
 
 
-## If the player is nearly on a doorway plane, looking at its centre has no stable
-## horizontal direction. Aim a short distance through it so tiny rooms still produce a
-## decisive camera heading toward the yellow route marker.
+## Aim through a doorway instead of at its plane. A centre-point target becomes ambiguous
+## not only when the survivor is very close, but also at shallow angles where the wall can
+## occupy the centre ray. The point beyond the threshold stays unambiguous at every range.
 func option_look_pos(opt: Dictionary, viewer_pos: Vector3) -> Vector3:
 	var p := option_pos(opt)
 	if p == Vector3.INF or opt.get("kind", "") not in ["door", "exit"]:
 		return p
-	var flat := Vector2(p.x - viewer_pos.x, p.z - viewer_pos.z)
-	if flat.length() >= 0.55:
-		return p
 	var door := plan.doors[int(opt["door"])]
 	var through := Vector2(door.dir) if door.a == current_room else -Vector2(door.dir)
-	return p + Vector3(through.x, 0, through.y) * 0.9
+	var distance := Vector2(p.x - viewer_pos.x, p.z - viewer_pos.z).length()
+	var depth := clampf(distance * 0.22, 1.05, 1.55)
+	return p + Vector3(through.x, 0, through.y) * depth + Vector3(0, 1.25, 0)
 
 
 func _loot_prop_by_id(id: String) -> FloorPlan.Prop:

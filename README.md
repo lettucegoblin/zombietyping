@@ -37,8 +37,8 @@ than another upkeep timer.
 - Type-to-travel navigation, physical door breaches, line-of-sight combat, and readable
   route guidance through cleared and unexplored spaces.
 - Stable building addresses shared by the world view, minimap, and full map.
-- Persistent salvage, vehicle teardown, walls, farms, furnishings, survivors, jobs, supply
-  links, and safe-zone expansion.
+- Persistent salvage, vehicle teardown, walls, farms, furnishings, resident homes and
+  schedules, jobs, supply links, safe-zone expansion, and resource-backed healing.
 - A forced 21-colour comic palette, directional character animation, positional sound, and a
   dynamic audio mixer.
 
@@ -48,7 +48,7 @@ than another upkeep timer.
 |---|---|
 | Type the visible word | Travel, interact, open a door, loot, or attack |
 | Mouse | Look around in first person |
-| `Tab` | Pause and open the city/building map |
+| `Tab` | Pause, open the city/building map, and use field or safehouse care |
 | `Esc` | Pause and open settings |
 | `WASD` | Move freely inside a claimed safe zone |
 
@@ -257,8 +257,10 @@ Eligible uncleared buildings also receive a deterministic named survivor in a se
 The room/floor route takes priority over irrelevant cleared branches, the survivor emits a
 distance-filtered directional knock from their exact generated location, and `help` becomes
 typeable only after their room is safe. Rescues persist in a pending roster until a base is
-claimed, then become named citizens at the nearest claimed base. Only the first base gets a
-single founder automatically; later settlement population comes from rescues.
+claimed, then become named citizens at the nearest claimed base. Citizens use full survivor
+sprites, receive persistent homes, and follow deterministic home, work, community, and patrol
+schedules around obstacle-aware safe zones. Only the first base gets a single founder
+automatically; later settlement population comes from rescues.
 
 The Tab building panel derives each site's role and beds/storage/water/power/comfort capacity
 from its complete procedural room program and still-intact generated props. Dismantled prop
@@ -287,6 +289,12 @@ stores, while a cut-off outpost can use only its own stockpile. People always re
 contributing: meals, medicine, comfort, and high morale grant positive productivity bonuses
 instead of turning the settlement into an upkeep timer. The Tab building panel reports each
 base's wellbeing and each named resident's condition; all progress persists.
+
+The Tab map also exposes immediate care without adding another twitch control: carried
+bandages provide field healing, while a selected safehouse can treat the player from its
+stored or connected medical supply when the player is physically inside that safe zone.
+Safe-zone entrance doors fill their frames and swing open automatically as the player
+approaches, then close after the player moves clear.
 
 Fortified perimeters combine building materials with zombie matter. They are permanent safe
 ground: outdoor zombies cannot spawn or remain inside them, and they never decay or trigger

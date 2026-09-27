@@ -58,7 +58,12 @@ func _run() -> void:
 
 	# A settlement rebuild used to respawn every citizen at the building centre. Preserve
 	# their exact walkable position across unrelated material/state redraws instead.
-	World.state[b.id()] = { "fortified": true, "claimed": true, "citizens": 1 }
+	var resident_id := "nav-test-resident"
+	World.survivors[resident_id] = {
+		"id": resident_id, "name": "Mara", "trait": "builder", "job": "builder",
+		"base_id": b.id(), "home_id": b.id(), "home_slot": 3, "schedule_offset": 0,
+	}
+	World.state[b.id()] = { "fortified": true, "claimed": true, "citizens": 1, "founders": 0, "resident_ids": [resident_id] }
 	var settlement := Settlement.new()
 	add_child(settlement)
 	settlement._rebuild(b.sector)
@@ -66,6 +71,12 @@ func _run() -> void:
 		_fail("test settlement did not generate its citizen")
 		return
 	var citizen: Node3D = settlement._citizens[0]
+	if not (citizen.get_node_or_null("Sprite") is Sprite3D):
+		_fail("resident still uses placeholder geometry instead of a pixel person")
+		return
+	if int(citizen.get_meta("home_slot", -1)) != 3 or str(citizen.get_meta("schedule", "")) == "":
+		_fail("resident home or schedule metadata was not applied")
+		return
 	citizen.position = Vector3(start.x, 0.0, start.y)
 	var before := citizen.position
 	settlement._rebuild(b.sector)
@@ -82,6 +93,7 @@ func _run() -> void:
 			return
 
 	print("CITIZEN NAVIGATION OK  corners=", path.size())
+	World.survivors.erase(resident_id)
 	get_tree().quit(0)
 
 

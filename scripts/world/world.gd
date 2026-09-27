@@ -575,6 +575,14 @@ func _with_survivor_needs(record: Dictionary) -> Dictionary:
 		person["wellbeing"] = 45 + posmod(floori(float(roll) / 44892.0), 26)
 	if not person.has("injured"):
 		person["injured"] = int(person["health"]) < 64
+	var base_id := str(person.get("base_id", ""))
+	if base_id != "":
+		if not person.has("home_id"):
+			person["home_id"] = base_id
+		if not person.has("home_slot"):
+			person["home_slot"] = 1 + posmod(roll, 12)
+		if not person.has("schedule_offset"):
+			person["schedule_offset"] = posmod(floori(float(roll) / 97.0), int(WORK_CYCLE_SECONDS))
 	return person
 
 
@@ -586,6 +594,17 @@ func survivor_condition(person: Dictionary) -> String:
 	if int(person.get("morale", 60)) >= 75:
 		return "happy"
 	return "steady"
+
+
+func survivor_schedule(person: Dictionary) -> String:
+	var phase := fmod(settlement_work_seconds + float(person.get("schedule_offset", 0)), WORK_CYCLE_SECONDS) / WORK_CYCLE_SECONDS
+	if phase < 0.22:
+		return "home"
+	if phase < 0.58:
+		return "work"
+	if phase < 0.78:
+		return "community"
+	return "patrol"
 
 func rescue_eligible(b: BuildingData) -> bool:
 	# Eligibility is seed-derived rather than rolled on entry, so reloading or approaching
@@ -678,6 +697,7 @@ func _assign_survivor_to_base(survivor_id: String, base_id: String) -> void:
 		return
 	survivor["status"] = "assigned"
 	survivor["base_id"] = base_id
+	survivor["home_id"] = base_id
 	survivors[survivor_id] = survivor
 	var base_state := building_state(base_id)
 	var residents: Array = base_state.get("resident_ids", [])
@@ -685,6 +705,11 @@ func _assign_survivor_to_base(survivor_id: String, base_id: String) -> void:
 		residents.append(survivor_id)
 		base_state["resident_ids"] = residents
 		base_state["citizens"] = int(base_state.get("citizens", 0)) + 1
+	survivor["home_slot"] = residents.find(survivor_id) + int(base_state.get("founders", 0)) + 1
+	if not survivor.has("schedule_offset"):
+		var home_roll := Det.h3(seed, survivor_id.hash(), base_id.hash(), int(survivor["home_slot"]), 1402)
+		survivor["schedule_offset"] = posmod(home_roll, int(WORK_CYCLE_SECONDS))
+	survivors[survivor_id] = survivor
 	if str(survivor.get("job", "")) == "":
 		var base: BuildingData = building_by_id(base_id)
 		if base != null:
@@ -742,6 +767,44 @@ func resident_records(id: String) -> Array[Dictionary]:
 			survivors[str(survivor_id)] = person
 			out.append(person.duplicate(true))
 	return out
+
+
+## Spend one treatment from the selected base. Stored bandages are used first, then the
+## connected settlement medicine pool (or the base's isolated local stockpile).
+func consume_base_medicine(id: String) -> bool:
+	var st := building_state(id)
+	if not st.get("claimed", false):
+		return false
+	var stored: Dictionary = (st.get("stored_items", {}) as Dictionary).duplicate()
+	if _take_units(stored, "bandages", 1) > 0:
+		st["stored_items"] = stored
+		state_changed.emit(id)
+		settlement_changed.emit()
+		return true
+	var connected := networked_base_ids().has(id)
+	var pool: Dictionary = materials if connected else (st.get("local_stockpile", {}) as Dictionary).duplicate()
+	if _take_units(pool, "medicine", 1) <= 0:
+		return false
+	if connected:
+		materials_changed.emit()
+	else:
+		st["local_stockpile"] = pool
+		state_changed.emit(id)
+	settlement_changed.emit()
+	return true
+
+
+func base_medicine_count(id: String) -> int:
+	var st := building_state(id)
+	if not st.get("claimed", false):
+		return 0
+	var stored: Dictionary = st.get("stored_items", {})
+	var count := int(stored.get("bandages", 0))
+	if networked_base_ids().has(id):
+		count += int(materials.get("medicine", 0))
+	else:
+		count += int((st.get("local_stockpile", {}) as Dictionary).get("medicine", 0))
+	return count
 
 
 func auto_assign_jobs(id: String) -> String:
