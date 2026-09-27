@@ -1,4 +1,4 @@
-[gd_scene load_steps=24 format=3]
+[gd_scene load_steps=25 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/streamer.gd" id="2_streamer"]
@@ -18,6 +18,7 @@
 [ext_resource type="Script" path="res://scripts/settings/game_settings.gd" id="16_settings"]
 [ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="17_pause"]
 [ext_resource type="Script" path="res://scripts/ui/loot_flyover.gd" id="18_loot"]
+[ext_resource type="Script" path="res://scripts/ui/mode_hint.gd" id="19_mode_hint"]
 
 [sub_resource type="ShaderMaterial" id="post_mat"]
 shader = ExtResource("7_post")
@@ -186,6 +187,15 @@ mouse_filter = 2
 script = ExtResource("9_words")
 view_container = NodePath("../../View")
 viewport = NodePath("../../View/Viewport")
+
+[node name="ModeHint" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("19_mode_hint")
 
 [node name="Flash" type="ColorRect" parent="UI"]
 anchors_preset = 15

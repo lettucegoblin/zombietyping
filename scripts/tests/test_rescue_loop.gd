@@ -162,6 +162,20 @@ func _run() -> void:
 	if not spoken.contains(str(mission["name"])) or not spoken.contains("\""):
 		_fail("assigned rescue could not speak in the safezone: %s" % spoken)
 		return
+	if not main.settlement.last_interaction_world \
+			or not (resident_node.get_node_or_null("SpeechBubble") is Label3D):
+		_fail("resident dialogue was not attached above the speaking character")
+		return
+	main.mode = 3 # Main.Mode.SAFEZONE
+	main.player.global_position = resident_node.global_position
+	main.minimap._msg = "dialogue must not use the minimap"
+	var talk_key := InputEventKey.new()
+	talk_key.pressed = true
+	talk_key.keycode = KEY_T
+	main._unhandled_input(talk_key)
+	if main.minimap._msg != "dialogue must not use the minimap":
+		_fail("character dialogue was also copied into the minimap status line")
+		return
 
 	print("RESCUE LOOP OK  ", mission["name"], " / ", mission["trait"], " / floor ", int(mission["floor"]) + 1, " ", mission["room_kind"])
 	get_tree().quit(0)

@@ -99,7 +99,9 @@ func _draw() -> void:
 				y = (tip.y - s * 1.25 - 6.0) if d.y > 0.0 else (tip.y + s * 1.25 + fs * 0.9)
 		var marker_width := 0.0
 		if w.recommended and not w.retired:
-			marker_width = _font.get_string_size("▶", HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x + 7.0
+			# Drawn geometry instead of a Unicode glyph: the Web fallback font does not
+			# consistently contain the old triangle, which made the recommendation vanish.
+			marker_width = fs * 0.62 + 7.0
 		var rect := Rect2(Vector2(x - marker_width, y - fs * 0.9), Vector2(wt + wr + marker_width, fs * 1.18)).grow(osz + 2.0)
 		items.append({
 			"label": w, "typed_text": t, "rest_text": r, "typed_width": wt,
@@ -136,10 +138,7 @@ func _draw_word_item(item: Dictionary) -> void:
 	var typed_col := GOLD
 	var rest_col := RETIRED if w.retired else CREAM
 	if w.recommended and not w.retired:
-		var marker := "▶"
-		var mw := _font.get_string_size(marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string_outline(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, INK)
-		draw_string(_font, Vector2(x - mw - 7.0, y), marker, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, GOLD)
+		_draw_recommendation_chevron(Vector2(x - fs * 0.4, y - fs * 0.28), fs, osz)
 	if t != "":
 		draw_string_outline(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, osz, item["outline_color"])
 		draw_string(_font, Vector2(x, y), t, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, typed_col)
@@ -151,6 +150,18 @@ func _draw_word_item(item: Dictionary) -> void:
 		var word_width: float = item["typed_width"] + item["rest_width"]
 		draw_line(Vector2(x - 2.0, strike_y), Vector2(x + word_width + 2.0, strike_y), INK, 6.0)
 		draw_line(Vector2(x - 2.0, strike_y), Vector2(x + word_width + 2.0, strike_y), RETIRED, 2.0)
+
+
+func _draw_recommendation_chevron(center: Vector2, font_size: int, outline: int) -> void:
+	var half_h := font_size * 0.28
+	var half_w := font_size * 0.22
+	var points := PackedVector2Array([
+		center + Vector2(-half_w, -half_h),
+		center + Vector2(half_w, 0),
+		center + Vector2(-half_w, half_h),
+	])
+	draw_polyline(points, INK, outline + 4.0, true)
+	draw_polyline(points, GOLD, maxf(2.5, font_size * 0.11), true)
 
 
 ## Resolve labels in priority order. Active typing and route recommendations keep their

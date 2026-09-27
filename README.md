@@ -51,7 +51,8 @@ than another upkeep timer.
 | `Tab` | Pause, open the city/building map, and use field or safehouse care |
 | `Esc` | Pause and open settings |
 | `WASD` | Move freely inside a claimed safe zone |
-| `T` | Talk to the nearest safe-zone resident |
+| `T` | Talk to the nearest safe-zone resident (dialogue appears above them) |
+| `P` | Pet the nearest cat or dog |
 
 ## Run locally
 
@@ -236,6 +237,9 @@ Click its label in the Tab map (or type `info <label>`) to open the building pan
    selects wall/crate/bed/chair/farm, arrow keys nudge a world-stable placement cursor, `C`
    recenters it, and `F` places it. Farms produce food and seed-derived citizens walk
    deterministic waypoints inside the perimeter.
+
+A centered, fading control card marks that handoff: a pixel-art WASD cluster appears on
+settlement entry, and a pixel-art keyboard appears when typed street travel resumes.
 
 Generated furnishings retain stable object IDs after claiming. Walk close to an intact item
 and press `X` to dismantle that specific bed, television, fridge, rug, fixture, or other prop;

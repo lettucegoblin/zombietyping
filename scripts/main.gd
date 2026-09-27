@@ -39,6 +39,7 @@ var _rescue_cue: SurvivorCue
 var _loot_collecting := false
 var _loot_ticket := 0
 var _safezone_exiting := false
+var _movement_hint_pending := ""
 
 @onready var player: Node3D = $View/Viewport/World/Player
 @onready var settings: GameSettings = $Settings
@@ -60,6 +61,7 @@ var _safezone_exiting := false
 @onready var words: WordOverlay = $UI/Words
 @onready var pause_menu: PauseMenu = $UI/PauseMenu
 @onready var loot_flyover: LootFlyover = $UI/LootFlyover
+@onready var mode_hint: ModeHint = $UI/ModeHint
 
 
 func _ready() -> void:
@@ -244,9 +246,11 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	if mode == Mode.SAFEZONE and event is InputEventKey and event.pressed and not event.echo:
 		var msg := ""
+		settlement.last_interaction_world = false
 		match event.keycode:
 			KEY_B: msg = settlement.toggle_build()
 			KEY_T: msg = settlement.talk_nearest(player.global_position) if not settlement.build_mode else ""
+			KEY_P: msg = settlement.pet_nearest(player.global_position) if not settlement.build_mode else ""
 			KEY_Q: msg = settlement.cycle_build(-1) if settlement.build_mode else ""
 			KEY_E: msg = settlement.cycle_build(1) if settlement.build_mode else ""
 			KEY_R: msg = settlement.rotate_preview() if settlement.build_mode else ""
@@ -281,7 +285,10 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_PAGEUP: msg = _safezone_floor(1)
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
-			minimap.flash(msg)
+			if not settlement.last_interaction_world:
+				minimap.flash(msg)
+			elif event.keycode == KEY_P:
+				sfx.play("flutter", -8.0, 0.03, 1.22, "UI")
 			loot_flyover.sync_backpack()
 			_refresh_hud()
 			get_viewport().set_input_as_handled()
@@ -347,6 +354,10 @@ func _on_map_closed() -> void:
 	get_tree().paused = false
 	typist.enabled = mode != Mode.SAFEZONE
 	_capture_mouse_look()
+	if _movement_hint_pending != "":
+		var pending := _movement_hint_pending
+		_movement_hint_pending = ""
+		_show_movement_hint(pending)
 
 
 func _toggle_map() -> void:
@@ -535,6 +546,7 @@ func _enter_safezone(b: BuildingData) -> void:
 	director.clear_street_zombies()
 	var restock := World.refresh_field_inventory(b.id())
 	loot_flyover.sync_backpack()
+	_show_movement_hint("safezone")
 	minimap.flash(restock if restock != "" else "safe zone: WASD move · B build · Tab travel/manage")
 	_refresh_hud()
 
@@ -566,6 +578,7 @@ func _leave_safezone_for_travel() -> void:
 	typist.enabled = true
 	if b != null:
 		player.snap_to_road(b.road_tile)
+	_show_movement_hint("street")
 
 
 func _on_safezone_gate_exit() -> void:
@@ -630,8 +643,19 @@ func _finish_safezone_exit() -> void:
 	typist.enabled = true
 	_safezone_exiting = false
 	player.snap_to_road(final_tile if World.road_at(final_tile) > 0 else (b.road_tile if b != null else final_tile))
+	_show_movement_hint("street")
 	minimap.flash("on the road — typed travel restored")
 	_refresh_hud()
+
+
+func _show_movement_hint(next_mode: String) -> void:
+	if map.visible:
+		_movement_hint_pending = next_mode
+		return
+	if next_mode == "safezone":
+		mode_hint.show_safezone()
+	else:
+		mode_hint.show_street()
 
 
 func _safezone_floor(delta: int) -> String:
@@ -1174,7 +1198,7 @@ func _append_safezone_hud(lines: Array[String]) -> void:
 		lines.append("[color=#9aa]typed travel resumes when you reach the road[/color]")
 		return
 	var floor_text := "floor %d/%d · PgUp/PgDn floors" % [interior.plan.floor + 1, door_building.floors] if interior.is_inside() and door_building != null else ""
-	lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  T talk  ·  %s  ·  Tab manage/travel" % floor_text)
+	lines.append("[color=#68d5ff][b]SAFE ZONE[/b][/color]  WASD move  ·  mouse look  ·  T talk  ·  P pet  ·  %s  ·  Tab manage/travel" % floor_text)
 	if settlement.build_mode:
 		var preview_state := "[color=#7ee787]VALID[/color]" if settlement.ghost_is_valid() \
 				else "[color=#ff6f91]%s[/color]" % settlement.ghost_error()

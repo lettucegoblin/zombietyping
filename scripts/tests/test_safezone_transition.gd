@@ -51,6 +51,9 @@ func _run() -> void:
 	if main.typist.enabled:
 		_fail("typing combat remained enabled in SAFEZONE")
 		return
+	if main.mode_hint.last_mode != "safezone":
+		_fail("SAFEZONE entry did not show the WASD movement handoff")
+		return
 	if main.typist.locked != null or main.player.halt or main.player.is_look_locked():
 		_fail("SAFEZONE entry retained a combat or camera lock")
 		return
@@ -100,6 +103,9 @@ func _run() -> void:
 	if main.mode != 0 or main.player.manual_control or World.ward_contains_point(b.id(), exit_point) \
 			or World.road_at(main.player.tile) <= 0:
 		_fail("walk-out transition did not finish on a road outside the ward")
+		return
+	if main.mode_hint.last_mode != "street":
+		_fail("safe-zone exit did not show the typed-travel keyboard handoff")
 		return
 	var tower: BuildingData
 	for candidate in World.get_sector(0, 0).buildings:

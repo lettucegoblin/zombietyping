@@ -48,6 +48,7 @@ var _last_built: Dictionary = {}
 var _undo_until_msec := 0
 var _preview_cursor := Vector3.INF
 var _preview_heading := 0.0
+var last_interaction_world := false
 
 
 func _ready() -> void:
@@ -623,6 +624,7 @@ func _animate_citizen(n: Node3D, dt: float, moving: bool) -> void:
 
 
 func talk_nearest(world_pos: Vector3, max_distance := 3.5) -> String:
+	last_interaction_world = false
 	var nearest: Node3D
 	var nearest_distance := max_distance
 	for citizen in _citizens:
@@ -635,10 +637,76 @@ func talk_nearest(world_pos: Vector3, max_distance := 3.5) -> String:
 	if nearest == null:
 		return "move closer to a resident to talk"
 	var survivor_id := str(nearest.get_meta("survivor_id", ""))
+	var spoken := ""
 	if survivor_id == "" or not World.survivors.has(survivor_id):
-		return "Caretaker: \"Everyone made it home. That's enough for today.\""
-	var person: Dictionary = World.survivors[survivor_id]
-	return "%s the %s: \"%s\"" % [person.get("name", "Resident"), World.survivor_archetype_label(person), World.survivor_dialogue(person)]
+		spoken = "Caretaker: \"Everyone made it home. That's enough for today.\""
+	else:
+		var person: Dictionary = World.survivors[survivor_id]
+		spoken = "%s the %s: \"%s\"" % [person.get("name", "Resident"), World.survivor_archetype_label(person), World.survivor_dialogue(person)]
+	_show_speech(nearest, spoken)
+	last_interaction_world = true
+	return spoken
+
+
+func pet_nearest(world_pos: Vector3, max_distance := 3.5) -> String:
+	last_interaction_world = false
+	var nearest: Node3D
+	var nearest_distance := max_distance
+	for citizen in _citizens:
+		if not is_instance_valid(citizen) or str(citizen.get_meta("archetype", "adult")) not in ["cat", "dog"]:
+			continue
+		var distance := citizen.global_position.distance_to(world_pos)
+		if distance < nearest_distance:
+			nearest = citizen
+			nearest_distance = distance
+	if nearest == null:
+		return "move closer to a cat or dog to pet them"
+	var archetype := str(nearest.get_meta("archetype", "cat"))
+	var survivor_id := str(nearest.get_meta("survivor_id", ""))
+	var name := archetype.capitalize()
+	if survivor_id != "" and World.survivors.has(survivor_id):
+		name = str((World.survivors[survivor_id] as Dictionary).get("name", name))
+	var spoken := "%s: \"%s\"" % [name,
+		"Yes. This is acceptable." if archetype == "cat" else "Again! Again!"]
+	_show_speech(nearest, spoken)
+	var sprite: Sprite3D = nearest.get_node_or_null("Sprite")
+	if sprite != null:
+		var old_pet_tween: Variant = sprite.get_meta("pet_tween") if sprite.has_meta("pet_tween") else null
+		if old_pet_tween is Tween and old_pet_tween.is_valid():
+			old_pet_tween.kill()
+		var pet_tween := sprite.create_tween().set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		sprite.set_meta("pet_tween", pet_tween)
+		pet_tween.tween_property(sprite, "scale", Vector3(1.18, 0.84, 1.0), 0.12)
+		pet_tween.tween_property(sprite, "scale", Vector3(0.92, 1.12, 1.0), 0.14)
+		pet_tween.tween_property(sprite, "scale", Vector3.ONE, 0.18)
+	last_interaction_world = true
+	return spoken
+
+
+func _show_speech(citizen: Node3D, text: String) -> void:
+	var old := citizen.get_node_or_null("SpeechBubble")
+	if old != null:
+		old.queue_free()
+	var label := Label3D.new()
+	label.name = "SpeechBubble"
+	label.text = text
+	var animal := str(citizen.get_meta("archetype", "adult")) in ["cat", "dog"]
+	label.position = Vector3(0, 1.08 if animal else 2.05, 0)
+	label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+	label.font_size = 24
+	label.pixel_size = 0.006
+	label.outline_size = 9
+	label.modulate = Color("#fdf6e3")
+	label.outline_modulate = Color("#120a1f")
+	label.width = 430.0
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.no_depth_test = true
+	citizen.add_child(label)
+	var speech_tween := label.create_tween()
+	speech_tween.tween_interval(3.6)
+	speech_tween.tween_property(label, "modulate:a", 0.0, 0.6)
+	speech_tween.tween_callback(label.queue_free)
 
 
 func _add_placement(item: Dictionary) -> void:

@@ -94,6 +94,11 @@ func _run() -> void:
 	if rebuilt.position.distance_to(before) > 0.001:
 		_fail("unrelated rebuild reset citizen position from %s to %s" % [before, rebuilt.position])
 		return
+	var pet_response := settlement.pet_nearest(rebuilt.global_position, 0.5)
+	if not pet_response.contains("Mara") or not settlement.last_interaction_world \
+			or not (rebuilt.get_node_or_null("SpeechBubble") is Label3D):
+		_fail("nearby animal could not be petted with character-anchored feedback")
+		return
 	var live_nav: RefCounted = settlement._citizen_navigation[b.id()]
 	for i in 600:
 		settlement._move_citizens(0.1)
