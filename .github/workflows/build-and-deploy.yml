@@ -15,6 +15,9 @@ concurrency:
   group: pages-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  GODOT_VERSION: 4.6.2
+
 jobs:
   export:
     runs-on: ubuntu-latest
@@ -23,6 +26,12 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@v5
+
+      - name: Install export templates
+        run: |
+          mkdir -p ~/.local/share/godot/export_templates
+          mv "/root/.local/share/godot/export_templates/${GODOT_VERSION}.stable" \
+            "$HOME/.local/share/godot/export_templates/${GODOT_VERSION}.stable"
 
       - name: Import assets
         run: godot --headless --editor --quit
