@@ -168,13 +168,13 @@ func _run() -> void:
 		return
 	main.mode = 3 # Main.Mode.SAFEZONE
 	main.player.global_position = resident_node.global_position
-	main.minimap._msg = "dialogue must not use the minimap"
+	main.notification_toast.show_notice("dialogue must remain world attached")
 	var talk_key := InputEventKey.new()
 	talk_key.pressed = true
 	talk_key.keycode = KEY_T
 	main._unhandled_input(talk_key)
-	if main.minimap._msg != "dialogue must not use the minimap":
-		_fail("character dialogue was also copied into the minimap status line")
+	if main.notification_toast.current_message() != "dialogue must remain world attached":
+		_fail("world-attached character dialogue was duplicated into the notification toast")
 		return
 
 	print("RESCUE LOOP OK  ", mission["name"], " / ", mission["trait"], " / floor ", int(mission["floor"]) + 1, " ", mission["room_kind"])

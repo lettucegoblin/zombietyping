@@ -1,4 +1,4 @@
-[gd_scene load_steps=27 format=3]
+[gd_scene load_steps=28 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/streamer.gd" id="2_streamer"]
@@ -21,6 +21,7 @@
 [ext_resource type="Script" path="res://scripts/ui/mode_hint.gd" id="19_mode_hint"]
 [ext_resource type="Script" path="res://scripts/ui/orientation_cue.gd" id="20_orientation"]
 [ext_resource type="Script" path="res://scripts/ui/context_ribbon.gd" id="21_context"]
+[ext_resource type="Script" path="res://scripts/ui/notification_toast.gd" id="22_notice"]
 
 [sub_resource type="ShaderMaterial" id="post_mat"]
 shader = ExtResource("7_post")
@@ -216,6 +217,15 @@ grow_horizontal = 2
 grow_vertical = 2
 mouse_filter = 2
 script = ExtResource("21_context")
+
+[node name="NotificationToast" type="Control" parent="UI"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("22_notice")
 
 [node name="Flash" type="ColorRect" parent="UI"]
 anchors_preset = 15

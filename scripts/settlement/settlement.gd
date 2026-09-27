@@ -53,6 +53,10 @@ var _undo_until_msec := 0
 var _preview_cursor := Vector3.INF
 var _preview_heading := 0.0
 var last_interaction_world := false
+var _cart_feedback_text := ""
+var _cart_feedback_building := ""
+var _cart_feedback_until := 0
+var _cart_feedback_color := Color("#7ee787")
 
 
 func _ready() -> void:
@@ -269,6 +273,10 @@ func _process(dt: float) -> void:
 		_dirty = true
 	if _dirty:
 		_rebuild(sec)
+	if _cart_feedback_text != "" and Time.get_ticks_msec() >= _cart_feedback_until:
+		_cart_feedback_text = ""
+		_cart_feedback_building = ""
+		_dirty = true
 	_update_ghost()
 	_move_citizens(dt)
 	_update_expedition_party(dt)
@@ -389,6 +397,22 @@ func _add_gate_cart(b: BuildingData) -> void:
 		label.modulate = Color("#facc15")
 		label.outline_modulate = Color("#17131f")
 		holder.add_child(label)
+	if _cart_feedback_building == b.id() and Time.get_ticks_msec() < _cart_feedback_until:
+		var status := Label3D.new()
+		status.name = "CartStatus"
+		status.text = _cart_feedback_text
+		status.position = Vector3(0, 2.35, 0)
+		status.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		status.font_size = 21
+		status.pixel_size = 0.0065
+		status.outline_size = 9
+		status.modulate = _cart_feedback_color
+		status.outline_modulate = Color("#120a1f")
+		status.width = 440.0
+		status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		status.no_depth_test = true
+		holder.add_child(status)
 
 
 func _add_wall(pos: Vector3, size: Vector3, yaw: float = 0.0) -> void:
@@ -811,12 +835,21 @@ func pet_nearest(world_pos: Vector3, max_distance := 3.5) -> String:
 
 
 func assign_cart_crew(world_pos: Vector3, max_distance := 5.0) -> String:
+	last_interaction_world = false
 	if active_building_id == "":
 		return "enter a claimed safe zone first"
 	var gate := World.ward_gate_world(active_building_id)
 	if Vector2(world_pos.x, world_pos.z).distance_to(gate) > max_distance:
 		return "move to the gate cart to assign expedition companions"
-	return World.cycle_cart_crew(active_building_id)
+	var result := World.cycle_cart_crew(active_building_id)
+	_cart_feedback_text = result
+	_cart_feedback_building = active_building_id
+	_cart_feedback_until = Time.get_ticks_msec() + 3200
+	_cart_feedback_color = Color("#ff6f91") if result.begins_with("rescue") \
+			or result.contains("only") else Color("#7ee787")
+	last_interaction_world = true
+	_dirty = true
+	return result
 
 
 func _show_speech(citizen: Node3D, text: String) -> void:

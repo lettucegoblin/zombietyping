@@ -96,6 +96,9 @@ is the technical guide for contributors.
   controls appear briefly in a state-aware bottom ribbon, the minimap draws a deterministic
   sparse slice of its fully typeable address registry, and detailed settlement/audio data is
   available on demand instead of competing with the current action.
+- The minimap is navigation-only: interaction results use a dedicated lower-screen toast,
+  character speech stays attached to its speaker, and cart crew feedback appears above the
+  cart itself. Typed destinations remain in the centered orientation cue.
 
 ## 2. Running things
 

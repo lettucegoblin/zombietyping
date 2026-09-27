@@ -18,6 +18,7 @@ func _ready() -> void:
 	map.size = Vector2(1280, 720)
 	var player: Node3D = main.get_node("View/Viewport/World/Player")
 	var minimap: Control = main.get_node("UI/Minimap")
+	_check(not minimap.has_method("flash"), "minimap still exposes a generic text-output channel")
 	var reticle: BuildingReticle = main.get_node("UI/BuildingReticle")
 	_check(main._gameplay_mouse_look, "gameplay did not enable always-on mouse look")
 	reticle._physics_process(0.0)

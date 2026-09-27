@@ -154,10 +154,24 @@ func _ready() -> void:
 	party_player.add_child(party_camera)
 	add_child(party_player)
 	settlement.configure(party_player)
+	settlement.enter(first.id())
+	var gate := World.ward_gate_world(first.id())
+	party_player.global_position = Vector3(gate.x, 0.0, gate.y)
+	settlement.assign_cart_crew(party_player.global_position) # clear the existing full crew
+	var cart_feedback_message := settlement.assign_cart_crew(party_player.global_position)
+	settlement._add_gate_cart(first)
+	var cart_feedback := settlement._root.find_child("CartStatus", true, false)
+	if not settlement.last_interaction_world or not cart_feedback_message.contains("June") \
+			or not (cart_feedback is Label3D) or not cart_feedback.text.contains("June"):
+		_fail("cart assignment feedback was not attached to the cart: " + cart_feedback_message)
+		return
+	cart_feedback.get_parent().free()
+	settlement.leave()
 	World.begin_expedition(first.id())
 	settlement._rebuild_expedition_party()
 	if settlement._party_root.get_child_count() != 2:
-		_fail("one recruited companion and the supply cart did not render as an expedition party")
+		_fail("one recruited companion and the supply cart did not render as an expedition party: nodes=%d crew=%s expedition=%s" % [
+			settlement._party_root.get_child_count(), World.cart_crew(first.id()), World.expedition_base_id])
 		return
 	settlement.set_expedition_inside(true)
 	settlement._update_expedition_party(0.1)

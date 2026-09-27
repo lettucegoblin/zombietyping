@@ -69,6 +69,7 @@ var _typing_target_id := ""
 @onready var mode_hint: ModeHint = $UI/ModeHint
 @onready var orientation_cue: OrientationCue = $UI/OrientationCue
 @onready var context_ribbon: Control = $UI/ContextRibbon
+@onready var notification_toast: NotificationToast = $UI/NotificationToast
 
 
 func _ready() -> void:
@@ -299,7 +300,7 @@ func _unhandled_input(event: InputEvent) -> void:
 			KEY_PAGEDOWN: msg = _safezone_floor(-1)
 		if msg != "":
 			if not settlement.last_interaction_world:
-				minimap.flash(msg)
+				notification_toast.show_notice(msg)
 			elif event.keycode == KEY_P:
 				sfx.play("flutter", -8.0, 0.03, 1.22, "UI")
 			loot_flyover.sync_backpack()
@@ -432,9 +433,8 @@ func _on_hud_destination(id: String) -> void:
 	orientation_cue.commit_destination(label)
 	_typing_target_id = ""
 	if not player.enqueue(id):
-		minimap.flash("no route to " + label)
+		notification_toast.show_notice("no route to " + label, "warning")
 		return
-	minimap.flash("queued " + label)
 	minimap.relabel()
 	if mode == Mode.INSIDE and interior.is_inside() and interior.plan.floor == 0 and not player.is_moving() and not typist.in_combat():
 		var er: int = interior.entrance_room()
@@ -571,7 +571,8 @@ func _enter_safezone(b: BuildingData) -> void:
 	World.end_expedition()
 	loot_flyover.sync_backpack()
 	_show_movement_hint("safezone")
-	minimap.flash(" · ".join(arrival_messages) if not arrival_messages.is_empty() else "safe zone: WASD move · B build · Tab travel/manage")
+	if not arrival_messages.is_empty():
+		notification_toast.show_notice(" · ".join(arrival_messages), "success")
 	_refresh_hud()
 
 
@@ -629,7 +630,6 @@ func _on_safezone_gate_exit() -> void:
 		through,
 		road,
 	]), "safezone_exit", 3.4)
-	minimap.flash("leaving the safe zone — walking out to the road")
 	_refresh_hud()
 
 
@@ -672,7 +672,6 @@ func _finish_safezone_exit() -> void:
 	_safezone_exiting = false
 	player.snap_to_road(final_tile if World.road_at(final_tile) > 0 else (b.road_tile if b != null else final_tile))
 	_show_movement_hint("street")
-	minimap.flash("on the road — typed travel restored")
 	_refresh_hud()
 
 
@@ -738,7 +737,7 @@ func _update_safezone_stairs(dt: float) -> void:
 	orientation_cue.set_stair(_stair_hold / STAIR_HOLD_SECONDS, nearest_direction)
 	if _stair_hold >= STAIR_HOLD_SECONDS:
 		var result := _safezone_floor(1 if nearest_direction == "up" else -1)
-		minimap.flash(result)
+		notification_toast.show_notice(result, "accent")
 		_refresh_hud()
 
 
@@ -813,7 +812,7 @@ func _enter_building() -> void:
 	_seed_floor()
 	_startle_near(d.pos, ri)
 	if not rescue.is_empty():
-		minimap.flash("rescue lead: %s · %s · floor %d %s" % [rescue["name"], rescue["trait"], int(rescue["floor"]) + 1, rescue["room_kind"]])
+		notification_toast.show_notice("rescue lead: %s · %s · floor %d %s" % [rescue["name"], rescue["trait"], int(rescue["floor"]) + 1, rescue["room_kind"]], "accent")
 	_refresh_hud()
 	# a beat to watch the door tumble in (and see what is standing behind it), then walk
 	await get_tree().create_timer(0.55).timeout
@@ -904,7 +903,7 @@ func _schedule_room_rewards(ri: int, beat := 0.85) -> void:
 	var props: Array = interior.lootable_props_in_room(ri, true)
 	if props.is_empty():
 		if interior.has_uncollected_loot(ri):
-			minimap.flash("room clear — backpack full, supplies left in place")
+			notification_toast.show_notice("room clear — backpack full, supplies left in place", "warning")
 		_refresh_prompts()
 		_face_room()
 		if not interior.rescue_waiting_here():
@@ -918,7 +917,6 @@ func _schedule_room_rewards(ri: int, beat := 0.85) -> void:
 	typist.clear_prompts()
 	var first: FloorPlan.Prop = props[0]
 	player.guide_toward(first.pos + Vector3(0, maxf(first.size.y, 0.7), 0))
-	minimap.flash("room clear — supplies incoming")
 	_collect_room_rewards(ri, ticket, beat)
 	_refresh_hud()
 
@@ -939,7 +937,6 @@ func _collect_room_rewards(ri: int, ticket: int, beat: float) -> void:
 		if not result.begins_with("searched"):
 			break
 		var flight := loot_flyover.fly_bundle(origin, bundle, units_before, field_before)
-		minimap.flash("collected " + PropLootRules.item_text(bundle))
 		_refresh_hud()
 		if flight > 0.0:
 			await get_tree().create_timer(flight, false).timeout
@@ -949,7 +946,7 @@ func _collect_room_rewards(ri: int, ticket: int, beat: float) -> void:
 	_refresh_prompts()
 	_face_room()
 	if interior.has_uncollected_loot(ri):
-		minimap.flash("backpack full — remaining supplies stay here")
+		notification_toast.show_notice("backpack full — remaining supplies stay here", "warning")
 	if not interior.rescue_waiting_here():
 		_queue_search(0.35)
 	_refresh_hud()
@@ -1032,7 +1029,7 @@ func _on_option(opt: Dictionary) -> void:
 			var result := World.complete_rescue(interior.building.id())
 			_rescue_cue.resolve()
 			interior.clear_rescue_visual()
-			minimap.flash(result)
+			notification_toast.show_notice(result, "success")
 			interior._update_labels()
 			_refresh_prompts()
 			_face_room()
@@ -1041,7 +1038,7 @@ func _on_option(opt: Dictionary) -> void:
 		"loot":
 			_moving_on = false
 			var result: String = interior.loot_here(player.global_position)
-			minimap.flash(result)
+			notification_toast.show_notice(result)
 			sfx.play_at("clank", player.global_position, -15.0, 0.12, 1.1, 10.0)
 			interior._update_labels()
 			_refresh_prompts()

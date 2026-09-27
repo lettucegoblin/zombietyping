@@ -24,9 +24,7 @@ var _label_offsets: Dictionary = {} # building id -> persistent nudge from its m
 var _label_center := Vector2(INF, INF)
 var _was_moving := false
 var _font: Font
-var typing := ""                  # destination being typed (shown under the map)
-var _msg := ""
-var _msg_until := 0.0
+var typing := ""                  # destination prefix; highlights matching map labels
 
 
 func _ready() -> void:
@@ -34,11 +32,6 @@ func _ready() -> void:
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	clip_contents = true
 	_font = ThemeDB.fallback_font
-
-
-func flash(msg: String) -> void:
-	_msg = msg
-	_msg_until = Time.get_ticks_msec() / 1000.0 + 2.5
 
 
 func _process(_dt: float) -> void:
@@ -294,18 +287,9 @@ func _draw() -> void:
 	draw_circle(pp, 5.0, Color.BLACK)
 	draw_circle(pp, 3.5, COL_PLAYER)
 	draw_line(pp, pp + dir * 9.0, COL_PLAYER, 2.0)
-	# frame + typed destination
+	# The minimap is navigation only. Typed text is centered by OrientationCue and
+	# interaction results use NotificationToast or a world-attached label.
 	draw_rect(Rect2(Vector2.ZERO, size), Color("#fdf6e3", 0.55), false, 2.0)
-	var now := Time.get_ticks_msec() / 1000.0
-	var line := ""
-	if typing != "":
-		line = "> " + typing + ("_" if int(now * 2.0) % 2 == 0 else " ")
-	elif now < _msg_until:
-		line = _msg
-	if line != "":
-		var lw := _font.get_string_size(line, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-		draw_rect(Rect2(Vector2(size.x - lw - 10, size.y - 22), Vector2(lw + 8, 20)), Color(0, 0, 0, 0.7))
-		draw_string(_font, Vector2(size.x - lw - 6, size.y - 7), line, HORIZONTAL_ALIGNMENT_LEFT, -1, 14, Color("#facc15"))
 
 
 func building_visited(id: String) -> bool:
