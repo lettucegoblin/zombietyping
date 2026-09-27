@@ -121,9 +121,10 @@ func _process(dt: float) -> void:
 func _ensure_player() -> void:
 	if is_instance_valid(_player):
 		return
+	GameSettings.ensure_buses()
 	_player = AudioStreamPlayer3D.new()
 	_player.name = "DirectionalRescueCue"
-	_player.bus = "Master"
+	_player.bus = "Survivor"
 	_player.stream = cue_stream
 	_player.volume_db = volume_db
 	_player.unit_size = 2.5

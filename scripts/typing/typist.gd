@@ -203,3 +203,4 @@ func _input(event: InputEvent) -> void:
 		if buffer != "":
 			buffer = ""
 			changed.emit()
+			get_viewport().set_input_as_handled()

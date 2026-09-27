@@ -33,6 +33,11 @@ up. `NEXT_STEPS.md` holds the backlog and the open design questions.
   their action remains readable. Buildings use stable, fixed-width digit-first addresses
   (`1aa` … `9zz`) across the minimap, Tab map, and first-person reticle, so they can be
   typed from the HUD without opening the map.
+- Esc opens a persistent settings menu. Audio is routed through separate combat, interaction,
+  footsteps, ambience, television, survivor, and typing/UI buses under an overall volume;
+  the menu generates those rows from `GameSettings.AUDIO_BUSES` so future categories remain
+  a data addition rather than a UI rewrite. It also owns mouse look, display, and accessibility
+  preferences (shake, hit flash, and world typing-text scale).
 
 ## 2. Running things
 
@@ -54,6 +59,7 @@ report `Identifier not found: World` — ignore those lines from the parse check
 |---|---|
 | `scenes/tests/test_combat.tscn` (~1 min) | LOS + typing lock, stun on hit, wrong letter no advance, re-lock on the NEXT letter, rail halt, damage + i-frames, re-lock after a hit, word clamped on screen when a zombie is in your face, door throw-back, notice beat, fairness timing |
 | `scenes/tests/test_camera_control.tscn` | kicked-door camera lock plus mouse-look priority over ambient auto-aim |
+| `scenes/tests/test_pause_menu.tscn` | Escape pause ownership, dynamic mixer sliders, sound routing, and live accessibility controls |
 | `scenes/tests/test_gameloop.tscn` (~2 min) | Tab map labels → queue two buildings → arrivals in order, fog reveal, sparse state, HUD-typed travel, and crossed-out-but-typeable revisited doors |
 | `scenes/tests/test_loot.tscn` | deterministic container contents, typed room looting, backpack capacity/state, duplicate prevention, breakdown yields, and save/load |
 | `scenes/tests/test_settlement.tscn` | clear ≠ claim, material-class salvage, four-stage vehicle teardown, fortify, road-or-joined-ward expansion, claim, and persistent furniture placement |

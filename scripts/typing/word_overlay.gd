@@ -15,6 +15,7 @@ const RETIRED := Color("#6c6c72")
 const EDGE_MARGIN := Vector2(56.0, 46.0)
 
 var _font: Font
+var text_scale := 1.0
 
 
 func _ready() -> void:
@@ -65,9 +66,10 @@ func _draw() -> void:
 				sp = _edge_point(inner, dir)
 				arrow = dir
 		var dist := cam.global_position.distance_to(p)
-		var fs := w.font_px
+		var base_font := float(w.font_px) * text_scale
+		var fs := roundi(base_font)
 		if w.scale_with_distance:
-			fs = int(clampf(w.font_px * 1.45 - dist * 1.1, w.font_px * 0.7, w.font_px * 1.45))
+			fs = int(clampf(base_font * 1.45 - dist * 1.1, base_font * 0.7, base_font * 1.45))
 		if w.locked:
 			fs = int(fs * 1.15)
 		elif w.recommended:

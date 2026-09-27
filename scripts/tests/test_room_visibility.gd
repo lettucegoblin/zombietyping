@@ -58,6 +58,8 @@ func _ready() -> void:
 	interior.reveal_all()
 	var tv_audio: Array[Node] = interior.find_children("*", "AudioStreamPlayer3D", true, false)
 	_check(not tv_audio.is_empty(), "fixture generated no television audio source")
+	for audio in tv_audio:
+		_check((audio as AudioStreamPlayer3D).bus == "Television", "TV static bypassed its mixer bus")
 	interior.unload()
 	for audio in tv_audio:
 		_check(not (audio as AudioStreamPlayer3D).playing, "television static survived interior unload")

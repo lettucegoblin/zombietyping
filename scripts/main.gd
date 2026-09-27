@@ -37,6 +37,7 @@ const AIM_RANGE := 14.0               # ...and turns you to face it whenever you
 var _rescue_cue: SurvivorCue
 
 @onready var player: Node3D = $View/Viewport/World/Player
+@onready var settings: GameSettings = $Settings
 @onready var streamer: Node3D = $View/Viewport/World/Streamer
 @onready var interior: Node3D = $View/Viewport/World/Interior
 @onready var director: Node3D = $View/Viewport/World/Director
@@ -52,9 +53,15 @@ var _rescue_cue: SurvivorCue
 @onready var sky: Node3D = $View/Viewport/World/SkyLife
 @onready var settlement: Settlement = $View/Viewport/World/Settlement
 @onready var hud: RichTextLabel = $UI/HUD
+@onready var words: WordOverlay = $UI/Words
+@onready var pause_menu: PauseMenu = $UI/PauseMenu
 
 
 func _ready() -> void:
+	pause_menu.configure(settings)
+	pause_menu.resume_requested.connect(_on_pause_resumed)
+	settings.changed.connect(_on_setting_changed)
+	_apply_runtime_settings()
 	World.state_changed.connect(_on_world_state_changed)
 	streamer.target = player
 	streamer.prime(World.sector_of_tile(player.tile))
@@ -186,7 +193,7 @@ func _process(dt: float) -> void:
 
 
 func _unhandled_input(event: InputEvent) -> void:
-	if event is InputEventMouseMotion and _gameplay_mouse_look and not map.visible:
+	if event is InputEventMouseMotion and _gameplay_mouse_look and not map.visible and not pause_menu.visible:
 		player.mouse_look(event.relative)
 		get_viewport().set_input_as_handled()
 		return
@@ -234,6 +241,11 @@ func _unhandled_input(event: InputEvent) -> void:
 			_refresh_hud()
 			get_viewport().set_input_as_handled()
 			return
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		if not map.visible and not pause_menu.visible:
+			_open_pause_menu()
+			get_viewport().set_input_as_handled()
+		return
 	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_F1:
 		var on: float = post_mat.get_shader_parameter("enabled")
 		post_mat.set_shader_parameter("enabled", 0.0 if on > 0.5 else 1.0)
@@ -272,12 +284,14 @@ func _release_mouse_look() -> void:
 
 
 func _capture_mouse_look() -> void:
-	if not dead and not map.visible:
+	if not dead and not map.visible and not pause_menu.visible:
 		_gameplay_mouse_look = true
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 
 
 func _open_map() -> void:
+	if pause_menu.visible:
+		return
 	_release_mouse_look()
 	typist.enabled = false
 	get_tree().paused = true
@@ -295,6 +309,31 @@ func _toggle_map() -> void:
 		map.close()
 	else:
 		_open_map()
+
+
+func _open_pause_menu() -> void:
+	_release_mouse_look()
+	typist.enabled = false
+	get_tree().paused = true
+	pause_menu.open()
+
+
+func _on_pause_resumed() -> void:
+	get_tree().paused = false
+	typist.enabled = not dead and mode != Mode.SAFEZONE
+	if not dead:
+		_capture_mouse_look()
+
+
+func _on_setting_changed(_key: String, _value: Variant) -> void:
+	_apply_runtime_settings()
+
+
+func _apply_runtime_settings() -> void:
+	player.mouse_look_sensitivity = 0.0025 * settings.mouse_sensitivity
+	player.invert_mouse_y = settings.invert_mouse_y
+	player.shake_intensity = settings.screen_shake
+	words.text_scale = settings.typing_text_scale
 
 
 # ------------------------------------------------------------------ street
@@ -838,6 +877,7 @@ func _die() -> void:
 
 
 func _flash(col: Color, dur: float) -> void:
+	col.a *= settings.screen_flash
 	flash.color = col
 	var tw := create_tween()
 	tw.tween_property(flash, "color:a", 0.0, dur)

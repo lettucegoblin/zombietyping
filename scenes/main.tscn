@@ -1,4 +1,4 @@
-[gd_scene load_steps=21 format=3]
+[gd_scene load_steps=23 format=3]
 
 [ext_resource type="Script" path="res://scripts/main.gd" id="1_main"]
 [ext_resource type="Script" path="res://scripts/world/streamer.gd" id="2_streamer"]
@@ -15,6 +15,8 @@
 [ext_resource type="Script" path="res://scripts/world/sky_life.gd" id="13_sky"]
 [ext_resource type="Script" path="res://scripts/settlement/settlement.gd" id="14_settlement"]
 [ext_resource type="Script" path="res://scripts/ui/building_reticle.gd" id="15_reticle"]
+[ext_resource type="Script" path="res://scripts/settings/game_settings.gd" id="16_settings"]
+[ext_resource type="Script" path="res://scripts/ui/pause_menu.gd" id="17_pause"]
 
 [sub_resource type="ShaderMaterial" id="post_mat"]
 shader = ExtResource("7_post")
@@ -52,6 +54,9 @@ fog_depth_end = 150.0
 
 [node name="Main" type="Node"]
 script = ExtResource("1_main")
+
+[node name="Settings" type="Node" parent="."]
+script = ExtResource("16_settings")
 
 [node name="View" type="SubViewportContainer" parent="."]
 texture_filter = 1
@@ -178,6 +183,16 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 mouse_filter = 2
 color = Color(1, 1, 1, 0)
+
+[node name="PauseMenu" type="Control" parent="UI"]
+process_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 0
+script = ExtResource("17_pause")
 
 [node name="GameOver" type="Label" parent="UI"]
 anchors_preset = 8

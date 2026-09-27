@@ -42,20 +42,21 @@ const WET_ROOMS := ["bathroom", "kitchen", "studio"]
 
 
 func _ready() -> void:
+	GameSettings.ensure_buses()
 	add_to_group("sfx")
 	for i in POOL:
 		var p := AudioStreamPlayer.new()
-		p.bus = "Master"
+		p.bus = "Interaction"
 		add_child(p)
 		_pool.append(p)
-	_wind = _loop("wind", -14.0)
-	_room = _loop("room", -60.0)
-	_electric = _loop("electric", -60.0)
-	_pipes = _loop("pipes", -60.0)
+	_wind = _loop("wind", -14.0, "Ambience")
+	_room = _loop("room", -60.0, "Ambience")
+	_electric = _loop("electric", -60.0, "Ambience")
+	_pipes = _loop("pipes", -60.0, "Ambience")
 	_next_event = 4.0
 
 
-func _loop(name: String, db: float) -> AudioStreamPlayer:
+func _loop(name: String, db: float, bus_name := "Ambience") -> AudioStreamPlayer:
 	var p := AudioStreamPlayer.new()
 	var s := _stream(name)
 	if s is AudioStreamWAV:
@@ -65,6 +66,7 @@ func _loop(name: String, db: float) -> AudioStreamPlayer:
 		# in samples; the imported data is QOA-compressed, so never derive this from data.size()
 		w.loop_end = int(round(w.get_length() * w.mix_rate))
 	p.stream = s
+	p.bus = bus_name
 	p.volume_db = db
 	p.autoplay = true
 	add_child(p)
@@ -82,7 +84,7 @@ func _stream(name: String) -> AudioStream:
 
 
 ## One-shot, no position. pitch_var = random +-fraction (0.08 = +-8%).
-func play(name: String, db := 0.0, pitch_var := 0.0, pitch := 1.0) -> void:
+func play(name: String, db := 0.0, pitch_var := 0.0, pitch := 1.0, bus_override := "") -> void:
 	var s := _stream(name)
 	if s == null:
 		return
@@ -92,6 +94,7 @@ func play(name: String, db := 0.0, pitch_var := 0.0, pitch := 1.0) -> void:
 			p = c
 			break
 	p.stream = s
+	p.bus = bus_override if bus_override != "" else GameSettings.bus_for_sound(name)
 	p.volume_db = db
 	p.pitch_scale = pitch * (1.0 + randf_range(-pitch_var, pitch_var))
 	p.play()
@@ -107,7 +110,7 @@ func _ensure_world_pool() -> bool:
 	for i in POOL:
 		var p := AudioStreamPlayer3D.new()
 		p.name = "WorldSound%d" % i
-		p.bus = "Master"
+		p.bus = "Interaction"
 		p.unit_size = 2.5
 		p.max_distance = 32.0
 		p.panning_strength = 1.7
@@ -119,9 +122,10 @@ func _ensure_world_pool() -> bool:
 
 
 ## One-shot from a world position with real stereo direction and distance filtering.
-func play_at(name: String, pos: Vector3, db := 0.0, pitch_var := 0.0, pitch := 1.0, max_dist := 26.0) -> void:
+func play_at(name: String, pos: Vector3, db := 0.0, pitch_var := 0.0, pitch := 1.0,
+		max_dist := 26.0, bus_override := "") -> void:
 	if player == null or not _ensure_world_pool():
-		return play(name, db, pitch_var, pitch)
+		return play(name, db, pitch_var, pitch, bus_override)
 	var d := pos.distance_to(player.global_position)
 	if d > max_dist:
 		return
@@ -134,6 +138,7 @@ func play_at(name: String, pos: Vector3, db := 0.0, pitch_var := 0.0, pitch := 1
 			p = c
 			break
 	p.stream = s
+	p.bus = bus_override if bus_override != "" else GameSettings.bus_for_sound(name)
 	p.global_position = pos
 	p.volume_db = db
 	p.pitch_scale = pitch * (1.0 + randf_range(-pitch_var, pitch_var))
@@ -143,13 +148,14 @@ func play_at(name: String, pos: Vector3, db := 0.0, pitch_var := 0.0, pitch := 1
 
 ## Place an ambience event in a stable-feeling ring around the survivor rather than in the
 ## centre of their head. Vertical variation helps upstairs/behind-you events read clearly.
-func play_near(name: String, db: float, pitch_var: float, near := 5.0, far := 13.0) -> void:
+func play_near(name: String, db: float, pitch_var: float, near := 5.0, far := 13.0,
+		bus_override := "") -> void:
 	if player == null:
-		return play(name, db, pitch_var)
+		return play(name, db, pitch_var, 1.0, bus_override)
 	var a := _rng.randf_range(-PI, PI)
 	var dist := _rng.randf_range(near, far)
 	var pos := player.global_position + Vector3(cos(a) * dist, _rng.randf_range(-1.0, 2.2), sin(a) * dist)
-	play_at(name, pos, db, pitch_var, 1.0, far + 12.0)
+	play_at(name, pos, db, pitch_var, 1.0, far + 12.0, bus_override)
 
 
 func set_inside(v: bool, room_kind := "") -> void:
@@ -174,9 +180,9 @@ func atmosphere(dt: float) -> void:
 		var table: Array = ROOM_EVENTS.get(_room_kind, INSIDE_EVENTS) if _inside else OUTSIDE_EVENTS
 		var e: Array = table[_rng.randi_range(0, table.size() - 1)]
 		if _inside:
-			play_near(e[0], e[1], e[2], 3.5, 10.0)
+			play_near(e[0], e[1], e[2], 3.5, 10.0, "Ambience")
 		else:
-			play_near(e[0], e[1], e[2], 8.0, 22.0)
+			play_near(e[0], e[1], e[2], 8.0, 22.0, "Ambience")
 		_next_event = _rng.randf_range(7.0, 16.0) if _inside else _rng.randf_range(6.0, 16.0)
 
 

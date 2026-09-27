@@ -65,6 +65,9 @@ func _run() -> void:
 		_fail("safe-zone C input did not recenter the build cursor")
 		return
 	_press(main, KEY_ESCAPE)
+	if main.pause_menu.visible:
+		_fail("Escape opened pause menu instead of cancelling active build mode")
+		return
 	var gate_dir := Vector2(b.road_tile - b.door_tile).normalized()
 	var gate_world := World.tile_to_world(b.road_tile)
 	main.player.global_position = gate_world + Vector3(gate_dir.x, 0, gate_dir.y) * 1.9

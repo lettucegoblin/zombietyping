@@ -33,9 +33,11 @@ var _shake := 0.0
 var _look_locked := false
 var _manual_look_time := 0.0
 
-const MOUSE_LOOK_SENSITIVITY := 0.0025
 const MOUSE_LOOK_HOLD := 1.25
 const MAX_LOOK_PITCH := deg_to_rad(38.0)
+var mouse_look_sensitivity := 0.0025
+var invert_mouse_y := false
+var shake_intensity := 1.0
 
 @onready var cam: Camera3D = $Camera3D
 
@@ -266,10 +268,11 @@ func mouse_look(relative: Vector2) -> void:
 	if _look_locked:
 		return
 	_manual_look_time = MOUSE_LOOK_HOLD
-	var yaw := atan2(-facing.x, -facing.z) - relative.x * MOUSE_LOOK_SENSITIVITY
+	var yaw := atan2(-facing.x, -facing.z) - relative.x * mouse_look_sensitivity
 	facing = Vector3(-sin(yaw), 0.0, -cos(yaw))
 	_yaw = yaw
-	_pitch = clampf(_pitch - relative.y * MOUSE_LOOK_SENSITIVITY, -MAX_LOOK_PITCH, MAX_LOOK_PITCH)
+	var vertical_sign := 1.0 if invert_mouse_y else -1.0
+	_pitch = clampf(_pitch + relative.y * mouse_look_sensitivity * vertical_sign, -MAX_LOOK_PITCH, MAX_LOOK_PITCH)
 
 
 func all_paths() -> Array:
@@ -370,7 +373,7 @@ func _finish() -> void:
 
 
 func shake(amount: float) -> void:
-	_shake = maxf(_shake, amount)
+	_shake = maxf(_shake, amount * shake_intensity)
 
 
 func _update_cam(dt: float) -> void:

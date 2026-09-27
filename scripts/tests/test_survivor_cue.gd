@@ -20,6 +20,7 @@ func _ready() -> void:
 	_check(cue.global_position.is_equal_approx(pos), "cue did not keep target world position")
 	var audio: AudioStreamPlayer3D = cue.audio_player()
 	_check(audio is AudioStreamPlayer3D, "cue did not create a 3D audio player")
+	_check(audio.bus == "Survivor", "directional cue bypassed the Survivor mixer bus")
 	_check(is_equal_approx(audio.max_distance, cue.max_distance), "3D attenuation range was not configured")
 	_check(audio.panning_strength > 1.0, "directional stereo panning was not configured")
 	_check(audio.attenuation_filter_db < 0.0, "distance filtering was not configured")

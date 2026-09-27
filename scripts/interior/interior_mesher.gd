@@ -354,6 +354,7 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 	sprite.alpha_cut = SpriteBase3D.ALPHA_CUT_DISCARD
 	sprite.texture_filter = BaseMaterial3D.TEXTURE_FILTER_NEAREST
 	if p.kind == "tv":
+		GameSettings.ensure_buses()
 		sprite.set_script(load("res://scripts/interior/tv_static.gd"))
 		sprite.set_meta("animated_tv", true)
 		var audio := AudioStreamPlayer3D.new()
@@ -364,6 +365,7 @@ static func _sprite_prop(p: FloorPlan.Prop) -> Node3D:
 			(static_stream as AudioStreamWAV).loop_mode = AudioStreamWAV.LOOP_FORWARD
 			(static_stream as AudioStreamWAV).loop_end = int(round(static_stream.get_length() * (static_stream as AudioStreamWAV).mix_rate))
 		audio.stream = static_stream
+		audio.bus = "Television"
 		audio.volume_db = -22.0
 		audio.max_distance = 16.0
 		audio.unit_size = 2.2
