@@ -12,6 +12,7 @@ const COL_PLAYER := Color("#ff5a36")
 const COL_QUEUED := Color("#ffd166")
 const LABEL_NUDGE_STEP := 5.0
 const LABEL_NUDGE_RINGS := 8
+const LABEL_OVERSCAN := 42.0       # laid out offscreen, then clipped for smooth edge entry
 
 var player: Node3D
 var tab_map: Control              # texture cache + fog dirty tracking live there
@@ -220,7 +221,8 @@ func _draw() -> void:
 	for e in _placed:
 		var b: BuildingData = e["b"]
 		var p := _tile_to_screen(b.center_tile(), center)
-		if p.x < -20 or p.y < -10 or p.x > size.x + 20 or p.y > size.y + 10:
+		if p.x < -LABEL_OVERSCAN or p.y < -LABEL_OVERSCAN \
+				or p.x > size.x + LABEL_OVERSCAN or p.y > size.y + LABEL_OVERSCAN:
 			continue
 		layout_entries.append(e)
 		var label: String = e["label"]
@@ -230,7 +232,9 @@ func _draw() -> void:
 			ordinary_entries.append(e)
 	var draw_entries := priority_entries.duplicate()
 	draw_entries.append_array(ordinary_entries)
-	var bounds := Rect2(Vector2(3, 3), size - Vector2(6, 27))
+	# Layout extends beyond all four sides. `clip_contents` reveals each label progressively
+	# as the world scrolls it through the minimap frame instead of popping in fully formed.
+	var bounds := Rect2(Vector2.ZERO, size).grow(LABEL_OVERSCAN)
 	var candidates: Array = []
 	for e in layout_entries:
 		var b: BuildingData = e["b"]

@@ -108,6 +108,16 @@ func _ready() -> void:
 		"newly visible priority label stole a settled minimap slot")
 	_check(not retained_new.intersects(retained_settled),
 		"newcomer was not nudged around the settled minimap label")
+	# The actual minimap clips drawing; its layout should accept a partially offscreen label
+	# so movement reveals it continuously through the edge instead of popping it in.
+	minimap._label_offsets.clear()
+	var screen_bounds := Rect2(Vector2.ZERO, Vector2(160, 100))
+	var overscan_bounds := screen_bounds.grow(minimap.LABEL_OVERSCAN)
+	var edge_none: Array[Rect2] = []
+	var edge_rect: Rect2 = minimap._stable_label_rect("edge", Vector2(-5, 50),
+		Vector2(28, 14), edge_none, overscan_bounds)
+	_check(edge_rect.size != Vector2.ZERO and edge_rect.intersects(screen_bounds)
+		and not screen_bounds.encloses(edge_rect), "minimap rejected a partially visible overscan label")
 	_check(map.building_name(a) == map.building_name(a), "building name is not deterministic")
 	_check(map.building_name(a).contains(" "), "building name is not human-readable")
 	World.state[a.id()] = { "cleared": true, "claimed": true }
